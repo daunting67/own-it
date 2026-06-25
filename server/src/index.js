@@ -30,4 +30,9 @@ app.use('/api/invoices', invoicesRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok' }))
 
-app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
+// Local dev
+if (process.env.NODE_ENV !== 'production' || process.env.USE_LOCAL_SERVER) {
+  app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
+}
+
+export default app
