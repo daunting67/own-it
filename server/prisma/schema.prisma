@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("hr_manager")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Staff {
+  id         String   @id @default(uuid())
+  name       String
+  hireType   String
+  siteId     String?
+  position   String?
+  mobile     String?
+  email      String?
+  startDate  String?
+  supplierId String?
+  role       String?
+  checklist  Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  site     Site?     @relation(fields: [siteId], references: [id])
+  supplier Supplier? @relation(fields: [supplierId], references: [id])
+}
+
+model Site {
+  id         String   @id @default(uuid())
+  name       String
+  inductions String[]
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  staff Staff[]
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  name      String
+  contact   String?
+  email     String?
+  phone     String?
+  rates     Json     @default("[]")
+  createdAt DateTime @default(now())
+
+  staff    Staff[]
+  invoices Invoice[]
+}
+
+model Invoice {
+  id         String   @id @default(uuid())
+  supplierId String
+  invNumber  String?
+  period     String?
+  amount     Float?
+  djrMatch   Boolean  @default(false)
+  tsMatch    Boolean  @default(false)
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+}
