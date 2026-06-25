@@ -7,18 +7,19 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:seed": "node src/seed.js",
-    "build": "prisma generate"
+    "build": "prisma generate",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.14.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.3",
-    "prisma": "^5.14.0"
+    "nodemon": "^3.1.3"
   },
   "allowScripts": {
     "prisma@5.22.0": true,
