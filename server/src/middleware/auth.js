@@ -1,12 +1,10 @@
-import jwt from 'jsonwebtoken'
+const jwt = require('jsonwebtoken')
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production'
 
-export function requireAuth(req, res, next) {
+function requireAuth(req, res, next) {
   const header = req.headers.authorization
-  if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorised' })
-  }
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorised' })
   const token = header.slice(7)
   try {
     req.user = jwt.verify(token, JWT_SECRET)
@@ -16,13 +14,11 @@ export function requireAuth(req, res, next) {
   }
 }
 
-export function requireRole(...roles) {
+function requireRole(...roles) {
   return (req, res, next) => {
-    if (!roles.includes(req.user?.role)) {
-      return res.status(403).json({ error: 'Forbidden' })
-    }
+    if (!roles.includes(req.user?.role)) return res.status(403).json({ error: 'Forbidden' })
     next()
   }
 }
 
-export { JWT_SECRET }
+module.exports = { requireAuth, requireRole, JWT_SECRET }

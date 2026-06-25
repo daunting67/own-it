@@ -1,26 +1,18 @@
-import { Router } from 'express'
-import prisma from '../lib/prisma.js'
-import { requireAuth } from '../middleware/auth.js'
+const { Router } = require('express')
+const prisma = require('../lib/prisma')
+const { requireAuth } = require('../middleware/auth')
 
 const router = Router()
 router.use(requireAuth)
 
 router.get('/', async (req, res) => {
-  const invoices = await prisma.invoice.findMany({
-    include: { supplier: true },
-    orderBy: { createdAt: 'desc' }
-  })
-  res.json(invoices)
+  res.json(await prisma.invoice.findMany({ include: { supplier: true }, orderBy: { createdAt: 'desc' } }))
 })
 
 router.post('/', async (req, res) => {
   const { supplierId, invNumber, period, amount, djrMatch, tsMatch } = req.body
   if (!supplierId) return res.status(400).json({ error: 'Supplier required' })
-  const invoice = await prisma.invoice.create({
-    data: { supplierId, invNumber, period, amount: amount ? parseFloat(amount) : null, djrMatch: !!djrMatch, tsMatch: !!tsMatch },
-    include: { supplier: true }
-  })
-  res.status(201).json(invoice)
+  res.status(201).json(await prisma.invoice.create({ data: { supplierId, invNumber, period, amount: amount ? parseFloat(amount) : null, djrMatch: !!djrMatch, tsMatch: !!tsMatch }, include: { supplier: true } }))
 })
 
 router.patch('/:id', async (req, res) => {
@@ -32,12 +24,7 @@ router.patch('/:id', async (req, res) => {
   if (invNumber !== undefined) data.invNumber = invNumber
   if (period !== undefined) data.period = period
   if (amount !== undefined) data.amount = amount ? parseFloat(amount) : null
-  const invoice = await prisma.invoice.update({
-    where: { id: req.params.id },
-    data,
-    include: { supplier: true }
-  })
-  res.json(invoice)
+  res.json(await prisma.invoice.update({ where: { id: req.params.id }, data, include: { supplier: true } }))
 })
 
 router.delete('/:id', async (req, res) => {
@@ -45,4 +32,4 @@ router.delete('/:id', async (req, res) => {
   res.status(204).end()
 })
 
-export default router
+module.exports = router

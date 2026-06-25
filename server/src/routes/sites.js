@@ -1,22 +1,18 @@
-import { Router } from 'express'
-import prisma from '../lib/prisma.js'
-import { requireAuth } from '../middleware/auth.js'
+const { Router } = require('express')
+const prisma = require('../lib/prisma')
+const { requireAuth } = require('../middleware/auth')
 
 const router = Router()
 router.use(requireAuth)
 
 router.get('/', async (req, res) => {
-  const sites = await prisma.site.findMany({ orderBy: { name: 'asc' } })
-  res.json(sites)
+  res.json(await prisma.site.findMany({ orderBy: { name: 'asc' } }))
 })
 
 router.post('/', async (req, res) => {
   const { name, inductions } = req.body
   if (!name) return res.status(400).json({ error: 'Name required' })
-  const site = await prisma.site.create({
-    data: { name, inductions: inductions || [] }
-  })
-  res.status(201).json(site)
+  res.status(201).json(await prisma.site.create({ data: { name, inductions: inductions || [] } }))
 })
 
 router.patch('/:id', async (req, res) => {
@@ -25,8 +21,7 @@ router.patch('/:id', async (req, res) => {
   if (name !== undefined) data.name = name
   if (inductions !== undefined) data.inductions = inductions
   if (active !== undefined) data.active = active
-  const site = await prisma.site.update({ where: { id: req.params.id }, data })
-  res.json(site)
+  res.json(await prisma.site.update({ where: { id: req.params.id }, data }))
 })
 
 router.delete('/:id', async (req, res) => {
@@ -34,4 +29,4 @@ router.delete('/:id', async (req, res) => {
   res.status(204).end()
 })
 
-export default router
+module.exports = router
