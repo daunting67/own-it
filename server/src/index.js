@@ -5,6 +5,7 @@ const staffRouter = require('./routes/staff')
 const sitesRouter = require('./routes/sites')
 const suppliersRouter = require('./routes/suppliers')
 const invoicesRouter = require('./routes/invoices')
+const processesRouter = require('./routes/processes')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -27,6 +28,7 @@ app.use('/api/staff', staffRouter)
 app.use('/api/sites', sitesRouter)
 app.use('/api/suppliers', suppliersRouter)
 app.use('/api/invoices', invoicesRouter)
+app.use('/api/processes', processesRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok' }))
 

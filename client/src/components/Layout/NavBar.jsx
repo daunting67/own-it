@@ -1,6 +1,7 @@
 const DEPTS = [
   { id: 'people',      label: 'People & HR',      icon: '👥', live: true },
   { id: 'payroll',     label: 'Payroll',           icon: '🧾', live: true },
+  { id: 'processes',   label: 'Processes',         icon: '⚡', live: true },
   { id: 'hs',          label: 'Health & safety',   icon: '🛡️', live: false },
   { id: 'operations',  label: 'Operations',        icon: '🏗️', live: false },
   { id: 'training',    label: 'Training',          icon: '🎓', live: false },
