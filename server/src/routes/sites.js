@@ -1,31 +1,35 @@
 const { Router } = require('express')
-const prisma = require('../lib/prisma')
+const { randomUUID } = require('crypto')
+const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 
 const router = Router()
 router.use(requireAuth)
 
 router.get('/', async (req, res) => {
-  res.json(await prisma.site.findMany({ orderBy: { name: 'asc' } }))
+  const { data } = await db.from('Site').select('*').order('name')
+  res.json(data || [])
 })
 
 router.post('/', async (req, res) => {
   const { name, inductions } = req.body
   if (!name) return res.status(400).json({ error: 'Name required' })
-  res.status(201).json(await prisma.site.create({ data: { name, inductions: inductions || [] } }))
+  const { data } = await db.from('Site').insert({ id: randomUUID(), name, inductions: inductions || [] }).select().single()
+  res.status(201).json(data)
 })
 
 router.patch('/:id', async (req, res) => {
   const { name, inductions, active } = req.body
-  const data = {}
-  if (name !== undefined) data.name = name
-  if (inductions !== undefined) data.inductions = inductions
-  if (active !== undefined) data.active = active
-  res.json(await prisma.site.update({ where: { id: req.params.id }, data }))
+  const updates = {}
+  if (name !== undefined) updates.name = name
+  if (inductions !== undefined) updates.inductions = inductions
+  if (active !== undefined) updates.active = active
+  const { data } = await db.from('Site').update(updates).eq('id', req.params.id).select().single()
+  res.json(data)
 })
 
 router.delete('/:id', async (req, res) => {
-  await prisma.site.delete({ where: { id: req.params.id } })
+  await db.from('Site').delete().eq('id', req.params.id)
   res.status(204).end()
 })
 

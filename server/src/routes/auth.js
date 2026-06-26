@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
-const prisma = require('../lib/prisma')
+const db = require('../lib/supabase')
 const { requireAuth, requireRole, JWT_SECRET } = require('../middleware/auth')
 
 const router = Router()
@@ -9,7 +9,7 @@ const router = Router()
 router.post('/login', async (req, res) => {
   const { email, password } = req.body
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' })
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+  const { data: user } = await db.from('User').select('*').eq('email', email.toLowerCase()).single()
   if (!user) return res.status(401).json({ error: 'Invalid credentials' })
   const valid = await bcrypt.compare(password, user.password)
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' })
@@ -18,38 +18,38 @@ router.post('/login', async (req, res) => {
 })
 
 router.get('/me', requireAuth, async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, email: true, name: true, role: true, createdAt: true } })
+  const { data: user } = await db.from('User').select('id,email,name,role,createdAt').eq('id', req.user.id).single()
   if (!user) return res.status(404).json({ error: 'User not found' })
   res.json(user)
 })
 
 router.get('/users', requireAuth, requireRole('super_admin'), async (req, res) => {
-  const users = await prisma.user.findMany({ select: { id: true, email: true, name: true, role: true, createdAt: true }, orderBy: { name: 'asc' } })
-  res.json(users)
+  const { data } = await db.from('User').select('id,email,name,role,createdAt').order('name')
+  res.json(data || [])
 })
 
 router.post('/users', requireAuth, requireRole('super_admin'), async (req, res) => {
   const { email, name, password, role } = req.body
   if (!email || !name || !password) return res.status(400).json({ error: 'Email, name, and password required' })
-  const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+  const { data: existing } = await db.from('User').select('id').eq('email', email.toLowerCase()).single()
   if (existing) return res.status(409).json({ error: 'Email already in use' })
   const hash = await bcrypt.hash(password, 10)
-  const user = await prisma.user.create({ data: { email: email.toLowerCase(), name, password: hash, role: role || 'hr_manager' }, select: { id: true, email: true, name: true, role: true, createdAt: true } })
-  res.status(201).json(user)
+  const { data } = await db.from('User').insert({ id: require('crypto').randomUUID(), email: email.toLowerCase(), name, password: hash, role: role || 'hr_manager' }).select('id,email,name,role,createdAt').single()
+  res.status(201).json(data)
 })
 
 router.patch('/users/:id', requireAuth, requireRole('super_admin'), async (req, res) => {
   const { name, role, password } = req.body
-  const data = {}
-  if (name) data.name = name
-  if (role) data.role = role
-  if (password) data.password = await bcrypt.hash(password, 10)
-  const user = await prisma.user.update({ where: { id: req.params.id }, data, select: { id: true, email: true, name: true, role: true, createdAt: true } })
-  res.json(user)
+  const updates = {}
+  if (name) updates.name = name
+  if (role) updates.role = role
+  if (password) updates.password = await bcrypt.hash(password, 10)
+  const { data } = await db.from('User').update(updates).eq('id', req.params.id).select('id,email,name,role,createdAt').single()
+  res.json(data)
 })
 
 router.delete('/users/:id', requireAuth, requireRole('super_admin'), async (req, res) => {
-  await prisma.user.delete({ where: { id: req.params.id } })
+  await db.from('User').delete().eq('id', req.params.id)
   res.status(204).end()
 })
 
