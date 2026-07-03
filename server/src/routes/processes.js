@@ -3,6 +3,34 @@ const { randomUUID } = require('crypto')
 const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
+const { submitDebrief } = require('../lib/teammateDebrief')
+
+function renderDebriefText(d) {
+  const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const actions = (d.actions && d.actions.length)
+    ? d.actions.map((a, i) => `${i + 1}. ${a.action} — Owner: ${a.owner || 'Not set'} — Due: ${a.due || 'Not set'}`).join('\n')
+    : 'No actions agreed.'
+  return [
+    'DEBRIEF',
+    'P&I (North) Ltd',
+    `${d.title} | ${nz}`,
+    '',
+    `PARTICIPANTS: ${(d.participants || []).join(', ')}`,
+    `COORDINATOR: ${d.coordinator || 'Tony Daunt'}`,
+    '',
+    'GIVE OWNERSHIP — what worked well and who deserves credit',
+    d.give_ownership,
+    '',
+    'TAKE OWNERSHIP — what went wrong and where ownership needs to be taken',
+    d.take_ownership,
+    '',
+    'SOLUTIONS — what improvements can be made',
+    d.solutions,
+    '',
+    'ACTION ITEMS',
+    actions
+  ].join('\n')
+}
 
 const router = Router()
 router.use(requireAuth)
@@ -81,7 +109,20 @@ router.post('/run/:id', async (req, res) => {
     }
 
     const data = await response.json()
-    const output = data.content?.[0]?.text || ''
+    let output = data.content?.[0]?.text || ''
+
+    if (proc.structured && proc.id === 'debrief') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      output = renderDebriefText(parsed)
+      try {
+        const tm = await submitDebrief(parsed)
+        const fs = tm.response?.response_data?.formNumber || tm.response?.response_data?._id || ''
+        output += `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — coordinator ${tm.coordinator}, ${tm.workplace} / ${tm.branch}`
+      } catch (tmErr) {
+        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`
+      }
+    }
 
     await db.from('ProcessRun').update({ output, status: 'completed' }).eq('id', runId)
     res.json({ id: runId, output, status: 'completed' })
