@@ -1,7 +1,7 @@
 const BASE = 'https://api.teammateapp.com/api/v2'
 
 function apiKey() {
-  const key = process.env.TEAMMATE_API_KEY
+  const key = process.env.TEAMMATE_API_KEY || process.env.TEAMATE_API_KEY
   if (!key) throw new Error('TEAMMATE_API_KEY not configured')
   return key
 }
