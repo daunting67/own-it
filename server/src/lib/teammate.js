@@ -11,6 +11,7 @@ async function tmRequest(method, path, body) {
     method,
     headers: {
       'x-api-key': apiKey(),
+      'authtoken': apiKey(),
       'Content-Type': 'application/json'
     },
     body: body ? JSON.stringify(body) : undefined
