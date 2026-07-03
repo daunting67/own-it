@@ -14,6 +14,14 @@ router.get('/formdata', requireRole('super_admin'), async (req, res) => {
   }
 })
 
+router.get('/forms', requireRole('super_admin'), async (req, res) => {
+  try {
+    res.json(await tmGet('/form'))
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
 router.get('/employees', requireRole('super_admin'), async (req, res) => {
   try {
     res.json(await tmGet('/employee'))
