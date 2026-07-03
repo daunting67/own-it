@@ -11,6 +11,11 @@ export default function ProcessesModule() {
   const [history, setHistory] = useState([])
   const [showHistory, setShowHistory] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [otterOpen, setOtterOpen] = useState(false)
+  const [otterLoading, setOtterLoading] = useState(false)
+  const [otterSpeeches, setOtterSpeeches] = useState([])
+  const [otterError, setOtterError] = useState(null)
+  const [otterFetching, setOtterFetching] = useState(null)
 
   useEffect(() => {
     api.getProcesses().then(setProcesses).catch(console.error)
@@ -23,6 +28,36 @@ export default function ProcessesModule() {
     setResult(null)
     setError(null)
     setCopied(false)
+    setOtterOpen(false)
+    setOtterError(null)
+  }
+
+  async function openOtterPicker() {
+    setOtterOpen(true)
+    setOtterError(null)
+    setOtterLoading(true)
+    try {
+      const speeches = await api.getOtterSpeeches()
+      setOtterSpeeches(speeches)
+    } catch (err) {
+      setOtterError(err.message)
+    } finally {
+      setOtterLoading(false)
+    }
+  }
+
+  async function pickOtterSpeech(id) {
+    setOtterFetching(id)
+    setOtterError(null)
+    try {
+      const t = await api.getOtterTranscript(id)
+      setInput(t.text)
+      setOtterOpen(false)
+    } catch (err) {
+      setOtterError(err.message)
+    } finally {
+      setOtterFetching(null)
+    }
   }
 
   async function runProcess() {
@@ -122,7 +157,38 @@ export default function ProcessesModule() {
 
             {selected.inputRequired && (
               <div className="process-input-section">
-                <label className="form-label">{selected.inputLabel}</label>
+                <div className="process-input-toolbar">
+                  <label className="form-label">{selected.inputLabel}</label>
+                  <button className="btn btn-secondary btn-sm" onClick={openOtterPicker} disabled={otterLoading}>
+                    {otterLoading ? '⏳ Loading…' : '🦦 Pull from Otter'}
+                  </button>
+                </div>
+
+                {otterOpen && (
+                  <div className="otter-picker card">
+                    {otterError && <div className="banner banner-danger">{otterError}</div>}
+                    {!otterLoading && !otterError && otterSpeeches.length === 0 && (
+                      <p className="history-empty">No transcripts found in Otter.</p>
+                    )}
+                    {otterSpeeches.map(s => (
+                      <button
+                        key={s.id}
+                        className="otter-speech-item"
+                        onClick={() => pickOtterSpeech(s.id)}
+                        disabled={otterFetching !== null}
+                      >
+                        <div className="otter-speech-title">
+                          {otterFetching === s.id ? '⏳ ' : ''}{s.title}
+                        </div>
+                        <div className="otter-speech-meta">
+                          {s.date ? new Date(s.date).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                          {s.duration ? ` · ${Math.round(s.duration / 60)} min` : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <textarea
                   className="form-textarea process-textarea"
                   placeholder={selected.inputPlaceholder}
