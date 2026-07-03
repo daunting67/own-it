@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { requireAuth, requireRole } = require('../middleware/auth')
-const { tmGet } = require('../lib/teammate')
+const { tmGet, tmPost } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
 
 const router = Router()
@@ -17,6 +17,9 @@ router.get('/formdata', requireRole('super_admin'), async (req, res) => {
 
 router.post('/testsubmit', requireRole('super_admin'), async (req, res) => {
   try {
+    if (req.body && req.body.formTemplateId) {
+      return res.json(await tmPost('/form', req.body))
+    }
     const result = await submitDebrief({
       title: 'API Diagnostic Debrief (ignore)',
       date: '2026-07-03',
