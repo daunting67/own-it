@@ -74,7 +74,10 @@ async function submitDebrief(d) {
   }
 
   const res = await tmPost('/form', body)
-  return { response: res, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name }
+  if (res.response_code && res.response_code !== 200 && res.response_code !== 201) {
+    throw new Error(`Teammate rejected the form: ${JSON.stringify(res).slice(0, 300)}`)
+  }
+  return { response: res, sentBody: body, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name }
 }
 
 module.exports = { submitDebrief }
