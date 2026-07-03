@@ -78,11 +78,16 @@ router.get('/transcript/:id', async (req, res) => {
 
     if (!lines.length) return res.status(404).json({ error: 'No transcript text found for this recording' })
 
+    const date = speech.created_at ? new Date(speech.created_at * 1000) : null
+    const dateLine = date
+      ? `[Recording date: ${date.toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' })}]\n\n`
+      : ''
+
     res.json({
       id: req.params.id,
       title: speech.title || 'Untitled',
-      date: speech.created_at ? new Date(speech.created_at * 1000).toISOString() : null,
-      text: lines.join('\n')
+      date: date ? date.toISOString() : null,
+      text: dateLine + lines.join('\n')
     })
   } catch (err) {
     session = null
