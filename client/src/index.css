@@ -308,3 +308,103 @@ tr:hover td { background: var(--surface-2); }
 .login-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-error { font-size: 13px; color: var(--danger); text-align: center; }
+
+/* ── Processes module ────────────────────────────────────── */
+.processes-layout {
+  display: flex; height: calc(100vh - 112px); overflow: hidden;
+}
+
+.processes-sidebar {
+  width: 280px; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+
+.processes-sidebar-header {
+  padding: 20px 16px 12px; border-bottom: 1px solid var(--border);
+}
+
+.process-list {
+  flex: 1; padding: 8px;
+}
+
+.process-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  width: 100%; padding: 10px 10px; border-radius: 6px; text-align: left;
+  transition: background .15s; margin-bottom: 2px;
+}
+.process-item:hover { background: var(--surface-2); }
+.process-item.active { background: #dbeafe; }
+
+.process-item-icon { font-size: 20px; flex-shrink: 0; line-height: 1.3; }
+.process-item-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.process-item-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+
+.processes-history-section {
+  border-top: 1px solid var(--border); padding: 8px;
+}
+.history-toggle-btn {
+  display: flex; justify-content: space-between; align-items: center;
+  width: 100%; padding: 8px 10px; font-size: 12px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em;
+  border-radius: 6px;
+}
+.history-toggle-btn:hover { background: var(--surface-2); }
+
+.run-history-list { padding: 4px 0; }
+.history-empty { font-size: 12px; color: var(--text-light); padding: 8px 10px; }
+
+.history-item {
+  padding: 8px 10px; border-radius: 6px; margin-bottom: 2px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.history-item-name { font-size: 13px; font-weight: 500; }
+.history-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.history-status-completed { background: var(--success-bg); color: var(--success); }
+.history-status-failed    { background: var(--danger-bg);  color: var(--danger); }
+.history-status-running   { background: var(--warning-bg); color: var(--warning); }
+
+/* Main panel */
+.processes-main {
+  flex: 1; overflow-y: auto; background: var(--bg);
+}
+
+.processes-empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 60vh; gap: 12px; text-align: center; color: var(--text-muted);
+}
+.processes-empty-icon { font-size: 48px; opacity: .25; }
+.processes-empty-state h3 { font-size: 18px; font-weight: 600; color: var(--text); }
+.processes-empty-state p { font-size: 13px; max-width: 320px; }
+
+.process-runner {
+  max-width: 760px; margin: 0 auto; padding: 28px 24px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+
+.process-runner-header {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding-bottom: 20px; border-bottom: 1px solid var(--border);
+}
+.process-runner-icon { font-size: 36px; line-height: 1; flex-shrink: 0; }
+.process-runner-title { font-size: 20px; font-weight: 700; color: var(--navy); }
+.process-runner-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+.process-input-section { display: flex; flex-direction: column; gap: 6px; }
+.process-textarea { min-height: 200px; font-family: monospace; font-size: 13px; line-height: 1.6; }
+
+.process-run-btn { align-self: flex-start; padding: 10px 20px; font-size: 14px; }
+
+.process-result { overflow: hidden; }
+.process-result-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  background: var(--success-bg);
+}
+.process-result-title { font-size: 13px; font-weight: 600; color: var(--success); }
+.process-result-body {
+  padding: 16px; font-family: monospace; font-size: 13px;
+  line-height: 1.7; white-space: pre-wrap; color: var(--text);
+  background: var(--surface); max-height: 60vh; overflow-y: auto;
+}

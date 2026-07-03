@@ -48,4 +48,9 @@ export const api = {
   createInvoice: (data) => request('/api/invoices', { method: 'POST', body: JSON.stringify(data) }),
   updateInvoice: (id, data) => request(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteInvoice: (id) => request(`/api/invoices/${id}`, { method: 'DELETE' }),
+
+  // Processes
+  getProcesses: () => request('/api/processes'),
+  getProcessRuns: () => request('/api/processes/runs'),
+  runProcess: (id, input) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input }) }),
 }
