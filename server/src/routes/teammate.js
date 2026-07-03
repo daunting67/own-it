@@ -36,6 +36,14 @@ router.post('/testsubmit', requireRole('super_admin'), async (req, res) => {
   }
 })
 
+router.get('/branches/:workplaceId', requireRole('super_admin'), async (req, res) => {
+  try {
+    res.json(await tmGet(`/workplace/${req.params.workplaceId}/branch`))
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
 router.get('/forms', requireRole('super_admin'), async (req, res) => {
   try {
     res.json(await tmGet('/form'))
