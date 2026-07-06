@@ -46,11 +46,14 @@ router.get('/debug-teammate', async (req, res) => {
     const employees = fd.listEmployee || []
     const coordinator = employees.find(e => /tony/i.test(e.name || '')) || employees[0]
 
-    const list = await tmGet('/form?limit=100')
+    const list = await tmGet('/form?limit=500')
     const forms = list.response_data?.forms || list.response_data?.form || list.response_data || []
     const arr = Array.isArray(forms) ? forms : []
-    const om = arr.find(f => (f.formTemplateId === '659ca7d0e0343f77b8149c11') || /office minutes/i.test(f.formName || f.name || f.formDescription || ''))
-    if (!om) return res.json({ message: 'No Office Minutes submission found', sample: arr.slice(0, 3) })
+    const om = arr.find(f => /office minutes/i.test(f.formTemplate || ''))
+    if (!om) {
+      const templates = [...new Set(arr.map(f => f.formTemplate))]
+      return res.json({ message: 'No Office Minutes submission found', count: arr.length, templatesSeen: templates })
+    }
     const detail = await tmGet(`/form/${om._id}/detail`)
     res.json({ formId: om._id, detail: detail.response_data || detail })
   } catch (e) {
