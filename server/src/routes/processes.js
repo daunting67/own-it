@@ -46,16 +46,25 @@ router.get('/debug-teammate', async (req, res) => {
     const employees = fd.listEmployee || []
     const coordinator = employees.find(e => /tony/i.test(e.name || '')) || employees[0]
 
-    const list = await tmGet('/form?limit=500')
-    const forms = list.response_data?.forms || list.response_data?.form || list.response_data || []
-    const arr = Array.isArray(forms) ? forms : []
-    const om = arr.find(f => /office minutes/i.test(f.formTemplate || ''))
-    if (!om) {
-      const templates = [...new Set(arr.map(f => f.formTemplate))]
-      return res.json({ message: 'No Office Minutes submission found', count: arr.length, templatesSeen: templates })
+    const body = {
+      formTemplateId: '659ca7d0e0343f77b8149c11',
+      formDescription: 'DEBUG TEST — delete me',
+      formDate: '2026-07-07',
+      workplace: workplace._id,
+      branch: branch._id,
+      coordinators: { employees: [coordinator._id], userGroups: [] },
+      formType: 'form-submission',
+      priority: 'none',
+      formValue: [
+        { relatedFormId: '659caa7ce0343f77b814c660', value: 'Main Office — Head Office', optionVal: [], subFormValues: [] },
+        { relatedFormId: '659caa7ce0343f77b814c65f', value: '09:00', optionVal: [], subFormValues: [] },
+        { relatedFormId: '659cabf8e0343f77b814d451', value: '2026-07-07', optionVal: [], subFormValues: [] },
+        { relatedFormId: '65a03e121b29faacb20ac054', value: 'DEBUG wins test', optionVal: [], subFormValues: [] }
+      ],
+      tasks: []
     }
-    const detail = await tmGet(`/form/${om._id}/detail`)
-    res.json({ formId: om._id, detail: detail.response_data || detail })
+    const result = await tmPost('/form', body)
+    res.json({ sentBody: body, result })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
