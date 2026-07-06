@@ -22,7 +22,7 @@ export default function Header({ saveState }) {
   return (
     <header className="portal-header">
       <div className="portal-logo">
-        <div className="logo-mark">OI</div>
+        <img src="/pi-logo.png" alt="Pipeline & Infrastructure" style={{ height: 38 }} />
         <div className="logo-text">
           <div className="logo-name">Own It</div>
           <div className="logo-sub">Operations portal</div>
