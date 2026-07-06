@@ -33,6 +33,39 @@ function renderDebriefText(d) {
 }
 
 const router = Router()
+// Debug: minimal Office Minutes POST with recipients (no auth — remove after debugging)
+router.get('/debug-teammate', async (req, res) => {
+  try {
+    const { tmGet, tmPost } = require('../lib/teammate')
+    const fd = (await tmGet('/form/data')).response_data
+    const workplace = fd.workplace.find(w => w.name.trim() === 'Main Office') || fd.workplace[0]
+    const branchRes = await tmGet(`/workplace/${workplace._id}/branch`)
+    const branchData = branchRes.response_data
+    const branches = Array.isArray(branchData) ? branchData : (branchData?.branch || branchData?.branches || [])
+    const branch = branches.find(b => /head office/i.test(b.name || '')) || branches[0]
+    const employees = fd.listEmployee || []
+    const coordinator = employees.find(e => /tony/i.test(e.name || '')) || employees[0]
+
+    const body = {
+      formTemplateId: '659ca7d0e0343f77b8149c11',
+      formDescription: 'DEBUG TEST — delete me',
+      formDate: '2026-07-07',
+      workplace: workplace._id,
+      branch: branch._id,
+      coordinators: { employees: [coordinator._id], userGroups: [] },
+      recipients: { anyone: false, employees: [coordinator._id], personnel: [], userGroups: [] },
+      formType: 'form-submission',
+      priority: 'none',
+      fields: {},
+      tasks: []
+    }
+    const result = await tmPost('/form', body)
+    res.json({ sentBody: body, result })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.use(requireAuth)
 
 // List available processes for this user's role
