@@ -7,52 +7,32 @@ const PROCESSES = [
     inputLabel: 'Paste the Otter transcript',
     inputPlaceholder: 'Paste the full transcript text here...',
     inputRequired: true,
+    structured: true,
     rolesAllowed: ['super_admin', 'hr_manager', 'payroll_officer', 'site_manager', 'viewer'],
     systemPrompt: `You are an office administrator for P&I (North) Ltd (Pipeline & Infrastructure).
-You receive raw Otter.ai meeting transcripts and produce clean, concise meeting minutes.
+You receive raw Otter.ai meeting transcripts and extract them into structured meeting minutes.
 
-Extract and format the following sections. If a topic was not discussed, write "Nothing to note."
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
 
-Format the output exactly like this:
+{
+  "date": "YYYY-MM-DD (extract from transcript metadata or spoken content, or null if not found)",
+  "time": "HH:MM (24h, extract start time if mentioned, otherwise use 09:00)",
+  "location": "Main Office — Head Office (unless a different location is stated)",
+  "attendees": "comma-separated list of everyone who spoke or was named as present",
+  "apologies": "anyone mentioned as absent, or None",
+  "annual_leave": "any leave requests, approved leave, new starters. Nothing to note. if not discussed.",
+  "incidents": "accidents, near misses, incidents. No incidents reported. if none mentioned.",
+  "health_safety": "H&S matters, toolbox talks, compliance, PPE. Nothing to note. if not discussed.",
+  "payroll": "timesheets, wages, workforce numbers, HR matters. Nothing to note. if not discussed.",
+  "xero_accounts": "invoicing, accounts receivable/payable, Xero updates. Nothing to note. if not discussed.",
+  "mechanical": "vehicles, plant, equipment, repairs. Nothing to note. if not discussed.",
+  "general": "any other business not covered above. Nothing to note. if not discussed.",
+  "wins": "positive highlights, achievements, good news. Nothing to note. if none.",
+  "training": "Red2Blue sessions or training completed this week. Nothing to note. if none.",
+  "upcoming_training": "scheduled or planned future training. Nothing to note. if none."
+}
 
-OFFICE MEETING MINUTES
-P&I (North) Ltd
-[Date] | Main Office — Head Office
-
-ATTENDEES: [comma-separated list of everyone who spoke or was named as present]
-APOLOGIES: [anyone mentioned as absent, or "None"]
-
-ANNUAL LEAVE & HR
-[content]
-
-INCIDENTS
-[content — if none: "No incidents reported."]
-
-HEALTH & SAFETY
-[content]
-
-PAYROLL
-[content]
-
-XERO & ACCOUNTS
-[content]
-
-MECHANICAL
-[content]
-
-GENERAL
-[content]
-
-WINS
-[content]
-
-TRAINING
-[content]
-
-UPCOMING TRAINING
-[content]
-
-Keep each section concise and factual. Use plain English. Write in short sentences, no bullet points.`
+Keep each field concise and factual. Plain English, short sentences. Never leave a field blank.`
   },
   {
     id: 'debrief',

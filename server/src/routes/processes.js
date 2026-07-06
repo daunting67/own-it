@@ -4,6 +4,7 @@ const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
+const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -110,6 +111,40 @@ router.post('/run/:id', async (req, res) => {
 
     const data = await response.json()
     let output = data.content?.[0]?.text || ''
+
+    if (proc.structured && proc.id === 'office-minutes') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      const nz = parsed.date
+        ? new Date(`${parsed.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
+        : 'Date not specified'
+      output = [
+        'OFFICE MEETING MINUTES',
+        'P&I (North) Ltd',
+        `${nz} | ${parsed.location || 'Main Office — Head Office'}`,
+        '',
+        `ATTENDEES: ${parsed.attendees || ''}`,
+        `APOLOGIES: ${parsed.apologies || 'None'}`,
+        '',
+        'ANNUAL LEAVE & HR', parsed.annual_leave,
+        '', 'INCIDENTS', parsed.incidents,
+        '', 'HEALTH & SAFETY', parsed.health_safety,
+        '', 'PAYROLL', parsed.payroll,
+        '', 'XERO & ACCOUNTS', parsed.xero_accounts,
+        '', 'MECHANICAL', parsed.mechanical,
+        '', 'GENERAL', parsed.general,
+        '', 'WINS', parsed.wins,
+        '', 'TRAINING', parsed.training,
+        '', 'UPCOMING TRAINING', parsed.upcoming_training
+      ].join('\n')
+      try {
+        const tm = await submitOfficeMinutes(parsed)
+        const fs = tm.response?.response_data?.formNumber || tm.response?.response_data?._id || ''
+        output += `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${tm.workplace} / ${tm.branch}`
+      } catch (tmErr) {
+        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
+      }
+    }
 
     if (proc.structured && proc.id === 'debrief') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
