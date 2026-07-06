@@ -4,7 +4,6 @@ const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
-const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -34,39 +33,6 @@ function renderDebriefText(d) {
 }
 
 const router = Router()
-
-// Debug: test minimal Office Minutes submission with no fields (no auth — remove after debugging)
-router.get('/debug-teammate', async (req, res) => {
-  try {
-    const { tmGet, tmPost } = require('../lib/teammate')
-    const fd = (await tmGet('/form/data')).response_data
-    const workplace = fd.workplace.find(w => w.name.trim() === 'Main Office') || fd.workplace[0]
-    const branchRes = await tmGet(`/workplace/${workplace._id}/branch`)
-    const branchData = branchRes.response_data
-    const branches = Array.isArray(branchData) ? branchData : (branchData?.branch || branchData?.branches || [])
-    const branch = branches.find(b => /head office/i.test(b.name || '')) || branches[0]
-    const employees = fd.listEmployee || []
-    const coordinator = employees.find(e => /tony/i.test(e.name || '')) || employees[0]
-
-    const body = {
-      formTemplateId: '659ca7d0e0343f77b8149c11',
-      formDescription: 'DEBUG TEST — delete me',
-      formDate: '2026-07-07',
-      workplace: workplace._id,
-      branch: branch._id,
-      coordinators: { employees: [coordinator._id], userGroups: [] },
-      formType: 'form-submission',
-      priority: 'none',
-      fields: {},
-      tasks: []
-    }
-    const result = await tmPost('/form', body)
-    res.json({ sentBody: body, result })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
 router.use(requireAuth)
 
 // List available processes for this user's role
@@ -170,13 +136,6 @@ router.post('/run/:id', async (req, res) => {
         '', 'TRAINING', parsed.training,
         '', 'UPCOMING TRAINING', parsed.upcoming_training
       ].join('\n')
-      try {
-        const tm = await submitOfficeMinutes(parsed)
-        const fs = tm.response?.response_data?.formNumber || tm.response?.response_data?._id || ''
-        output += `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${tm.workplace} / ${tm.branch}`
-      } catch (tmErr) {
-        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
-      }
     }
 
     if (proc.structured && proc.id === 'debrief') {
