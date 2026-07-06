@@ -35,17 +35,33 @@ function renderDebriefText(d) {
 
 const router = Router()
 
-// Debug: fetch a real Office Minutes form to inspect field IDs (no auth — remove after debugging)
+// Debug: test minimal Office Minutes submission with no fields (no auth — remove after debugging)
 router.get('/debug-teammate', async (req, res) => {
   try {
-    const { tmGet } = require('../lib/teammate')
-    const TEMPLATE_ID = '659ca7d0e0343f77b8149c11'
-    const forms = await tmGet(`/form?formTemplateId=${TEMPLATE_ID}&limit=1`)
-    const list = forms.response_data?.forms || forms.response_data || []
-    const first = Array.isArray(list) ? list[0] : list
-    if (!first) return res.json({ message: 'No submitted forms found for this template' })
-    const detail = await tmGet(`/form/${first._id}`)
-    res.json(detail.response_data || detail)
+    const { tmGet, tmPost } = require('../lib/teammate')
+    const fd = (await tmGet('/form/data')).response_data
+    const workplace = fd.workplace.find(w => w.name.trim() === 'Main Office') || fd.workplace[0]
+    const branchRes = await tmGet(`/workplace/${workplace._id}/branch`)
+    const branchData = branchRes.response_data
+    const branches = Array.isArray(branchData) ? branchData : (branchData?.branch || branchData?.branches || [])
+    const branch = branches.find(b => /head office/i.test(b.name || '')) || branches[0]
+    const employees = fd.listEmployee || []
+    const coordinator = employees.find(e => /tony/i.test(e.name || '')) || employees[0]
+
+    const body = {
+      formTemplateId: '659ca7d0e0343f77b8149c11',
+      formDescription: 'DEBUG TEST — delete me',
+      formDate: '2026-07-07',
+      workplace: workplace._id,
+      branch: branch._id,
+      coordinators: { employees: [coordinator._id], userGroups: [] },
+      formType: 'form-submission',
+      priority: 'none',
+      fields: {},
+      tasks: []
+    }
+    const result = await tmPost('/form', body)
+    res.json({ sentBody: body, result })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
