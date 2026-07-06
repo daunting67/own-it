@@ -1,9 +1,8 @@
 const { tmGet, tmPost } = require('./teammate')
 
+const FORM_TEMPLATE_ID = '659ca7d0e0343f77b8149c11'
+
 const FIELD_IDS = {
-  date:             '659caa7ce0343f77b814c65e',
-  time:             '659caa7ce0343f77b814c65f',
-  location:         '659caa7ce0343f77b814c660',
   annual_leave:     '66453197bba1430450867507',
   incidents:        '6643df2ddfdf3e33f77ab3e9',
   health_safety:    '65a03e121b29faacb20ac04d',
@@ -15,8 +14,6 @@ const FIELD_IDS = {
   training:         '668dab5cc8428553ace064c4',
   upcoming_training:'67abac8122fbae02b9457f65'
 }
-
-const FORM_TEMPLATE_SORT = 'office minutes'
 
 function normalise(s) {
   return (s || '').toLowerCase().replace(/[^a-z ]/g, '').trim()
@@ -41,12 +38,6 @@ function todayNZ() {
 async function submitOfficeMinutes(d) {
   const fd = (await tmGet('/form/data')).response_data
 
-  const template = fd.formTemplate.find(t =>
-    normalise(t.sortValue || t.name || '').includes('office minutes') ||
-    normalise(t.name || '').includes('office minutes')
-  )
-  if (!template) throw new Error('Office Minutes form template not found in Teammate')
-
   const workplace = fd.workplace.find(w => w.name.trim() === 'Main Office') || fd.workplace[0]
 
   const branchRes = await tmGet(`/workplace/${workplace._id}/branch`)
@@ -62,7 +53,7 @@ async function submitOfficeMinutes(d) {
   const meetingDate = d.date && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : todayNZ()
 
   const body = {
-    formTemplateId: template._id,
+    formTemplateId: FORM_TEMPLATE_ID,
     formDescription: `Office Minutes — ${meetingDate}`,
     formDate: meetingDate,
     workplace: workplace._id,
@@ -71,9 +62,6 @@ async function submitOfficeMinutes(d) {
     formType: 'form-submission',
     priority: 'none',
     fields: {
-      [FIELD_IDS.date]:             meetingDate,
-      [FIELD_IDS.time]:             d.time             || '09:00',
-      [FIELD_IDS.location]:         d.location         || 'Main Office — Head Office',
       [FIELD_IDS.annual_leave]:     d.annual_leave     || 'Nothing to note.',
       [FIELD_IDS.incidents]:        d.incidents        || 'No incidents reported.',
       [FIELD_IDS.health_safety]:    d.health_safety    || 'Nothing to note.',
