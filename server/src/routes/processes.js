@@ -34,9 +34,8 @@ function renderDebriefText(d) {
 }
 
 const router = Router()
-router.use(requireAuth)
 
-// Debug: inspect Teammate form templates and fields
+// Debug: inspect Teammate form templates (no auth — remove after debugging)
 router.get('/debug-teammate', async (req, res) => {
   try {
     const { tmGet } = require('../lib/teammate')
@@ -52,6 +51,8 @@ router.get('/debug-teammate', async (req, res) => {
     res.status(500).json({ error: e.message })
   }
 })
+
+router.use(requireAuth)
 
 // List available processes for this user's role
 router.get('/', (req, res) => {
