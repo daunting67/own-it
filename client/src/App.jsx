@@ -6,6 +6,7 @@ import NavBar from './components/Layout/NavBar'
 import PeopleModule from './components/People/PeopleModule'
 import PayrollModule from './components/Payroll/PayrollModule'
 import ProcessesModule from './components/Processes/ProcessesModule'
+import ProcurementModule from './components/Procurement/ProcurementModule'
 import ComingSoon from './components/ComingSoon'
 
 export default function App() {
@@ -36,7 +37,8 @@ export default function App() {
         {dept === 'people' && <PeopleModule onSaveStateChange={onSaveStateChange} />}
         {dept === 'payroll' && <PayrollModule onSaveStateChange={onSaveStateChange} />}
         {dept === 'processes' && <ProcessesModule />}
-        {!['people', 'payroll', 'processes'].includes(dept) && <ComingSoon dept={dept} />}
+        {dept === 'procurement' && <ProcurementModule />}
+        {!['people', 'payroll', 'processes', 'procurement'].includes(dept) && <ComingSoon dept={dept} />}
       </main>
     </>
   )

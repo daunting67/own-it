@@ -6,7 +6,7 @@ const DEPTS = [
   { id: 'operations',  label: 'Operations',        icon: '🏗️', live: false },
   { id: 'training',    label: 'Training',          icon: '🎓', live: false },
   { id: 'plant',       label: 'Plant & equipment', icon: '🔧', live: false },
-  { id: 'procurement', label: 'Procurement',       icon: '🛒', live: false },
+  { id: 'procurement', label: 'Procurement',       icon: '🛒', live: true },
   { id: 'commercial',  label: 'Commercial',        icon: '📄', live: false },
   { id: 'meetings',    label: 'Meetings',          icon: '💬', live: false },
   { id: 'executive',   label: 'Executive',         icon: '📊', live: false },
