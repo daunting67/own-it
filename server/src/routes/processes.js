@@ -35,18 +35,17 @@ function renderDebriefText(d) {
 
 const router = Router()
 
-// Debug: inspect Teammate form templates (no auth — remove after debugging)
+// Debug: fetch a real Office Minutes form to inspect field IDs (no auth — remove after debugging)
 router.get('/debug-teammate', async (req, res) => {
   try {
     const { tmGet } = require('../lib/teammate')
-    const fd = (await tmGet('/form/data')).response_data
-    const templates = (fd.formTemplate || []).map(t => ({
-      _id: t._id,
-      name: t.name,
-      sortValue: t.sortValue
-    }))
-    const workplace = (fd.workplace || []).map(w => ({ _id: w._id, name: w.name }))
-    res.json({ templates, workplace })
+    const TEMPLATE_ID = '659ca7d0e0343f77b8149c11'
+    const forms = await tmGet(`/form?formTemplateId=${TEMPLATE_ID}&limit=1`)
+    const list = forms.response_data?.forms || forms.response_data || []
+    const first = Array.isArray(list) ? list[0] : list
+    if (!first) return res.json({ message: 'No submitted forms found for this template' })
+    const detail = await tmGet(`/form/${first._id}`)
+    res.json(detail.response_data || detail)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
