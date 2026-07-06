@@ -7,6 +7,7 @@ import PeopleModule from './components/People/PeopleModule'
 import PayrollModule from './components/Payroll/PayrollModule'
 import ProcessesModule from './components/Processes/ProcessesModule'
 import ProcurementModule from './components/Procurement/ProcurementModule'
+import UsersModule from './components/Users/UsersModule'
 import ComingSoon from './components/ComingSoon'
 
 export default function App() {
@@ -38,7 +39,8 @@ export default function App() {
         {dept === 'payroll' && <PayrollModule onSaveStateChange={onSaveStateChange} />}
         {dept === 'processes' && <ProcessesModule />}
         {dept === 'procurement' && <ProcurementModule />}
-        {!['people', 'payroll', 'processes', 'procurement'].includes(dept) && <ComingSoon dept={dept} />}
+        {dept === 'users' && user?.role === 'super_admin' && <UsersModule />}
+        {!['people', 'payroll', 'processes', 'procurement', 'users'].includes(dept) && <ComingSoon dept={dept} />}
       </main>
     </>
   )

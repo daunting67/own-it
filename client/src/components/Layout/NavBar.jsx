@@ -1,3 +1,5 @@
+import { useAuth } from '../../contexts/AuthContext'
+
 const DEPTS = [
   { id: 'people',      label: 'People & HR',      icon: '👥', live: true },
   { id: 'payroll',     label: 'Payroll',           icon: '🧾', live: true },
@@ -13,9 +15,13 @@ const DEPTS = [
 ]
 
 export default function NavBar({ active, onSelect }) {
+  const { user } = useAuth()
+  const depts = user?.role === 'super_admin'
+    ? [...DEPTS, { id: 'users', label: 'Users', icon: '🔑', live: true }]
+    : DEPTS
   return (
     <nav className="dept-nav">
-      {DEPTS.map(d => (
+      {depts.map(d => (
         <button
           key={d.id}
           className={`dept-tab${d.id === active ? ' active' : ''}${!d.live ? ' soon' : ''}`}
