@@ -36,6 +36,23 @@ function renderDebriefText(d) {
 const router = Router()
 router.use(requireAuth)
 
+// Debug: inspect Teammate form templates and fields
+router.get('/debug-teammate', async (req, res) => {
+  try {
+    const { tmGet } = require('../lib/teammate')
+    const fd = (await tmGet('/form/data')).response_data
+    const templates = (fd.formTemplate || []).map(t => ({
+      _id: t._id,
+      name: t.name,
+      sortValue: t.sortValue
+    }))
+    const workplace = (fd.workplace || []).map(w => ({ _id: w._id, name: w.name }))
+    res.json({ templates, workplace })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // List available processes for this user's role
 router.get('/', (req, res) => {
   const userRole = req.user?.role
