@@ -19,7 +19,7 @@ const FORM_TEMPLATE_ID = 'REPLACE_WITH_TEMPLATE_ID'
 const FIELD_IDS = {
   employee:              'REPLACE',
   position:              'REPLACE',
-  assessor:              'REPLACE',
+  reviewed_by:           'REPLACE', // "Reviewed By" — MULTI-SELECT dropdown of reviewer names (can pick several). Submit as an array of matched employee _ids (or the optionVal structure the template expects — confirm from /form/{id}/detail).
   review_date:           'REPLACE',
   key_strengths:         'REPLACE', // "What has gone well last year? (Key Strengths Observed)"
   not_so_well:           'REPLACE', // "What went not so well last year?"
@@ -75,7 +75,13 @@ async function submitPerformanceReview(r, recordedByName) {
   if (!branch) throw new Error(`No branch found for workplace ${workplace.name}`)
 
   const employees = fd.listEmployee || []
-  const coordinator = findEmployee(employees, recordedByName) || findEmployee(employees, r.assessor) || findEmployee(employees, 'Tony Daunt') || employees[0]
+
+  // "Reviewed By" is a multi-select of reviewers — resolve each name to an employee
+  const reviewerNames = Array.isArray(r.reviewed_by) ? r.reviewed_by : (r.reviewed_by ? [r.reviewed_by] : [])
+  const reviewers = reviewerNames.map(n => findEmployee(employees, n)).filter(Boolean)
+  const reviewerIds = reviewers.map(e => e._id)
+
+  const coordinator = findEmployee(employees, recordedByName) || reviewers[0] || findEmployee(employees, 'Tony Daunt') || employees[0]
   if (!coordinator) throw new Error('Could not resolve coordinator employee in Teammate')
 
   const reviewDate = r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date) ? r.date : todayNZ()
@@ -83,7 +89,8 @@ async function submitPerformanceReview(r, recordedByName) {
   const fields = {
     [FIELD_IDS.employee]:              r.employee || '',
     [FIELD_IDS.position]:              r.position || '',
-    [FIELD_IDS.assessor]:              r.assessor || coordinator.name,
+    // multi-select: array of employee _ids (adjust to optionVal structure if the template needs it)
+    [FIELD_IDS.reviewed_by]:           reviewerIds.length ? reviewerIds : [coordinator._id],
     [FIELD_IDS.review_date]:           reviewDate,
     [FIELD_IDS.key_strengths]:         r.key_strengths || 'Not discussed in this review.',
     [FIELD_IDS.not_so_well]:           r.not_so_well || 'Not discussed in this review.',

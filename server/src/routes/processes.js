@@ -48,7 +48,7 @@ function renderReviewText(r) {
     'ANNUAL PERFORMANCE REVIEW — OUTCOME FORM',
     'P&I (North) Ltd',
     `${r.employee || 'Employee not named'} — ${r.position || 'Position not stated'}`,
-    `Assessor: ${r.assessor || 'Tony Daunt'} | ${nz}`,
+    `Reviewed by: ${(Array.isArray(r.reviewed_by) ? r.reviewed_by.filter(Boolean).join(', ') : r.reviewed_by) || 'Tony Daunt'} | ${nz}`,
     '',
     'KEY STRENGTHS',
     r.key_strengths,

@@ -88,7 +88,7 @@ Respond with ONLY a JSON object — no markdown fences, no commentary — in exa
 {
   "employee": "employee full name (from the opening line)",
   "position": "employee job title",
-  "assessor": "name of the person conducting the review — default Tony Daunt if unclear",
+  "reviewed_by": ["names of the reviewer(s) who conducted the review — there may be more than one; list each full name; default [\"Tony Daunt\"] if unclear"],
   "date": "YYYY-MM-DD (from the opening line; if missing use the recording date; else null)",
   "key_strengths": "What has gone well and the key strengths that stand out — with specific examples and named credit. Weave in what the employee is proud of. Group by the five P&I categories (Character, Safety, Communication, Trust, Quality) where it aids readability.",
   "not_so_well": "The explicit 'what went not so well this year' feedback — the single most important thing to capture. Factual and constructive, not blame.",
