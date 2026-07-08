@@ -34,26 +34,6 @@ function renderDebriefText(d) {
 }
 
 const router = Router()
-
-// Health: reports the running build so we can confirm deploys (no auth — remove after verifying)
-router.get('/health', (req, res) => {
-  res.json({ ok: true, build: 'om-reenable-1', ts: new Date().toISOString() })
-})
-
-// Debug: submit a minimal real Office Minutes to verify the 505 fix (no auth — remove after verifying)
-router.get('/debug-om', async (req, res) => {
-  try {
-    const result = await submitOfficeMinutes({
-      date: '2026-07-08',
-      wins: 'API fix verification — safe to delete.',
-      incidents: 'No incidents reported.'
-    }, 'Tony Daunt')
-    res.json({ ok: true, result })
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
-  }
-})
-
 router.use(requireAuth)
 
 // List available processes for this user's role
@@ -157,6 +137,13 @@ router.post('/run/:id', async (req, res) => {
         '', 'TRAINING', parsed.training,
         '', 'UPCOMING TRAINING', parsed.upcoming_training
       ].join('\n')
+      try {
+        const tm = await submitOfficeMinutes(parsed, req.user?.name)
+        const fs = tm.response?.response_data?.formatedNumber || tm.response?.response_data?._id || ''
+        output += `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — recorded by ${tm.coordinator}, ${tm.workplace} / ${tm.branch}`
+      } catch (tmErr) {
+        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
+      }
     }
 
     if (proc.structured && proc.id === 'debrief') {
