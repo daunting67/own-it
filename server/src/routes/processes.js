@@ -4,6 +4,7 @@ const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
+const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -33,6 +34,21 @@ function renderDebriefText(d) {
 }
 
 const router = Router()
+
+// Debug: submit a minimal real Office Minutes to verify the 505 fix (no auth — remove after verifying)
+router.get('/debug-om', async (req, res) => {
+  try {
+    const result = await submitOfficeMinutes({
+      date: '2026-07-08',
+      wins: 'API fix verification — safe to delete.',
+      incidents: 'No incidents reported.'
+    }, 'Tony Daunt')
+    res.json({ ok: true, result })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 router.use(requireAuth)
 
 // List available processes for this user's role
