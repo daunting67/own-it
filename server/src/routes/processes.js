@@ -69,25 +69,38 @@ function renderReviewText(r) {
 
 const router = Router()
 
-// Debug: audit the Performance Review template from Teammate (no auth — remove after)
+// Debug: audit template detail/permission fields from Teammate (no auth — remove after)
 router.get('/debug-tmpl', async (req, res) => {
   const { tmGet } = require('../lib/teammate')
+  const OM = '659ca7d0e0343f77b8149c11' // Office Minutes template (known-good reference)
   const out = {}
-  // 1. raw shape of a Form-module template (does it carry a group/module/type?)
-  try {
-    const fd = (await tmGet('/form/data')).response_data
-    out.formTemplateCount = (fd.formTemplate || []).length
-    out.formDataKeys = Object.keys(fd)
-    out.rawTemplateSample = fd.formTemplate && fd.formTemplate[0] ? Object.keys(fd.formTemplate[0]).reduce((a, k) => (a[k] = fd.formTemplate[0][k], a), {}) : null
-    out.reviewInForm = (fd.formTemplate || []).filter(t => /performance|review|outcome|annual/i.test((t.name || ''))).map(t => t.name)
-  } catch (e) { out.formDataError = e.message }
-  // 2. probe HR endpoints for anything template/review-shaped
-  for (const path of ['/employee/data', '/hr/getFormTemplate', '/hr/formTemplate', '/form/data?module=hr']) {
+  // does the API re-list a template with richer fields anywhere?
+  const probes = [
+    `/formTemplate/${OM}`,
+    `/form/template/${OM}`,
+    `/template/${OM}`,
+    `/formTemplate`,
+    '/form/templates',
+    `/form/${OM}/detail`
+  ]
+  for (const path of probes) {
     try {
       const r = await tmGet(path)
-      out['probe ' + path] = { ok: true, keys: Object.keys(r.response_data || r || {}).slice(0, 20) }
-    } catch (e) { out['probe ' + path] = { ok: false, err: e.message.slice(0, 120) } }
+      const rd = r.response_data || r
+      out['GET ' + path] = { ok: true, keys: Object.keys(rd || {}).slice(0, 25), sample: JSON.stringify(rd).slice(0, 400) }
+    } catch (e) { out['GET ' + path] = { ok: false, err: e.message.slice(0, 100) } }
   }
+  // check a real recent submission for permission-ish fields
+  try {
+    const list = await tmGet('/form?limit=30')
+    const forms = list.response_data?.forms || list.response_data || []
+    const arr = Array.isArray(forms) ? forms : []
+    const om = arr.find(f => /office minutes/i.test(f.formTemplate || ''))
+    if (om) {
+      out.submissionKeys = Object.keys(om)
+      out.permissionish = Object.fromEntries(Object.entries(om).filter(([k]) => /recipient|follow|group|permission|visib|coordinat|share|private|restrict/i.test(k)))
+    }
+  } catch (e) { out.formListError = e.message.slice(0, 120) }
   res.json(out)
 })
 
