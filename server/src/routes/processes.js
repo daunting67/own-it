@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
+const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -138,7 +139,7 @@ router.post('/run/:id', async (req, res) => {
         '', 'UPCOMING TRAINING', parsed.upcoming_training
       ].join('\n')
       try {
-        const tm = await submitOfficeMinutes(parsed, req.user?.name)
+        const tm = await submitOfficeMinutes(parsed, resolveTeammateName(req.user))
         const fs = tm.response?.response_data?.formatedNumber || tm.response?.response_data?._id || ''
         output += `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — recorded by ${tm.coordinator}, ${tm.workplace} / ${tm.branch}`
       } catch (tmErr) {
