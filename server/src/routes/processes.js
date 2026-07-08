@@ -68,6 +68,20 @@ function renderReviewText(r) {
 }
 
 const router = Router()
+
+// Debug: audit the Performance Review template from Teammate (no auth — remove after)
+router.get('/debug-tmpl', async (req, res) => {
+  try {
+    const { tmGet } = require('../lib/teammate')
+    const fd = (await tmGet('/form/data')).response_data
+    const all = (fd.formTemplate || []).map(t => ({ id: t._id, name: t.name, sort: t.sortValue }))
+    const match = (fd.formTemplate || []).filter(t => /review|outcome|annual/i.test((t.name || '') + ' ' + (t.sortValue || '')))
+    res.json({ totalTemplates: all.length, matches: match, allNames: all.map(t => t.name) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 router.use(requireAuth)
 
 // List available processes for this user's role
