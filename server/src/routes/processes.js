@@ -35,6 +35,11 @@ function renderDebriefText(d) {
 
 const router = Router()
 
+// Health: reports the running build so we can confirm deploys (no auth — remove after verifying)
+router.get('/health', (req, res) => {
+  res.json({ ok: true, build: 'om-reenable-1', ts: new Date().toISOString() })
+})
+
 // Debug: submit a minimal real Office Minutes to verify the 505 fix (no auth — remove after verifying)
 router.get('/debug-om', async (req, res) => {
   try {
