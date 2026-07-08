@@ -7,6 +7,7 @@ export default function ProcessesModule() {
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
+  const [doc, setDoc] = useState(null) // { document: base64, filename }
   const [error, setError] = useState(null)
   const [history, setHistory] = useState([])
   const [showHistory, setShowHistory] = useState(false)
@@ -26,6 +27,7 @@ export default function ProcessesModule() {
     setSelected(p)
     setInput('')
     setResult(null)
+    setDoc(null)
     setError(null)
     setCopied(false)
     setOtterOpen(false)
@@ -64,11 +66,13 @@ export default function ProcessesModule() {
     if (!selected) return
     setRunning(true)
     setResult(null)
+    setDoc(null)
     setError(null)
     setCopied(false)
     try {
       const res = await api.runProcess(selected.id, input)
       setResult(res.output)
+      if (res.document && res.filename) setDoc({ document: res.document, filename: res.filename })
       api.getProcessRuns().then(setHistory).catch(console.error)
     } catch (err) {
       setError(err.message)
@@ -82,6 +86,22 @@ export default function ProcessesModule() {
     navigator.clipboard.writeText(result)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  function downloadDoc() {
+    if (!doc) return
+    const bytes = atob(doc.document)
+    const arr = new Uint8Array(bytes.length)
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+    const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = doc.filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -217,9 +237,16 @@ export default function ProcessesModule() {
               <div className="process-result card">
                 <div className="process-result-header">
                   <span className="process-result-title">✅ Result</span>
-                  <button className="btn btn-secondary btn-sm" onClick={copyResult}>
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {doc && (
+                      <button className="btn btn-primary btn-sm" onClick={downloadDoc}>
+                        📄 Download Outcome Form (.docx)
+                      </button>
+                    )}
+                    <button className="btn btn-secondary btn-sm" onClick={copyResult}>
+                      {copied ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
                 </div>
                 <pre className="process-result-body">{result}</pre>
               </div>

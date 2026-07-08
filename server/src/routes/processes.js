@@ -68,42 +68,6 @@ function renderReviewText(r) {
 }
 
 const router = Router()
-
-// Debug: audit template detail/permission fields from Teammate (no auth — remove after)
-router.get('/debug-tmpl', async (req, res) => {
-  const { tmGet } = require('../lib/teammate')
-  const OM = '659ca7d0e0343f77b8149c11' // Office Minutes template (known-good reference)
-  const out = {}
-  // does the API re-list a template with richer fields anywhere?
-  const probes = [
-    `/formTemplate/${OM}`,
-    `/form/template/${OM}`,
-    `/template/${OM}`,
-    `/formTemplate`,
-    '/form/templates',
-    `/form/${OM}/detail`
-  ]
-  for (const path of probes) {
-    try {
-      const r = await tmGet(path)
-      const rd = r.response_data || r
-      out['GET ' + path] = { ok: true, keys: Object.keys(rd || {}).slice(0, 25), sample: JSON.stringify(rd).slice(0, 400) }
-    } catch (e) { out['GET ' + path] = { ok: false, err: e.message.slice(0, 100) } }
-  }
-  // check a real recent submission for permission-ish fields
-  try {
-    const list = await tmGet('/form?limit=30')
-    const forms = list.response_data?.forms || list.response_data || []
-    const arr = Array.isArray(forms) ? forms : []
-    const om = arr.find(f => /office minutes/i.test(f.formTemplate || ''))
-    if (om) {
-      out.submissionKeys = Object.keys(om)
-      out.permissionish = Object.fromEntries(Object.entries(om).filter(([k]) => /recipient|follow|group|permission|visib|coordinat|share|private|restrict/i.test(k)))
-    }
-  } catch (e) { out.formListError = e.message.slice(0, 120) }
-  res.json(out)
-})
-
 router.use(requireAuth)
 
 // List available processes for this user's role
@@ -181,6 +145,8 @@ router.post('/run/:id', async (req, res) => {
 
     const data = await response.json()
     let output = data.content?.[0]?.text || ''
+    let document = null   // base64 .docx, when a process produces a downloadable form
+    let filename = null
 
     if (proc.structured && proc.id === 'office-minutes') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
@@ -220,6 +186,15 @@ router.post('/run/:id', async (req, res) => {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
       output = renderReviewText(parsed)
+      try {
+        const { buildOutcomeDocx, reviewFilename } = require('../lib/buildOutcomeDocx')
+        const buf = await buildOutcomeDocx(parsed)
+        document = buf.toString('base64')
+        filename = reviewFilename(parsed)
+        output += `\n\n📄 Branded Outcome Form ready — use the Download button below, then file it in Teammate (HR module).`
+      } catch (docErr) {
+        output += `\n\n⚠️ Could not build the Outcome Form document: ${docErr.message}\nThe text above is still valid.`
+      }
     }
 
     if (proc.structured && proc.id === 'debrief') {
@@ -236,7 +211,7 @@ router.post('/run/:id', async (req, res) => {
     }
 
     await db.from('ProcessRun').update({ output, status: 'completed' }).eq('id', runId)
-    res.json({ id: runId, output, status: 'completed' })
+    res.json({ id: runId, output, status: 'completed', document, filename })
 
   } catch (err) {
     await db.from('ProcessRun').update({ output: err.message, status: 'failed' }).eq('id', runId)

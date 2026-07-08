@@ -9,6 +9,7 @@
     "@supabase/supabase-js": "^2.43.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "docx": "^9.7.1",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2"
   },
