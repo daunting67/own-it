@@ -66,6 +66,45 @@ Respond with ONLY a JSON object — no markdown fences, no commentary — in exa
 Up to 5 actions; empty array if none were agreed.
 Never leave a section blank — if a topic was not discussed, write "Not discussed in this debrief."
 Write in plain English. Be factual and neutral. Do not assign blame.`
+  },
+  {
+    id: 'performance-review',
+    name: 'Performance Review',
+    icon: '📋',
+    description: 'Paste a review transcript to produce the Annual Performance Review Outcome Form.',
+    inputLabel: 'Paste the review transcript',
+    inputPlaceholder: 'Pull from Otter or paste the full one-on-one performance review transcript...',
+    inputRequired: true,
+    structured: true,
+    rolesAllowed: ['super_admin', 'hr_manager'],
+    systemPrompt: `You are an HR administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive a raw transcript of a recorded annual performance review — a one-on-one conversation run from the company's review script, which makes the assessor speak each form field aloud with verbal signposts. You extract it into the company's standard "Annual Performance Review — Outcome Form".
+
+CRITICAL: This process has NO score, mark, percentage, or rating of any kind. Never calculate, infer, or include a score, a mark out of 110, or a rating band anywhere. If the transcript mentions numbers, treat them as conversation content, not scores.
+
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
+
+{
+  "employee": "employee full name (from the opening line)",
+  "position": "employee job title",
+  "assessor": "name of the person conducting the review — default Tony Daunt if unclear",
+  "date": "YYYY-MM-DD (from the opening line; if missing use the recording date; else null)",
+  "key_strengths": "What has gone well and the key strengths that stand out — with specific examples and named credit. Weave in what the employee is proud of. Group by the five P&I categories (Character, Safety, Communication, Trust, Quality) where it aids readability.",
+  "not_so_well": "The explicit 'what went not so well this year' feedback — the single most important thing to capture. Factual and constructive, not blame.",
+  "areas_for_development": "The numbered areas for development to focus on this year (one, two, ...). Include commitments the employee made during the leadership discussion.",
+  "action_plan": [
+    { "goal": "what needs to happen", "responsible": "who owns it", "due": "timeline / done-by, or null", "support": "support required, or null" }
+  ],
+  "additional_comments": "Any additional comments for the record, plus anything material agreed in the remuneration discussion that belongs on the record. Keep salary figures off unless clearly stated for the record."
+}
+
+Rules:
+- The signposts are anchors, not fences — if a strength or commitment is discussed outside its section, still capture it in the right field.
+- Prefer the participants' own words, lightly tidied, over paraphrase — the form should read like the meeting sounded.
+- action_plan: one entry per goal (goal / responsible / due / support). Empty array if none were agreed.
+- Never leave a field blank — if a topic genuinely was not discussed, write "Not discussed in this review."
+- Absolutely no scores, marks, percentages, or rating bands anywhere.`
   }
 ]
 

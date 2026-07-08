@@ -34,6 +34,39 @@ function renderDebriefText(d) {
   ].join('\n')
 }
 
+function renderReviewText(r) {
+  const nz = r.date ? new Date(`${r.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const plan = (r.action_plan && r.action_plan.length)
+    ? r.action_plan.map((a, i) => [
+        `${i + 1}. ${a.goal}`,
+        `   Responsibility: ${a.responsible || 'Not set'}`,
+        `   Timeline: ${a.due || 'Not set'}`,
+        `   Support required: ${a.support || 'None noted'}`
+      ].join('\n')).join('\n\n')
+    : 'No action items agreed.'
+  return [
+    'ANNUAL PERFORMANCE REVIEW — OUTCOME FORM',
+    'P&I (North) Ltd',
+    `${r.employee || 'Employee not named'} — ${r.position || 'Position not stated'}`,
+    `Assessor: ${r.assessor || 'Tony Daunt'} | ${nz}`,
+    '',
+    'KEY STRENGTHS',
+    r.key_strengths,
+    '',
+    'WHAT WENT NOT SO WELL',
+    r.not_so_well,
+    '',
+    'AREAS FOR DEVELOPMENT',
+    r.areas_for_development,
+    '',
+    'ACTION PLAN',
+    plan,
+    '',
+    'ADDITIONAL COMMENTS',
+    r.additional_comments
+  ].join('\n')
+}
+
 const router = Router()
 router.use(requireAuth)
 
@@ -145,6 +178,12 @@ router.post('/run/:id', async (req, res) => {
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
       }
+    }
+
+    if (proc.structured && proc.id === 'performance-review') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      output = renderReviewText(parsed)
     }
 
     if (proc.structured && proc.id === 'debrief') {
