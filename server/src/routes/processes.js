@@ -71,15 +71,24 @@ const router = Router()
 
 // Debug: audit the Performance Review template from Teammate (no auth — remove after)
 router.get('/debug-tmpl', async (req, res) => {
+  const { tmGet } = require('../lib/teammate')
+  const out = {}
+  // 1. raw shape of a Form-module template (does it carry a group/module/type?)
   try {
-    const { tmGet } = require('../lib/teammate')
     const fd = (await tmGet('/form/data')).response_data
-    const all = (fd.formTemplate || []).map(t => ({ id: t._id, name: t.name, sort: t.sortValue }))
-    const match = (fd.formTemplate || []).filter(t => /review|outcome|annual/i.test((t.name || '') + ' ' + (t.sortValue || '')))
-    res.json({ totalTemplates: all.length, matches: match, allNames: all.map(t => t.name) })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
+    out.formTemplateCount = (fd.formTemplate || []).length
+    out.formDataKeys = Object.keys(fd)
+    out.rawTemplateSample = fd.formTemplate && fd.formTemplate[0] ? Object.keys(fd.formTemplate[0]).reduce((a, k) => (a[k] = fd.formTemplate[0][k], a), {}) : null
+    out.reviewInForm = (fd.formTemplate || []).filter(t => /performance|review|outcome|annual/i.test((t.name || ''))).map(t => t.name)
+  } catch (e) { out.formDataError = e.message }
+  // 2. probe HR endpoints for anything template/review-shaped
+  for (const path of ['/employee/data', '/hr/getFormTemplate', '/hr/formTemplate', '/form/data?module=hr']) {
+    try {
+      const r = await tmGet(path)
+      out['probe ' + path] = { ok: true, keys: Object.keys(r.response_data || r || {}).slice(0, 20) }
+    } catch (e) { out['probe ' + path] = { ok: false, err: e.message.slice(0, 120) } }
   }
+  res.json(out)
 })
 
 router.use(requireAuth)
