@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { requireAuth, requireRole } = require('../middleware/auth')
-const { tmGet, tmPost } = require('../lib/teammate')
+const { tmGet, tmPost, tmPut } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
 
 const router = Router()
@@ -31,6 +31,22 @@ router.post('/testsubmit', requireRole('super_admin'), async (req, res) => {
       actions: []
     })
     res.json(result)
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
+router.get('/form/:formId/detail', requireRole('super_admin'), async (req, res) => {
+  try {
+    res.json(await tmGet(`/form/${req.params.formId}/detail`))
+  } catch (err) {
+    res.status(502).json({ error: err.message })
+  }
+})
+
+router.put('/form/:formId', requireRole('super_admin'), async (req, res) => {
+  try {
+    res.json(await tmPut(`/form/${req.params.formId}`, req.body || {}))
   } catch (err) {
     res.status(502).json({ error: err.message })
   }

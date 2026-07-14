@@ -25,5 +25,6 @@ async function tmRequest(method, path, body) {
 
 const tmGet = (path) => tmRequest('GET', path)
 const tmPost = (path, body) => tmRequest('POST', path, body)
+const tmPut = (path, body) => tmRequest('PUT', path, body)
 
-module.exports = { tmGet, tmPost }
+module.exports = { tmGet, tmPost, tmPut }
