@@ -53,6 +53,7 @@ export const api = {
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),
   runProcess: (id, input) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input }) }),
+  getRunDocument: (id) => request(`/api/processes/runs/${id}/document`),
 
   // Otter
   getOtterSpeeches: () => request('/api/otter/speeches'),

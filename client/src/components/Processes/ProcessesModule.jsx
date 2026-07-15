@@ -17,6 +17,8 @@ export default function ProcessesModule() {
   const [otterSpeeches, setOtterSpeeches] = useState([])
   const [otterError, setOtterError] = useState(null)
   const [otterFetching, setOtterFetching] = useState(null)
+  const [historyDocFetching, setHistoryDocFetching] = useState(null)
+  const [historyDocError, setHistoryDocError] = useState(null)
 
   useEffect(() => {
     api.getProcesses().then(setProcesses).catch(console.error)
@@ -88,20 +90,36 @@ export default function ProcessesModule() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  function downloadDoc() {
-    if (!doc) return
-    const bytes = atob(doc.document)
+  function saveDocFile(d) {
+    const bytes = atob(d.document)
     const arr = new Uint8Array(bytes.length)
     for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
     const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = doc.filename
+    a.download = d.filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  function downloadDoc() {
+    if (doc) saveDocFile(doc)
+  }
+
+  async function downloadRunDoc(runId) {
+    setHistoryDocError(null)
+    setHistoryDocFetching(runId)
+    try {
+      const d = await api.getRunDocument(runId)
+      saveDocFile(d)
+    } catch (err) {
+      setHistoryDocError({ runId, message: err.message })
+    } finally {
+      setHistoryDocFetching(null)
+    }
   }
 
   return (
@@ -148,6 +166,19 @@ export default function ProcessesModule() {
                   <span className={`badge history-status-${r.status}`}>
                     {r.status}
                   </span>
+                  {r.processId === 'performance-review' && r.status === 'completed' && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginTop: 6 }}
+                      onClick={() => downloadRunDoc(r.id)}
+                      disabled={historyDocFetching !== null}
+                    >
+                      {historyDocFetching === r.id ? '⏳ Fetching…' : '📄 Download .docx'}
+                    </button>
+                  )}
+                  {historyDocError?.runId === r.id && (
+                    <div className="history-item-meta" style={{ color: '#CC3201' }}>{historyDocError.message}</div>
+                  )}
                 </div>
               ))}
             </div>

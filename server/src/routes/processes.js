@@ -6,6 +6,7 @@ const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
+const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -151,6 +152,22 @@ router.get('/runs', async (req, res) => {
   res.json(data || [])
 })
 
+// Download the stored document for a run (role-gated like the run itself)
+router.get('/runs/:id/document', async (req, res) => {
+  const { data: run, error } = await db.from('ProcessRun').select('id, processId').eq('id', req.params.id).single()
+  if (error || !run) return res.status(404).json({ error: 'Run not found' })
+
+  const proc = PROCESSES.find(p => p.id === run.processId)
+  const userRole = req.user?.role
+  if (userRole !== 'super_admin' && proc?.rolesAllowed && !proc.rolesAllowed.includes(userRole)) {
+    return res.status(403).json({ error: 'You do not have permission to view this document' })
+  }
+
+  const doc = await getReviewDoc(run.id)
+  if (!doc) return res.status(404).json({ error: 'No document stored for this run (runs before 16 Jul 2026 were not stored)' })
+  res.json(doc)
+})
+
 // Run a process
 router.post('/run/:id', async (req, res) => {
   const proc = PROCESSES.find(p => p.id === req.params.id)
@@ -254,6 +271,12 @@ router.post('/run/:id', async (req, res) => {
         document = buf.toString('base64')
         filename = reviewFilename(parsed)
         output += `\n\n📄 Staff-facing Outcome Form ready — use the Download button below.`
+        try {
+          await saveReviewDoc(runId, filename, buf)
+          output += ` The document is also kept with this run in history for later download.`
+        } catch (storeErr) {
+          output += ` (Could not store the document for later download: ${storeErr.message} — download it now.)`
+        }
       } catch (docErr) {
         output += `\n\n⚠️ Could not build the staff-facing Outcome Form document: ${docErr.message}\nThe Teammate record content above is still valid.`
       }
