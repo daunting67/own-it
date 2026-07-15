@@ -35,37 +35,87 @@ function renderDebriefText(d) {
   ].join('\n')
 }
 
-function renderReviewText(r) {
+function renderReviewText(r, coordinator) {
   const nz = r.date ? new Date(`${r.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const reviewedBy = (Array.isArray(r.reviewed_by) ? r.reviewed_by.filter(Boolean).join(', ') : r.reviewed_by) || 'Tony Daunt'
+  const tm = r.teammate || {}
   const planItems = (r.action_plan || []).filter(Boolean)
   const plan = planItems.length
     ? planItems.map((a, i) => [
-        `${i + 1}. ${a.goal || 'Not captured'}`,
+        `Row ${i + 1}:`,
+        `   Goal / Action: ${a.goal || 'Not captured'}`,
         `   Responsibility: ${a.responsible || 'Not set'}`,
-        `   Timeline: ${a.due || 'Not set'}`,
-        `   Support required: ${a.support || 'None noted'}`
+        `   Timeline / Due Date: ${a.due || 'Not set'}`,
+        `   Support Required: ${a.support || 'None required'}`
       ].join('\n')).join('\n\n')
-    : 'No action items agreed.'
+    : 'No action items agreed — leave the table empty.'
+  const renumRows = (tm.renumeration_rows || []).filter(Boolean)
+  const renum = renumRows.length
+    ? renumRows.map((row, i) => [
+        `Row ${i + 1}:`,
+        `   Current Renumeration: ${row.current || 'Not captured'}`,
+        `   Revised Renumeration: ${row.revised || 'Not captured'}`,
+        `   Increase: ${row.increase || 'Not captured'}`,
+        `   Effective Date: ${row.effective || 'Not captured'}`
+      ].join('\n')).join('\n\n')
+    : 'No pay change agreed — leave the table empty.'
   return [
-    'ANNUAL PERFORMANCE REVIEW — OUTCOME FORM',
+    'ANNUAL PERFORMANCE REVIEW',
     'P&I (North) Ltd',
     `${r.employee || 'Employee not named'} — ${r.position || 'Position not stated'}`,
-    `Reviewed by: ${(Array.isArray(r.reviewed_by) ? r.reviewed_by.filter(Boolean).join(', ') : r.reviewed_by) || 'Tony Daunt'} | ${nz}`,
+    `Reviewed by: ${reviewedBy} | ${nz}`,
     '',
-    'KEY STRENGTHS',
-    r.key_strengths,
+    '════════ PART 1 — TEAMMATE RECORD (the system of record) ════════',
     '',
-    'WHAT WENT NOT SO WELL',
-    r.not_so_well,
+    'Create the draft in Teammate: Human Resources → Assign Forms',
+    '   Type of Form: Annual Performance Review - Outcomes',
+    '   Action Type: Reviewers to Complete the Form',
+    `   Employees: ${r.employee || '(employee)'}`,
+    `   Reviewers: ${coordinator || 'Tony Daunt'}`,
+    '   Tick "Prefill Form", then copy each block below into the matching field.',
     '',
-    'AREAS FOR DEVELOPMENT',
-    r.areas_for_development,
+    '— DETAILS —',
+    `Employee Name: ${r.employee || 'Not captured'}`,
+    `Position: ${r.position || 'Not captured'}`,
+    `Reviewed By: ${reviewedBy}`,
+    `Review Date: ${nz}`,
     '',
-    'ACTION PLAN',
+    '— 1. CONNECTION & REFLECTION —',
+    tm.connection_reflection || 'Not discussed in this review.',
+    '',
+    '— 2. FEEDBACK AGAINST THE STANDARDS —',
+    tm.feedback_standards || 'Not discussed in this review.',
+    '',
+    '— 3. STRENGTHS DISCUSSION —',
+    tm.strengths_discussion || 'Not discussed in this review.',
+    '',
+    '— 4. LEADERSHIP DISCUSSION —',
+    tm.leadership_discussion || 'Not discussed in this review.',
+    '',
+    '— 5. FUTURE EXPECTATIONS & DEVELOPMENT AREAS —',
+    tm.future_expectations || 'Not discussed in this review.',
+    '',
+    '— RENUMERATION TABLE (+ Add Row once per row, then fill only the new row) —',
+    renum,
+    '',
+    '— RENUMERATION DISCUSSION —',
+    tm.renumeration_discussion || 'Not discussed in this review.',
+    '',
+    '— AGREED ACTION PLAN TABLE (+ Add Row once per row, then fill only the new row) —',
     plan,
     '',
-    'ADDITIONAL COMMENTS',
-    r.additional_comments
+    '— ACTION PLAN CONVERSATION —',
+    tm.action_plan_conversation || 'Not discussed in this review.',
+    '',
+    '— FINAL COMMENTS —',
+    tm.final_comments || 'Not discussed in this review.',
+    '',
+    'Click SAVE DRAFT (not Submit). Reopen later via Home → My Actions → search the employee\'s name.',
+    '',
+    '════════ PART 2 — STAFF-FACING WORD DOCUMENT ════════',
+    '',
+    'The .docx download is the staff copy — written in the reviewer\'s own voice, no sign-off section.',
+    `Hand it to ${r.employee || 'the employee'} after the Teammate draft is saved. It does not replace the Teammate record.`
   ].join('\n')
 }
 
@@ -143,7 +193,7 @@ router.post('/run/:id', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
+        max_tokens: proc.maxTokens || 4096,
         system: proc.systemPrompt,
         messages: [{ role: 'user', content: input || 'Run this process.' }]
       })
@@ -197,15 +247,15 @@ router.post('/run/:id', async (req, res) => {
     if (proc.structured && proc.id === 'performance-review') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
-      output = renderReviewText(parsed)
+      output = renderReviewText(parsed, resolveTeammateName(req.user))
       try {
         const { buildOutcomeDocx, reviewFilename } = require('../lib/buildOutcomeDocx')
         const buf = await buildOutcomeDocx(parsed)
         document = buf.toString('base64')
         filename = reviewFilename(parsed)
-        output += `\n\n📄 Branded Outcome Form ready — use the Download button below, then file it in Teammate (HR module).`
+        output += `\n\n📄 Staff-facing Outcome Form ready — use the Download button below.`
       } catch (docErr) {
-        output += `\n\n⚠️ Could not build the Outcome Form document: ${docErr.message}\nThe text above is still valid.`
+        output += `\n\n⚠️ Could not build the staff-facing Outcome Form document: ${docErr.message}\nThe Teammate record content above is still valid.`
       }
     }
 

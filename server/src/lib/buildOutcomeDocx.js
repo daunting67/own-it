@@ -100,22 +100,6 @@ function actionPlanTable(actions) {
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })
 }
 
-function signoffTable() {
-  const headers = ['NAME', 'SIGNATURE', 'DATE']
-  const roles = ['Employee:', 'Assessor:', 'Manager:']
-  const rows = [new TableRow({ tableHeader: true, children: headers.map(headerCell) })]
-  for (const role of roles) {
-    rows.push(new TableRow({
-      children: [
-        new TableCell({ margins: { top: 80, bottom: 80, left: 100, right: 100 }, children: [new Paragraph({ children: [runsText(role, { size: 20 })] })] }),
-        bodyCell('', LIGHT),
-        bodyCell('', LIGHT)
-      ]
-    }))
-  }
-  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })
-}
-
 function detailsTable(r, reviewedBy, nzDate) {
   const lbl = t => runsText(t, { bold: true, color: NAVY, size: 20 })
   const val = t => runsText(t || '', { color: DARK, size: 20 })
@@ -134,9 +118,12 @@ function detailsTable(r, reviewedBy, nzDate) {
 }
 
 // r = structured review object; returns a Buffer of the .docx
+// Staff-facing document: first-person voice (r.doc.*), no sign-off section,
+// no header quote, Additional Comments above the Agreed Action Plan.
 async function buildOutcomeDocx(r) {
   const reviewedBy = Array.isArray(r.reviewed_by) ? r.reviewed_by.filter(Boolean).join(', ') : (r.reviewed_by || 'Tony Daunt')
   const nzDate = r.date ? new Date(`${r.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const d = r.doc || {}
 
   const headerChildren = []
   try {
@@ -150,28 +137,26 @@ async function buildOutcomeDocx(r) {
   headerChildren.push(
     new Paragraph({ spacing: { before: 120, after: 0 }, children: [runsText('ANNUAL PERFORMANCE REVIEW', { bold: true, color: NAVY, size: 32 })] }),
     new Paragraph({ spacing: { after: 40 }, children: [runsText('OUTCOME FORM', { bold: true, color: ORANGE, size: 24 })] }),
-    new Paragraph({ spacing: { after: 160 }, children: [runsText('P&I (North) Ltd   |   P&I-HR-PR-002   |   Rev 1', { color: GREY, size: 16 })] }),
-    new Paragraph({ spacing: { after: 160 }, children: [runsText('“Be honest, this is your opinion, the only consequence is improved performance.”', { italics: true, color: DARK, size: 20 })] })
+    new Paragraph({ spacing: { after: 160 }, children: [runsText('P&I (North) Ltd   |   P&I-HR-PR-002   |   Rev 1', { color: GREY, size: 16 })] })
   )
 
   const doc = new Document({
     sections: [{
-      properties: { page: { margin: { top: 1000, bottom: 1000, left: 1120, right: 1120 } } },
+      // A4 with 1-inch margins (DXA twips: 1440 = 1")
+      properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } } },
       children: [
         ...headerChildren,
         detailsTable(r, reviewedBy, nzDate),
         new Paragraph({ spacing: { after: 120 }, children: [] }),
-        sectionBox('What has gone well last year? (Key Strengths Observed)', r.key_strengths),
+        sectionBox('What has gone well last year? (Key Strengths Observed)', d.key_strengths || r.key_strengths),
         new Paragraph({ children: [] }),
-        sectionBox('What went not so well last year?', r.not_so_well),
+        sectionBox('What went not so well last year?', d.not_so_well || r.not_so_well),
         new Paragraph({ children: [] }),
-        sectionBox('How can we improve this year? (Areas for Development)', r.areas_for_development),
-        heading('Agreed Action Plan / Next Steps'),
-        actionPlanTable(r.action_plan),
+        sectionBox('How can we improve this year? (Areas for Development)', d.areas_for_development || r.areas_for_development),
         heading('Additional Comments'),
-        sectionBox('Additional Comments', r.additional_comments),
-        heading('Sign-Off'),
-        signoffTable()
+        sectionBox('Additional Comments', d.additional_comments || r.additional_comments),
+        heading('Agreed Action Plan / Next Steps'),
+        actionPlanTable(r.action_plan)
       ]
     }]
   })
