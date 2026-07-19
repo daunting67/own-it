@@ -4,6 +4,7 @@ import StaffCard from './StaffCard'
 import StaffModal from './StaffModal'
 import AddStaffModal from './AddStaffModal'
 import SiteManager from './SiteManager'
+import ProcessesModule from '../Processes/ProcessesModule'
 
 const HIRE_TYPES = ['All', 'Direct hire', 'Labour hire', 'Contractor', 'Casual']
 
@@ -108,7 +109,7 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {[['tracker', 'Onboarding tracker'], ['sites', 'Sites']].map(([id, label]) => (
+        {[['tracker', 'Onboarding tracker'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -154,6 +155,10 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {tab === 'sites' && (
         <SiteManager sites={sites} onAdd={addSite} onDelete={deleteSite} />
+      )}
+
+      {tab === 'reviews' && (
+        <ProcessesModule only="performance-review" />
       )}
 
       {selected && (

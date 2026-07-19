@@ -24,8 +24,8 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="card login-card">
-        <div className="login-logo" style={{ flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <img src="/pi-logo.png" alt="Pipeline & Infrastructure" style={{ height: 52, maxWidth: '100%' }} />
+        <div className="login-logo" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <img src="/brand/pipeline-logo.jpg" alt="Pipeline and Infrastructure" style={{ height: 52, maxWidth: '100%' }} />
           <div className="logo-text" style={{ textAlign: 'center' }}>
             <div className="logo-name">Own It</div>
             <div className="logo-sub">Operations portal</div>

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 
-export default function ProcessesModule() {
+// `only` embeds a single process (e.g. inside HR & People); `include` limits the
+// full module to a set of ids (e.g. the Meetings module); `exclude` hides ids.
+export default function ProcessesModule({ only = null, include = null, exclude = [], title = 'Processes' }) {
   const [processes, setProcesses] = useState([])
   const [selected, setSelected] = useState(null)
   const [input, setInput] = useState('')
@@ -24,6 +26,21 @@ export default function ProcessesModule() {
     api.getProcesses().then(setProcesses).catch(console.error)
     api.getProcessRuns().then(setHistory).catch(console.error)
   }, [])
+
+  const visibleProcesses = only
+    ? processes.filter(p => p.id === only)
+    : include
+      ? processes.filter(p => include.includes(p.id))
+      : processes.filter(p => !exclude.includes(p.id))
+  const visibleHistory = only
+    ? history.filter(r => r.processId === only)
+    : include
+      ? history.filter(r => include.includes(r.processId))
+      : history.filter(r => !exclude.includes(r.processId))
+
+  useEffect(() => {
+    if (only && !selected && visibleProcesses.length > 0) selectProcess(visibleProcesses[0])
+  }, [only, processes])
 
   function selectProcess(p) {
     setSelected(p)
@@ -123,16 +140,17 @@ export default function ProcessesModule() {
   }
 
   return (
-    <div className="processes-layout">
+    <div className={only ? 'process-embed' : 'processes-layout'}>
       {/* Sidebar */}
+      {!only && (
       <div className="processes-sidebar">
         <div className="processes-sidebar-header">
-          <div className="page-title">Processes</div>
+          <div className="page-title">{title}</div>
           <div className="page-subtitle">Click to run</div>
         </div>
 
         <div className="process-list">
-          {processes.map(p => (
+          {visibleProcesses.map(p => (
             <button
               key={p.id}
               className={`process-item${selected?.id === p.id ? ' active' : ''}`}
@@ -154,10 +172,10 @@ export default function ProcessesModule() {
           </button>
           {showHistory && (
             <div className="run-history-list">
-              {history.length === 0 && (
+              {visibleHistory.length === 0 && (
                 <p className="history-empty">No runs yet</p>
               )}
-              {history.map(r => (
+              {visibleHistory.map(r => (
                 <div key={r.id} className="history-item">
                   <div className="history-item-name">{r.processName}</div>
                   <div className="history-item-meta">
@@ -185,15 +203,21 @@ export default function ProcessesModule() {
           )}
         </div>
       </div>
+      )}
 
       {/* Main panel */}
-      <div className="processes-main">
-        {!selected && (
+      <div className={only ? '' : 'processes-main'}>
+        {!selected && !only && (
           <div className="processes-empty-state">
             <div className="processes-empty-icon">⚡</div>
             <h3>Select a process</h3>
             <p>Choose a process from the left panel to get started.</p>
           </div>
+        )}
+        {only && processes.length > 0 && visibleProcesses.length === 0 && (
+          <p style={{ color: 'var(--pi-body-muted)', fontSize: 13 }}>
+            This process isn't available for your role.
+          </p>
         )}
 
         {selected && (
@@ -282,6 +306,34 @@ export default function ProcessesModule() {
                 <pre className="process-result-body">{result}</pre>
               </div>
             )}
+          </div>
+        )}
+
+        {only && visibleHistory.length > 0 && (
+          <div className="embed-history">
+            <div className="checklist-section-title" style={{ marginTop: 24 }}>Previous runs</div>
+            {visibleHistory.map(r => (
+              <div key={r.id} className="history-item">
+                <div className="history-item-name">{r.processName}</div>
+                <div className="history-item-meta">
+                  {r.runBy} · {new Date(r.createdAt).toLocaleDateString('en-NZ')}
+                </div>
+                <span className={`badge history-status-${r.status}`}>{r.status}</span>
+                {r.processId === 'performance-review' && r.status === 'completed' && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => downloadRunDoc(r.id)}
+                    disabled={historyDocFetching !== null}
+                  >
+                    {historyDocFetching === r.id ? '⏳ Fetching…' : '📄 Download .docx'}
+                  </button>
+                )}
+                {historyDocError?.runId === r.id && (
+                  <div className="history-item-meta" style={{ color: 'var(--danger)' }}>{historyDocError.message}</div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
