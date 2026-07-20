@@ -65,21 +65,39 @@ async function getSubmission(formId, session) {
 // formValue entries, and writes the whole document back via formSubmissionEdit.
 async function populateSubmission(formId, values, session) {
   const doc = await getSubmission(formId, session)
-  let matched = 0
-  doc.formValue = (doc.formValue || []).map(fv => {
+  const existing = doc.formValue || []
+  const byId = new Map(existing.map(fv => [fv.relatedFormId, fv]))
+
+  // Update the slots that already exist...
+  let updated = 0
+  for (const fv of existing) {
     const v = values[fv.relatedFormId]
-    if (!v) return fv
-    matched++
-    return {
-      ...fv,
-      value: v.value != null ? v.value : (fv.value || ''),
-      optionVal: v.optionVal != null ? v.optionVal : (fv.optionVal || [])
-    }
-  })
+    if (!v) continue
+    updated++
+    fv.value = v.value != null ? v.value : (fv.value || '')
+    fv.optionVal = v.optionVal != null ? v.optionVal : (fv.optionVal || [])
+  }
+
+  // ...and create any slots the template hasn't instantiated yet (a freshly
+  // created form comes back with an empty formValue until first opened in UI).
+  let created = 0
+  for (const [relatedFormId, v] of Object.entries(values)) {
+    if (byId.has(relatedFormId)) continue
+    created++
+    existing.push({
+      relatedFormId,
+      value: v.value != null ? String(v.value) : '',
+      optionVal: v.optionVal != null ? v.optionVal : [],
+      subFormValues: []
+    })
+  }
+  doc.formValue = existing
+  const matched = updated + created
+
   const res = await internal('POST', '/formSubmission/formSubmissionEdit', session, doc)
   const ok = res?.response_code === 200 || /updated/i.test(res?.response_message || '')
   if (!ok) throw new Error(`formSubmissionEdit did not confirm: ${JSON.stringify(res).slice(0, 200)}`)
-  return { matched, total: (doc.formValue || []).length, response_message: res.response_message }
+  return { matched, updated, created, total: (doc.formValue || []).length, response_message: res.response_message }
 }
 
 module.exports = { haveCreds, signIn, getSubmission, populateSubmission, internal }
