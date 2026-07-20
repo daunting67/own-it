@@ -14,7 +14,7 @@ function haveCreds() {
   return !!(process.env.TEAMMATE_USER_EMAIL && process.env.TEAMMATE_USER_PASSWORD)
 }
 
-// Log in and return a short-lived session JWT (Teammate's authToken).
+// Log in and return a session { token, companyId, userId, employeeId }.
 async function signIn() {
   const userName = process.env.TEAMMATE_USER_EMAIL
   const password = process.env.TEAMMATE_USER_PASSWORD
@@ -27,14 +27,16 @@ async function signIn() {
   const text = await res.text()
   let data
   try { data = JSON.parse(text) } catch { data = {} }
-  const token = data?.response_data?.authToken
+  const rd = data?.response_data || {}
+  const token = rd.authToken
   if (!res.ok || !token) {
     throw new Error(`Teammate sign-in failed (${res.status}) — check TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD`)
   }
-  return token
+  return { token, companyId: rd.companyId, userId: rd._id, employeeId: rd.employeeId }
 }
 
-async function internal(method, path, token, body) {
+async function internal(method, path, session, body) {
+  const token = typeof session === 'string' ? session : session.token
   const res = await fetch(`${ROOT}${path}`, {
     method,
     headers: { 'authtoken': token, 'Content-Type': 'application/json' },
@@ -49,24 +51,19 @@ async function internal(method, path, token, body) {
 
 // Fetch the full submission document (contains formValue[] with each field's
 // _id + relatedFormId). Tries the known payload shapes for formSubmissionDetails.
-async function getSubmission(formId, token) {
-  const shapes = [{ formSubmissionId: formId }, { _id: formId }, { id: formId }, { submissionId: formId }]
-  let lastErr
-  for (const b of shapes) {
-    try {
-      const d = await internal('POST', '/formSubmission/formSubmissionDetails', token, b)
-      const doc = d?.response_data
-      if (doc && Array.isArray(doc.formValue)) return doc
-    } catch (err) { lastErr = err }
-  }
-  throw lastErr || new Error('Could not fetch submission detail')
+async function getSubmission(formId, session) {
+  const companyId = typeof session === 'object' ? session.companyId : undefined
+  const d = await internal('POST', '/formSubmission/formSubmissionDetails', session, { formSubmissionId: formId, companyId })
+  const doc = d?.response_data
+  if (!doc || !Array.isArray(doc.formValue)) throw new Error('Submission detail had no formValue array')
+  return doc
 }
 
 // values: { [relatedFormId]: { value?: string, optionVal?: array } }
 // Reads the current document, overlays the given field values onto the matching
 // formValue entries, and writes the whole document back via formSubmissionEdit.
-async function populateSubmission(formId, values, token) {
-  const doc = await getSubmission(formId, token)
+async function populateSubmission(formId, values, session) {
+  const doc = await getSubmission(formId, session)
   let matched = 0
   doc.formValue = (doc.formValue || []).map(fv => {
     const v = values[fv.relatedFormId]
@@ -78,7 +75,7 @@ async function populateSubmission(formId, values, token) {
       optionVal: v.optionVal != null ? v.optionVal : (fv.optionVal || [])
     }
   })
-  const res = await internal('POST', '/formSubmission/formSubmissionEdit', token, doc)
+  const res = await internal('POST', '/formSubmission/formSubmissionEdit', session, doc)
   const ok = res?.response_code === 200 || /updated/i.test(res?.response_message || '')
   if (!ok) throw new Error(`formSubmissionEdit did not confirm: ${JSON.stringify(res).slice(0, 200)}`)
   return { matched, total: (doc.formValue || []).length, response_message: res.response_message }

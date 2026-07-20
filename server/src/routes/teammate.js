@@ -82,10 +82,10 @@ router.get('/employees', requireRole('super_admin'), async (req, res) => {
 router.post('/session-test', requireRole('super_admin'), async (req, res) => {
   try {
     if (!haveCreds()) return res.json({ ok: false, reason: 'creds-not-set' })
-    const token = await signIn()
+    const session = await signIn()
     const formId = req.body?.formId
-    if (!formId) return res.json({ ok: true, step: 'signin', tokenLen: token.length })
-    const doc = await getSubmission(formId, token)
+    if (!formId) return res.json({ ok: true, step: 'signin', tokenLen: session.token.length, companyId: session.companyId })
+    const doc = await getSubmission(formId, session)
     const info = {
       ok: true, step: 'read', formId,
       formatedNumber: doc.formatedNumber,
@@ -94,7 +94,7 @@ router.post('/session-test', requireRole('super_admin'), async (req, res) => {
       relatedFormIds: (doc.formValue || []).map(f => f.relatedFormId)
     }
     if (req.body?.write && req.body?.values) {
-      const result = await populateSubmission(formId, req.body.values, token)
+      const result = await populateSubmission(formId, req.body.values, session)
       info.step = 'write'
       info.write = result
     }
