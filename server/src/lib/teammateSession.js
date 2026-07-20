@@ -104,11 +104,24 @@ async function populateSubmission(formId, values, session) {
 // UI "Share form" action). employeeIds = array of Teammate employee _ids.
 // Returns { notifiedCount }.
 async function shareSubmission(formId, employeeIds, message, session) {
-  const body = { employees: employeeIds, userGroups: [], message: message || '' }
-  const res = await internal('POST', `/v3/form-submission/${formId}/share`, session, body)
-  const ok = res?.response_code === 200
-  if (!ok) throw new Error(`share did not confirm: ${JSON.stringify(res).slice(0, 200)}`)
-  return { notifiedCount: res?.response_data?.notifiedCount ?? null }
+  const path = `/v3/form-submission/${formId}/share`
+  const candidates = [
+    { employeeIds, userGroupIds: [], message: message || '' },
+    { employeeIds, message: message || '' },
+    { employeeIds },
+    { userIds: employeeIds, message: message || '' }
+  ]
+  let lastErr
+  for (const body of candidates) {
+    try {
+      const res = await internal('POST', path, session, body)
+      if (res?.response_code === 200) {
+        return { notifiedCount: res?.response_data?.notifiedCount ?? null, bodyShape: Object.keys(body).join('+') }
+      }
+      lastErr = new Error(JSON.stringify(res).slice(0, 200))
+    } catch (err) { lastErr = err }
+  }
+  throw lastErr || new Error('share failed for all payload shapes')
 }
 
 module.exports = { haveCreds, signIn, getSubmission, populateSubmission, shareSubmission, internal }
