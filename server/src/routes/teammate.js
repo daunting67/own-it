@@ -70,7 +70,10 @@ router.get('/forms', requireRole('super_admin'), async (req, res) => {
 
 router.get('/employees', requireRole('super_admin'), async (req, res) => {
   try {
-    res.json(await tmGet('/employee'))
+    const qs = []
+    if (req.query.page) qs.push(`page=${encodeURIComponent(req.query.page)}`)
+    if (req.query.pageSize) qs.push(`pageSize=${encodeURIComponent(req.query.pageSize)}`)
+    res.json(await tmGet(`/employee${qs.length ? `?${qs.join('&')}` : ''}`))
   } catch (err) {
     res.status(502).json({ error: err.message })
   }
