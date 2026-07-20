@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { requireAuth, requireRole } = require('../middleware/auth')
 const { tmGet, tmPost, tmPut } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
-const { haveCreds, signIn, getSubmission, populateSubmission } = require('../lib/teammateSession')
+const { haveCreds, signIn, getSubmission, populateSubmission, internal } = require('../lib/teammateSession')
 
 const router = Router()
 router.use(requireAuth)
@@ -85,6 +85,11 @@ router.post('/session-test', requireRole('super_admin'), async (req, res) => {
     const session = await signIn()
     const formId = req.body?.formId
     if (!formId) return res.json({ ok: true, step: 'signin', tokenLen: session.token.length, companyId: session.companyId })
+    if (req.body?.raw) {
+      const d = await internal('POST', '/formSubmission/formSubmissionDetails', session, { formSubmissionId: formId, companyId: session.companyId })
+      const rd = d?.response_data
+      return res.json({ ok: true, step: 'raw', topKeys: d ? Object.keys(d) : null, rdType: Array.isArray(rd) ? 'array' : typeof rd, rdKeys: rd && !Array.isArray(rd) ? Object.keys(rd) : null, sample: JSON.stringify(rd).slice(0, 600) })
+    }
     const doc = await getSubmission(formId, session)
     const info = {
       ok: true, step: 'read', formId,
