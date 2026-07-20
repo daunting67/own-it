@@ -17,7 +17,7 @@ const ITEMS = [
   { id: 'people',      label: 'HR & People',       live: true },
   { id: 'payroll',     label: 'Payroll',           live: true },
   { id: 'meetings',    label: 'Meetings',          live: true },
-  { id: 'procurement', label: 'Procurement',       live: true },
+  { id: 'projects',    label: 'Project Management', live: true },
   { id: 'hs',          label: 'Health & Safety',   live: false },
   { id: 'operations',  label: 'Operations',        live: false },
   { id: 'training',    label: 'Training',          live: false },

@@ -8,7 +8,7 @@ import Dashboard from './components/Dashboard/Dashboard'
 import PeopleModule from './components/People/PeopleModule'
 import PayrollModule from './components/Payroll/PayrollModule'
 import MeetingsModule from './components/Meetings/MeetingsModule'
-import ProcurementModule from './components/Procurement/ProcurementModule'
+import ProjectManagementModule from './components/ProjectManagement/ProjectManagementModule'
 import UsersModule from './components/Users/UsersModule'
 import ComingSoon from './components/ComingSoon'
 
@@ -17,7 +17,7 @@ const VIEW_TITLES = {
   people: 'HR & People',
   payroll: 'Payroll',
   meetings: 'Meetings',
-  procurement: 'Procurement',
+  projects: 'Project Management',
   users: 'Users',
   hs: 'Health & Safety',
   operations: 'Operations',
@@ -71,9 +71,9 @@ export default function App() {
             {dept === 'people' && <PeopleModule onSaveStateChange={onSaveStateChange} />}
             {dept === 'payroll' && <PayrollModule onSaveStateChange={onSaveStateChange} />}
             {dept === 'meetings' && <MeetingsModule />}
-            {dept === 'procurement' && <ProcurementModule />}
+            {dept === 'projects' && <ProjectManagementModule />}
             {dept === 'users' && user?.role === 'super_admin' && <UsersModule />}
-            {!['dashboard', 'people', 'payroll', 'meetings', 'procurement', 'users'].includes(dept) && <ComingSoon dept={dept} />}
+            {!['dashboard', 'people', 'payroll', 'meetings', 'projects', 'users'].includes(dept) && <ComingSoon dept={dept} />}
           </div>
         </div>
       </main>
