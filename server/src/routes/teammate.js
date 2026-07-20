@@ -2,6 +2,7 @@ const { Router } = require('express')
 const { requireAuth, requireRole } = require('../middleware/auth')
 const { tmGet, tmPost, tmPut } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
+const { haveCreds, signIn, getSubmission, populateSubmission } = require('../lib/teammateSession')
 
 const router = Router()
 router.use(requireAuth)
@@ -73,6 +74,33 @@ router.get('/employees', requireRole('super_admin'), async (req, res) => {
     res.json(await tmGet('/employee'))
   } catch (err) {
     res.status(502).json({ error: err.message })
+  }
+})
+
+// TEMP diagnostic — verify session-auth field population against a given form.
+// Read step only unless ?write=1. Remove after wiring is verified.
+router.post('/session-test', requireRole('super_admin'), async (req, res) => {
+  try {
+    if (!haveCreds()) return res.json({ ok: false, reason: 'creds-not-set' })
+    const token = await signIn()
+    const formId = req.body?.formId
+    if (!formId) return res.json({ ok: true, step: 'signin', tokenLen: token.length })
+    const doc = await getSubmission(formId, token)
+    const info = {
+      ok: true, step: 'read', formId,
+      formatedNumber: doc.formatedNumber,
+      formDescription: doc.formDescription,
+      fieldCount: (doc.formValue || []).length,
+      relatedFormIds: (doc.formValue || []).map(f => f.relatedFormId)
+    }
+    if (req.body?.write && req.body?.values) {
+      const result = await populateSubmission(formId, req.body.values, token)
+      info.step = 'write'
+      info.write = result
+    }
+    res.json(info)
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message })
   }
 })
 
