@@ -54,7 +54,8 @@ async function internal(method, path, session, body) {
 async function getSubmission(formId, session) {
   const companyId = typeof session === 'object' ? session.companyId : undefined
   const d = await internal('POST', '/formSubmission/formSubmissionDetails', session, { formSubmissionId: formId, companyId })
-  const doc = d?.response_data
+  // response_data = { typeObservation, formSubmission: [ <doc> ], recordedBy }
+  const doc = d?.response_data?.formSubmission?.[0]
   if (!doc || !Array.isArray(doc.formValue)) throw new Error('Submission detail had no formValue array')
   return doc
 }
