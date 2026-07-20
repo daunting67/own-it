@@ -36,7 +36,7 @@ function renderDebriefText(d) {
   ].join('\n')
 }
 
-function renderReviewText(r, coordinator) {
+function renderReviewText(r) {
   const nz = r.date ? new Date(`${r.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
   const reviewedBy = (Array.isArray(r.reviewed_by) ? r.reviewed_by.filter(Boolean).join(', ') : r.reviewed_by) || 'Tony Daunt'
   const tm = r.teammate || {}
@@ -72,7 +72,7 @@ function renderReviewText(r, coordinator) {
     '   Type of Form: Annual Performance Review - Outcomes',
     '   Action Type: Reviewers to Complete the Form',
     `   Employees: ${r.employee || '(employee)'}`,
-    `   Reviewers: ${coordinator || 'Tony Daunt'}`,
+    `   Reviewers: ${reviewedBy}`,
     '   Tick "Prefill Form", then copy each block below into the matching field.',
     '',
     '— DETAILS —',
@@ -264,7 +264,7 @@ router.post('/run/:id', async (req, res) => {
     if (proc.structured && proc.id === 'performance-review') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
-      output = renderReviewText(parsed, resolveTeammateName(req.user))
+      output = renderReviewText(parsed)
       try {
         const { buildOutcomeDocx, reviewFilename } = require('../lib/buildOutcomeDocx')
         const buf = await buildOutcomeDocx(parsed)
