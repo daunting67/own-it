@@ -93,7 +93,11 @@ async function submitOfficeMinutes(d, recordedByName) {
   // the session-authenticated internal endpoint (read-modify-write).
   const newId = res.response_data?._id
   let populated = null
-  if (newId && haveCreds()) {
+  if (!newId) {
+    populated = { error: 'no form _id returned by create' }
+  } else if (!haveCreds()) {
+    populated = { error: 'creds-unset' }
+  } else {
     try {
       const values = {}
       for (const [fieldId, value] of Object.entries(body.fields)) {
