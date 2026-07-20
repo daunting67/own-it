@@ -131,7 +131,11 @@ function teammateBanner(tm, label) {
   const where = `recorded by ${tm.coordinator}, ${tm.workplace} / ${tm.branch}`
   const p = tm.populated
   if (p && !p.error && p.matched > 0) {
-    return `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${where}. ${p.matched} field${p.matched === 1 ? '' : 's'} populated automatically. Open it in Teammate to review and Save/Submit.`
+    let msg = `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${where}. ${p.matched} field${p.matched === 1 ? '' : 's'} populated automatically. Open it in Teammate to review and Save/Submit.`
+    if (p.attendeesUnmatched && p.attendeesUnmatched.length) {
+      msg += `\nNote: these attendees weren't on the staff list, so add them manually if needed: ${p.attendeesUnmatched.join(', ')}.`
+    }
+    return msg
   }
   if (p && p.error === 'creds-unset') {
     return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}. Automatic field population is not configured, so the form is EMPTY. Open it and paste the ${label} sections above into the matching fields.`

@@ -18,7 +18,35 @@ const FIELD_IDS = {
   upcoming_training: '67abac8122fbae02b9457f65'
 }
 
+// Employee-type multi-select fields (need optionVal with employee IDs)
+const ATTENDEES_FIELD = '659caa7ce0343f77b814c661'
+const APOLOGIES_FIELD = '659caa7ce0343f77b814c662'
+
 const FORM_TEMPLATE_ID = '659ca7d0e0343f77b8149c11'
+
+// Turn a comma-separated name string into an optionVal[] of matched Teammate
+// employees. Unmatched names (new starters, visitors) are returned separately
+// so we never invent a person. Returns { optionVal, unmatched }.
+function resolveEmployees(nameString, employees) {
+  const optionVal = []
+  const unmatched = []
+  const names = String(nameString || '')
+    .split(/[,;\n]| and /i)
+    .map(n => n.replace(/\(.*?\)/g, '').trim())   // drop parentheticals e.g. "(new labourer)"
+    .filter(Boolean)
+  for (const name of names) {
+    if (/^none$/i.test(name)) continue
+    const emp = findEmployee(employees, name)
+    if (emp) {
+      if (!optionVal.some(o => o.value === emp._id)) {
+        optionVal.push({ value: emp._id, employeeName: emp.name })
+      }
+    } else {
+      unmatched.push(name)
+    }
+  }
+  return { optionVal, unmatched }
+}
 
 function normalise(s) {
   return (s || '').toLowerCase().replace(/[^a-z ]/g, '').trim()
@@ -103,8 +131,16 @@ async function submitOfficeMinutes(d, recordedByName) {
       for (const [fieldId, value] of Object.entries(body.fields)) {
         values[fieldId] = { value: String(value) }
       }
+      // Attendees & apologies are employee multi-selects — resolve names to
+      // Teammate employees and set optionVal. Unmatched names are skipped.
+      const att = resolveEmployees(d.attendees, employees)
+      const apo = resolveEmployees(d.apologies, employees)
+      if (att.optionVal.length) values[ATTENDEES_FIELD] = { value: '', optionVal: att.optionVal }
+      if (apo.optionVal.length) values[APOLOGIES_FIELD] = { value: '', optionVal: apo.optionVal }
       const session = await signIn()
       populated = await populateSubmission(newId, values, session)
+      populated.attendeesMatched = att.optionVal.length
+      populated.attendeesUnmatched = att.unmatched
     } catch (fillErr) {
       populated = { error: fillErr.message }
     }
