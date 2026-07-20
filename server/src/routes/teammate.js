@@ -75,23 +75,4 @@ router.get('/employees', requireRole('super_admin'), async (req, res) => {
     res.status(502).json({ error: err.message })
   }
 })
-// TEMP diagnostic — run the real submitOfficeMinutes and return the raw
-// `populated` result (bypasses the banner interpretation).
-router.post('/create-probe', requireRole('super_admin'), async (req, res) => {
-  try {
-    const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
-    const tm = await submitOfficeMinutes({
-      date: '2026-07-20', location: 'PROBE', time: '09:00',
-      general: 'PROBE general', wins: 'PROBE wins'
-    }, 'Tony Daunt')
-    res.json({
-      formatedNumber: tm.response?.response_data?.formatedNumber,
-      newId: tm.response?.response_data?._id,
-      populated: tm.populated
-    })
-  } catch (err) {
-    res.status(502).json({ error: err.message, stack: (err.stack || '').split('\n').slice(0, 4) })
-  }
-})
-
 module.exports = router

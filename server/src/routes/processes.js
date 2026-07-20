@@ -128,11 +128,11 @@ function teammateBanner(tm, label) {
   if (p && !p.error && p.matched > 0) {
     return `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${where}. ${p.matched} field${p.matched === 1 ? '' : 's'} populated automatically. Open it in Teammate to review and Save/Submit.`
   }
-  if (p && p.error) {
-    return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}, but automatic field population failed (${p.error}). Open it and paste the ${label} sections above into the matching fields.`
+  if (p && p.error === 'creds-unset') {
+    return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}. Automatic field population is not configured, so the form is EMPTY. Open it and paste the ${label} sections above into the matching fields.`
   }
-  // populated === null → no session credentials configured
-  return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}. Automatic field population is not configured, so the form is EMPTY. Open it and paste the ${label} sections above into the matching fields.`
+  const reason = p && p.error ? p.error : 'no fields matched'
+  return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}, but automatic field population failed (${reason}). Open it and paste the ${label} sections above into the matching fields.`
 }
 
 const router = Router()
