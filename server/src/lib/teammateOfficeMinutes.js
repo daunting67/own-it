@@ -1,5 +1,9 @@
 const { tmGet, tmPost } = require('./teammate')
-const { haveCreds, signIn, populateSubmission } = require('./teammateSession')
+const { haveCreds, signIn, populateSubmission, shareSubmission } = require('./teammateSession')
+
+// After the minutes are filled, Teammate emails these people (its "Share form"
+// action). Edit this list to change who gets the office minutes by email.
+const SHARE_WITH = ['Tony Daunt', 'Sandra Grace']
 
 // Teammate "Office Minutes Form - P&I (North) Ltd" field IDs
 const FIELD_IDS = {
@@ -141,6 +145,26 @@ async function submitOfficeMinutes(d, recordedByName) {
       populated = await populateSubmission(newId, values, session)
       populated.attendeesMatched = att.optionVal.length
       populated.attendeesUnmatched = att.unmatched
+
+      // Email the minutes to the standing recipients via Teammate's Share.
+      try {
+        const recipients = SHARE_WITH
+          .map(name => findEmployee(employees, name))
+          .filter(Boolean)
+        if (recipients.length) {
+          const meetingDateNz = new Date(`${meetingDate}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
+          const share = await shareSubmission(
+            newId,
+            recipients.map(e => e._id),
+            `Office minutes for the meeting on ${meetingDateNz}.`,
+            session
+          )
+          populated.sharedWith = recipients.map(e => e.name)
+          populated.notifiedCount = share.notifiedCount
+        }
+      } catch (shareErr) {
+        populated.shareError = shareErr.message
+      }
     } catch (fillErr) {
       populated = { error: fillErr.message }
     }

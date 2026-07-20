@@ -132,6 +132,11 @@ function teammateBanner(tm, label) {
   const p = tm.populated
   if (p && !p.error && p.matched > 0) {
     let msg = `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${where}. ${p.matched} field${p.matched === 1 ? '' : 's'} populated automatically. Open it in Teammate to review and Save/Submit.`
+    if (p.sharedWith && p.sharedWith.length) {
+      msg += `\n📧 Emailed via Teammate to: ${p.sharedWith.join(', ')}.`
+    } else if (p.shareError) {
+      msg += `\n⚠️ Couldn't email it via Teammate (${p.shareError}).`
+    }
     if (p.attendeesUnmatched && p.attendeesUnmatched.length) {
       msg += `\nNote: these attendees weren't on the staff list, so add them manually if needed: ${p.attendeesUnmatched.join(', ')}.`
     }

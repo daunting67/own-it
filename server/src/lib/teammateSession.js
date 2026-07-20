@@ -100,4 +100,15 @@ async function populateSubmission(formId, values, session) {
   return { matched, updated, created, total: (doc.formValue || []).length, response_message: res.response_message }
 }
 
-module.exports = { haveCreds, signIn, getSubmission, populateSubmission, internal }
+// Share a form submission with employees — Teammate emails them (the same as the
+// UI "Share form" action). employeeIds = array of Teammate employee _ids.
+// Returns { notifiedCount }.
+async function shareSubmission(formId, employeeIds, message, session) {
+  const body = { employees: employeeIds, userGroups: [], message: message || '' }
+  const res = await internal('POST', `/v3/form-submission/${formId}/share`, session, body)
+  const ok = res?.response_code === 200
+  if (!ok) throw new Error(`share did not confirm: ${JSON.stringify(res).slice(0, 200)}`)
+  return { notifiedCount: res?.response_data?.notifiedCount ?? null }
+}
+
+module.exports = { haveCreds, signIn, getSubmission, populateSubmission, shareSubmission, internal }
