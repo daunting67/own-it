@@ -171,7 +171,7 @@ router.post('/run', uploadFiles, async (req, res) => {
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 8192,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userContent }]
@@ -206,8 +206,9 @@ router.post('/run', uploadFiles, async (req, res) => {
     res.json({ id: runId, output, document: buf.toString('base64'), filename, stats })
 
   } catch (err) {
+    console.error('SOQ run failed:', err)
     await db.from('ProcessRun').update({ output: err.message, status: 'failed' }).eq('id', runId)
-    res.status(500).json({ error: 'Schedule of Quantities failed', details: err.message })
+    res.status(500).json({ error: err.message || 'Schedule of Quantities failed' })
   }
 })
 
