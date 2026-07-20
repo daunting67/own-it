@@ -3,7 +3,7 @@ const { haveCreds, signIn, populateSubmission, shareSubmission } = require('./te
 
 // After the minutes are filled, Teammate emails these people (its "Share form"
 // action). Edit this list to change who gets the office minutes by email.
-const SHARE_WITH = ['Tony Daunt', 'Sandra Grace']
+const SHARE_WITH = ['Tony Daunt']
 
 // Teammate "Office Minutes Form - P&I (North) Ltd" field IDs
 const FIELD_IDS = {
