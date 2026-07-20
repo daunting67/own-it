@@ -2,32 +2,9 @@ const { Router } = require('express')
 const { requireAuth, requireRole } = require('../middleware/auth')
 const { tmGet, tmPost, tmPut } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
-const { signIn, internal } = require('../lib/teammateSession')
 
 const router = Router()
 router.use(requireAuth)
-
-// TEMP — probe the v3 share endpoint's expected schema by sending variants.
-router.post('/share-probe', requireRole('super_admin'), async (req, res) => {
-  try {
-    const session = await signIn()
-    const formId = req.body?.formId || '6a5d5734d20ca39067e8dbda'
-    const keys = ['employeeIds','userGroupIds','recipientIds','shareWithEmployees','notifyEmployeeIds','assigneeIds','toEmployeeIds','employeeIdList','memberIds','employeeList','userGroupList','recipientEmployeeIds']
-    const bodies = keys.map(k => ({ [k]: [] }))
-    const out = []
-    for (const b of bodies) {
-      try {
-        const r = await internal('POST', `/v3/form-submission/${formId}/share`, session, b)
-        out.push({ sent: Object.keys(b), ok: true, resp: JSON.stringify(r).slice(0, 200) })
-      } catch (e) {
-        out.push({ sent: Object.keys(b), err: e.message.slice(0, 260) })
-      }
-    }
-    res.json({ out })
-  } catch (err) {
-    res.status(502).json({ error: err.message })
-  }
-})
 
 // Reference data lookups (super_admin only — used for wiring/diagnostics)
 router.get('/formdata', requireRole('super_admin'), async (req, res) => {
