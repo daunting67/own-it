@@ -128,6 +128,12 @@ function uploadFiles(req, res, next) {
 router.post('/run', uploadFiles, async (req, res) => {
   const files = req.files || []
   if (!files.length) return res.status(400).json({ error: 'Upload at least one PDF plan set' })
+  const emptyFile = files.find(f => !f.buffer || f.buffer.length === 0)
+  if (emptyFile) {
+    return res.status(400).json({
+      error: `"${emptyFile.originalname}" is empty (0 bytes). If it's stored in iCloud Drive/OneDrive, make sure it has fully downloaded to your Mac (not just showing as a placeholder), then try again.`
+    })
+  }
 
   const projectName = (req.body.projectName || '').trim()
   const notes = (req.body.notes || '').trim()
