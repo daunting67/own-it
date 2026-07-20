@@ -1,4 +1,5 @@
 const { tmGet, tmPost } = require('./teammate')
+const { haveCreds, signIn, populateSubmission } = require('./teammateSession')
 
 // Teammate DEBRIEF form field IDs (the three ownership textareas)
 const FIELD_IDS = {
@@ -77,7 +78,24 @@ async function submitDebrief(d) {
   if (res.response_code && res.response_code !== 200 && res.response_code !== 201) {
     throw new Error(`Teammate rejected the form: ${JSON.stringify(res).slice(0, 300)}`)
   }
-  return { response: res, sentBody: body, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name }
+
+  // Public API drops field values — populate them via the session endpoint.
+  const newId = res.response_data?._id
+  let populated = null
+  if (newId && haveCreds()) {
+    try {
+      const values = {}
+      for (const [fieldId, value] of Object.entries(body.fields)) {
+        values[fieldId] = { value: String(value) }
+      }
+      const session = await signIn()
+      populated = await populateSubmission(newId, values, session)
+    } catch (fillErr) {
+      populated = { error: fillErr.message }
+    }
+  }
+
+  return { response: res, sentBody: body, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name, populated }
 }
 
 module.exports = { submitDebrief }

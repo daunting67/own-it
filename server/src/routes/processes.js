@@ -120,6 +120,21 @@ function renderReviewText(r) {
   ].join('\n')
 }
 
+// Build an honest banner about the Teammate submission + field population.
+function teammateBanner(tm, label) {
+  const fs = tm.response?.response_data?.formatedNumber || tm.response?.response_data?.formNumber || tm.response?.response_data?._id || ''
+  const where = `recorded by ${tm.coordinator}, ${tm.workplace} / ${tm.branch}`
+  const p = tm.populated
+  if (p && !p.error && p.matched > 0) {
+    return `\n\n✅ Submitted to Teammate${fs ? ` (${fs})` : ''} — ${where}. ${p.matched} field${p.matched === 1 ? '' : 's'} populated automatically. Open it in Teammate to review and Save/Submit.`
+  }
+  if (p && p.error) {
+    return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}, but automatic field population failed (${p.error}). Open it and paste the ${label} sections above into the matching fields.`
+  }
+  // populated === null → no session credentials configured
+  return `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — ${where}. Automatic field population is not configured, so the form is EMPTY. Open it and paste the ${label} sections above into the matching fields.`
+}
+
 const router = Router()
 
 router.use(requireAuth)
@@ -253,9 +268,7 @@ router.post('/run/:id', async (req, res) => {
       ].join('\n')
       try {
         const tm = await submitOfficeMinutes(parsed, resolveTeammateName(req.user))
-        const fs = tm.response?.response_data?.formatedNumber || tm.response?.response_data?._id || ''
-        output += `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — recorded by ${tm.coordinator}, ${tm.workplace} / ${tm.branch}.`
-        output += `\nTeammate's API cannot save the section text, so the form is EMPTY. Open it in Teammate and paste the sections above into the matching fields.`
+        output += teammateBanner(tm, 'minutes')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
       }
@@ -288,9 +301,7 @@ router.post('/run/:id', async (req, res) => {
       output = renderDebriefText(parsed)
       try {
         const tm = await submitDebrief(parsed)
-        const fs = tm.response?.response_data?.formatedNumber || tm.response?.response_data?.formNumber || tm.response?.response_data?._id || ''
-        output += `\n\n⚠️ Form shell created in Teammate${fs ? ` (${fs})` : ''} — coordinator ${tm.coordinator}, ${tm.workplace} / ${tm.branch}.`
-        output += `\nTeammate's API cannot save the section text, so the form is EMPTY. Open it in Teammate and paste the sections above into the matching fields.`
+        output += teammateBanner(tm, 'debrief')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`
       }

@@ -1,4 +1,5 @@
 const { tmGet, tmPost } = require('./teammate')
+const { haveCreds, signIn, populateSubmission } = require('./teammateSession')
 
 // Teammate "Office Minutes Form - P&I (North) Ltd" field IDs
 const FIELD_IDS = {
@@ -87,7 +88,25 @@ async function submitOfficeMinutes(d, recordedByName) {
   if (res.response_code && res.response_code !== 200 && res.response_code !== 201) {
     throw new Error(`Teammate rejected the form: ${JSON.stringify(res).slice(0, 300)}`)
   }
-  return { response: res, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name }
+
+  // The public API creates the shell but drops field values. Populate them via
+  // the session-authenticated internal endpoint (read-modify-write).
+  const newId = res.response_data?._id
+  let populated = null
+  if (newId && haveCreds()) {
+    try {
+      const values = {}
+      for (const [fieldId, value] of Object.entries(body.fields)) {
+        values[fieldId] = { value: String(value) }
+      }
+      const session = await signIn()
+      populated = await populateSubmission(newId, values, session)
+    } catch (fillErr) {
+      populated = { error: fillErr.message }
+    }
+  }
+
+  return { response: res, coordinator: coordinator.name, workplace: workplace.name, branch: branch.name, populated }
 }
 
 module.exports = { submitOfficeMinutes }
