@@ -8,6 +8,7 @@ const invoicesRouter = require('./routes/invoices')
 const processesRouter = require('./routes/processes')
 const otterRouter = require('./routes/otter')
 const teammateRouter = require('./routes/teammate')
+const soqRouter = require('./routes/soq')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -33,6 +34,7 @@ app.use('/api/invoices', invoicesRouter)
 app.use('/api/processes', processesRouter)
 app.use('/api/otter', otterRouter)
 app.use('/api/teammate', teammateRouter)
+app.use('/api/soq', soqRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-20-teammate-share-live' }))
 

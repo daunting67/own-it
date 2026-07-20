@@ -58,4 +58,17 @@ export const api = {
   // Otter
   getOtterSpeeches: () => request('/api/otter/speeches'),
   getOtterTranscript: (id) => request(`/api/otter/transcript/${id}`),
+
+  // Schedule of Quantities
+  getSoqRuns: () => request('/api/soq/runs'),
+  getSoqRunDocument: (id) => request(`/api/soq/runs/${id}/document`),
+  runSoq: async (formData) => {
+    const token = getToken()
+    const headers = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch(`${BASE}/api/soq/run`, { method: 'POST', headers, body: formData })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || data.details || 'Request failed')
+    return data
+  },
 }
