@@ -7,6 +7,11 @@ const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
+const { rosterPromptBlock } = require('../lib/staffRoster')
+
+// Processes whose input is an Otter transcript benefit from the staff roster
+// (name correction). Keyed by process id.
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -216,6 +221,10 @@ router.post('/run/:id', async (req, res) => {
     const anthropicKey = process.env.ANTHROPIC_API_KEY
     if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured')
 
+    const systemPrompt = ROSTER_PROCESSES.has(proc.id)
+      ? `${proc.systemPrompt}\n\n${rosterPromptBlock()}`
+      : proc.systemPrompt
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -226,7 +235,7 @@ router.post('/run/:id', async (req, res) => {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: proc.maxTokens || 4096,
-        system: proc.systemPrompt,
+        system: systemPrompt,
         messages: [{ role: 'user', content: input || 'Run this process.' }]
       })
     })
