@@ -12,7 +12,8 @@ router.post('/share-probe', requireRole('super_admin'), async (req, res) => {
   try {
     const session = await signIn()
     const formId = req.body?.formId || '6a5d5734d20ca39067e8dbda'
-    const bodies = [ {}, { recipients: [] }, { employee: [] }, { notifyEmployees: [] } ]
+    const keys = ['employeeIds','userGroupIds','recipientIds','shareWithEmployees','notifyEmployeeIds','assigneeIds','toEmployeeIds','employeeIdList','memberIds','employeeList','userGroupList','recipientEmployeeIds']
+    const bodies = keys.map(k => ({ [k]: [] }))
     const out = []
     for (const b of bodies) {
       try {

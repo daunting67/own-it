@@ -34,7 +34,7 @@ app.use('/api/processes', processesRouter)
 app.use('/api/otter', otterRouter)
 app.use('/api/teammate', teammateRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-20-teammate-share-probe' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-20-teammate-share-probe2' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
