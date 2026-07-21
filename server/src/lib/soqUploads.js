@@ -11,10 +11,12 @@ async function ensureBucket() {
   if (error && !/already exists/i.test(error.message)) throw error
 }
 
+const MISSING_BUCKET = /bucket not found|resource does not exist/i
+
 // Returns { path, signedUrl } the browser can PUT the file to directly.
 async function createUploadUrl(path) {
   let { data, error } = await db.storage.from(BUCKET).createSignedUploadUrl(path)
-  if (error && /bucket not found/i.test(error.message)) {
+  if (error && MISSING_BUCKET.test(error.message)) {
     await ensureBucket()
     ;({ data, error } = await db.storage.from(BUCKET).createSignedUploadUrl(path))
   }
