@@ -163,7 +163,7 @@ function SoqTab() {
         <div style={{ marginTop: 20, padding: 16, background: 'var(--bg-secondary)', borderRadius: 6 }}>
           <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginBottom: 14 }}>{result.output}</div>
           <button className="btn btn-primary" onClick={() => saveDocFile(result)}>
-            📄 Download {result.filename}
+            📄 Download Schedule (.xlsx)
           </button>
         </div>
       )}
