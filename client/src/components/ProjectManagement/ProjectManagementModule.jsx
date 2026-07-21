@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { api } from '../../lib/api'
+import { api, uploadToSignedUrl } from '../../lib/api'
 
 const PO_TOOL_URL = 'http://5.78.210.250'
 
@@ -24,6 +24,7 @@ function SoqTab() {
   const [projectName, setProjectName] = useState('')
   const [notes, setNotes] = useState('')
   const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState('')
   const [result, setResult] = useState(null) // { output, document, filename, stats }
   const [error, setError] = useState(null)
   const [history, setHistory] = useState([])
@@ -44,17 +45,27 @@ function SoqTab() {
     setResult(null)
     setError(null)
     try {
-      const form = new FormData()
-      files.forEach(f => form.append('files', f))
-      if (projectName.trim()) form.append('projectName', projectName.trim())
-      if (notes.trim()) form.append('notes', notes.trim())
-      const res = await api.runSoq(form)
+      const empty = files.find(f => f.size === 0)
+      if (empty) {
+        throw new Error(`"${empty.name}" is empty (0 bytes). If it's stored in iCloud/OneDrive, open it once so it fully downloads, then try again.`)
+      }
+      const paths = []
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i]
+        setProgress(`Uploading ${f.name} (${i + 1}/${files.length})…`)
+        const { path, signedUrl } = await api.getSoqUploadUrl(f.name)
+        await uploadToSignedUrl(signedUrl, f)
+        paths.push(path)
+      }
+      setProgress('Reading plans & building schedule… (can take a minute)')
+      const res = await api.runSoq(paths, projectName.trim(), notes.trim())
       setResult(res)
       api.getSoqRuns().then(setHistory).catch(() => {})
     } catch (err) {
       setError(err.message)
     } finally {
       setRunning(false)
+      setProgress('')
     }
   }
 
@@ -139,7 +150,7 @@ function SoqTab() {
         disabled={running || !files.length}
         style={{ opacity: running || !files.length ? 0.6 : 1, cursor: running || !files.length ? 'not-allowed' : 'pointer' }}
       >
-        {running ? 'Reading plans & building schedule… (can take a minute)' : 'Generate Schedule →'}
+        {running ? (progress || 'Working…') : 'Generate Schedule →'}
       </button>
 
       {error && (

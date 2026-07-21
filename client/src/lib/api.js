@@ -62,13 +62,21 @@ export const api = {
   // Schedule of Quantities
   getSoqRuns: () => request('/api/soq/runs'),
   getSoqRunDocument: (id) => request(`/api/soq/runs/${id}/document`),
-  runSoq: async (formData) => {
-    const token = getToken()
-    const headers = {}
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(`${BASE}/api/soq/run`, { method: 'POST', headers, body: formData })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error || data.details || 'Request failed')
-    return data
-  },
+  getSoqUploadUrl: (filename) => request('/api/soq/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  runSoq: (paths, projectName, notes) =>
+    request('/api/soq/run', { method: 'POST', body: JSON.stringify({ paths, projectName, notes }) }),
+}
+
+// Upload a File straight to Supabase Storage via a signed upload URL (bypasses the
+// backend's serverless request-size limit). Mirrors storage-js uploadToSignedUrl.
+export async function uploadToSignedUrl(signedUrl, file) {
+  const body = new FormData()
+  body.append('cacheControl', '3600')
+  body.append('', file)
+  const res = await fetch(signedUrl, { method: 'PUT', headers: { 'x-upsert': 'true' }, body })
+  if (!res.ok) {
+    let msg = `Upload failed (${res.status})`
+    try { msg = (await res.json()).message || msg } catch { /* ignore */ }
+    throw new Error(msg)
+  }
 }

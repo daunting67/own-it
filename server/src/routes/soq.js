@@ -1,22 +1,13 @@
 const { Router } = require('express')
-const multer = require('multer')
 const { randomUUID } = require('crypto')
 const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const { buildScheduleXlsx } = require('../lib/buildScheduleXlsx')
 const { saveSoqDoc, getSoqDoc } = require('../lib/soqDocs')
+const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/soqUploads')
 
 const PROCESS_ID = 'schedule-of-quantities'
 const PROCESS_NAME = 'Schedule of Quantities'
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024, files: 10 },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype !== 'application/pdf') return cb(new Error('Only PDF files are accepted'))
-    cb(null, true)
-  }
-})
 
 const SYSTEM_PROMPT = `You are a Quantity Surveyor for P&I (North) Ltd (Pipeline & Infrastructure), reading
 a set of civil / resource-consent plans (attached as PDFs) to produce a Materials & Quantities
@@ -97,6 +88,10 @@ function slugFilename(name) {
   return (name || 'Schedule').replace(/[^\w\- ]+/g, '').trim().slice(0, 80)
 }
 
+function safePathPart(name) {
+  return (name || 'file.pdf').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
+}
+
 const router = Router()
 router.use(requireAuth)
 
@@ -118,32 +113,38 @@ router.get('/runs/:id/document', async (req, res) => {
   res.json(doc)
 })
 
-function uploadFiles(req, res, next) {
-  upload.array('files', 10)(req, res, (err) => {
-    if (err) return res.status(400).json({ error: err.message })
-    next()
-  })
-}
-
-router.post('/run', uploadFiles, async (req, res) => {
-  const files = req.files || []
-  if (!files.length) return res.status(400).json({ error: 'Upload at least one PDF plan set' })
-  const emptyFile = files.find(f => !f.buffer || f.buffer.length === 0)
-  if (emptyFile) {
-    return res.status(400).json({
-      error: `"${emptyFile.originalname}" is empty (0 bytes). If it's stored in iCloud Drive/OneDrive, make sure it has fully downloaded to your Mac (not just showing as a placeholder), then try again.`
-    })
+// Step 1: browser asks for a signed URL to upload each plan PDF straight to Supabase
+// Storage, bypassing Vercel's ~4.5MB serverless request-body limit. Returns the storage
+// path (used later by /run) and the signed URL to PUT the file to.
+router.post('/upload-url', async (req, res) => {
+  const filename = safePathPart(req.body?.filename)
+  if (!/\.pdf$/i.test(filename)) return res.status(400).json({ error: 'Only PDF files are accepted' })
+  try {
+    const path = `${randomUUID()}/${filename}`
+    const { signedUrl } = await createUploadUrl(path)
+    res.json({ path, signedUrl })
+  } catch (err) {
+    console.error('SOQ upload-url failed:', err)
+    res.status(500).json({ error: err.message || 'Could not start upload' })
   }
+})
+
+// Step 2: browser has uploaded the PDFs; it sends the storage paths here. We download
+// them server-side, run the take-off, build the workbook, then delete the temp uploads.
+router.post('/run', async (req, res) => {
+  const paths = Array.isArray(req.body?.paths) ? req.body.paths.filter(p => typeof p === 'string' && p) : []
+  if (!paths.length) return res.status(400).json({ error: 'Upload at least one PDF plan set' })
 
   const projectName = (req.body.projectName || '').trim()
   const notes = (req.body.notes || '').trim()
+  const filenames = paths.map(p => p.split('/').pop())
 
   const runId = randomUUID()
   await db.from('ProcessRun').insert({
     id: runId,
     processId: PROCESS_ID,
     processName: PROCESS_NAME,
-    input: files.map(f => f.originalname).join(', ') + (projectName ? ` — ${projectName}` : ''),
+    input: filenames.join(', ') + (projectName ? ` — ${projectName}` : ''),
     output: null,
     status: 'running',
     runBy: req.user?.email || 'unknown',
@@ -154,6 +155,10 @@ router.post('/run', uploadFiles, async (req, res) => {
     const anthropicKey = process.env.ANTHROPIC_API_KEY
     if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured')
 
+    const buffers = await Promise.all(paths.map(downloadUpload))
+    const emptyIdx = buffers.findIndex(b => !b || b.length === 0)
+    if (emptyIdx !== -1) throw new Error(`"${filenames[emptyIdx]}" arrived empty — please re-upload it`)
+
     const userContent = [
       {
         type: 'text',
@@ -163,9 +168,9 @@ router.post('/run', uploadFiles, async (req, res) => {
           'Read the attached plan set(s) and produce the take-off JSON as specified.'
         ].filter(Boolean).join('\n')
       },
-      ...files.map(f => ({
+      ...buffers.map(b => ({
         type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') }
+        source: { type: 'base64', media_type: 'application/pdf', data: b.toString('base64') }
       }))
     ]
 
@@ -209,11 +214,13 @@ router.post('/run', uploadFiles, async (req, res) => {
     ].join('\n')
 
     await db.from('ProcessRun').update({ output, status: 'completed' }).eq('id', runId)
+    removeUploads(paths).catch(() => {}) // temp PDFs no longer needed
     res.json({ id: runId, output, document: buf.toString('base64'), filename, stats })
 
   } catch (err) {
     console.error('SOQ run failed:', err)
     await db.from('ProcessRun').update({ output: err.message, status: 'failed' }).eq('id', runId)
+    removeUploads(paths).catch(() => {})
     res.status(500).json({ error: err.message || 'Schedule of Quantities failed' })
   }
 })
