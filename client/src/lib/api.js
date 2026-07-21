@@ -68,12 +68,14 @@ export const api = {
 }
 
 // Upload a File straight to Supabase Storage via a signed upload URL (bypasses the
-// backend's serverless request-size limit). Mirrors storage-js uploadToSignedUrl.
+// backend's serverless request-size limit). Sends the file as a raw body — the signed
+// URL's token is self-authenticating, so no Supabase API key is needed client-side.
 export async function uploadToSignedUrl(signedUrl, file) {
-  const body = new FormData()
-  body.append('cacheControl', '3600')
-  body.append('', file)
-  const res = await fetch(signedUrl, { method: 'PUT', headers: { 'x-upsert': 'true' }, body })
+  const res = await fetch(signedUrl, {
+    method: 'PUT',
+    headers: { 'x-upsert': 'true', 'cache-control': '3600', 'content-type': 'application/pdf' },
+    body: file
+  })
   if (!res.ok) {
     let msg = `Upload failed (${res.status})`
     try { msg = (await res.json()).message || msg } catch { /* ignore */ }
