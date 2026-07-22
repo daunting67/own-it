@@ -72,15 +72,21 @@ function RateCardModal({ supplier, onSave, onClose }) {
   )
 }
 
-function AddSupplierModal({ onSave, onClose }) {
-  const [form, setForm] = useState({ name: '', contact: '', email: '', phone: '' })
+function SupplierFormModal({ supplier, onSave, onClose }) {
+  const isEdit = !!supplier
+  const [form, setForm] = useState({
+    name: supplier?.name || '',
+    contact: supplier?.contact || '',
+    email: supplier?.email || '',
+    phone: supplier?.phone || '',
+  })
   function set(f, v) { setForm(prev => ({ ...prev, [f]: v })) }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Add supplier</h2>
+          <h2>{isEdit ? 'Edit supplier' : 'Add supplier'}</h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
@@ -105,7 +111,7 @@ function AddSupplierModal({ onSave, onClose }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(form)} disabled={!form.name.trim()}>Add supplier</button>
+          <button className="btn btn-primary" onClick={() => onSave(form)} disabled={!form.name.trim()}>{isEdit ? 'Save changes' : 'Add supplier'}</button>
         </div>
       </div>
     </div>
@@ -114,16 +120,28 @@ function AddSupplierModal({ onSave, onClose }) {
 
 export default function SupplierManager({ suppliers, onAdd, onUpdate, onDelete }) {
   const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState(null)
   const [rateCardFor, setRateCardFor] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   async function handleAdd(data) {
     await onAdd(data)
     setShowAdd(false)
   }
 
+  async function handleEditSave(data) {
+    await onUpdate(editing.id, data)
+    setEditing(null)
+  }
+
   async function handleRateSave(id, rates) {
     await onUpdate(id, { rates })
     setRateCardFor(null)
+  }
+
+  async function handleDelete(id) {
+    await onDelete(id)
+    setConfirmDelete(null)
   }
 
   return (
@@ -152,7 +170,17 @@ export default function SupplierManager({ suppliers, onAdd, onUpdate, onDelete }
                     }
                   </td>
                   <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setRateCardFor(s)}>Rate card</button>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setRateCardFor(s)}>Rate card</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setEditing(s)}>Edit</button>
+                      {confirmDelete === s.id
+                        ? <>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(s.id)}>Delete</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                          </>
+                        : <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirmDelete(s.id)}>✕</button>
+                      }
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -160,7 +188,10 @@ export default function SupplierManager({ suppliers, onAdd, onUpdate, onDelete }
           </table>
         )}
       </div>
-      {showAdd && <AddSupplierModal onSave={handleAdd} onClose={() => setShowAdd(false)} />}
+      {showAdd && <SupplierFormModal onSave={handleAdd} onClose={() => setShowAdd(false)} />}
+      {editing && (
+        <SupplierFormModal supplier={editing} onSave={handleEditSave} onClose={() => setEditing(null)} />
+      )}
       {rateCardFor && (
         <RateCardModal
           supplier={rateCardFor}
