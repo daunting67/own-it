@@ -127,7 +127,7 @@ async function submitOfficeMinutes(d, recordedByName) {
   let populated = null
   if (!newId) {
     populated = { error: 'no form _id returned by create' }
-  } else if (!haveCreds()) {
+  } else if (!haveCreds(recordedByName)) {
     populated = { error: 'creds-unset' }
   } else {
     try {
@@ -141,7 +141,7 @@ async function submitOfficeMinutes(d, recordedByName) {
       const apo = resolveEmployees(d.apologies, employees)
       if (att.optionVal.length) values[ATTENDEES_FIELD] = { value: '', optionVal: att.optionVal }
       if (apo.optionVal.length) values[APOLOGIES_FIELD] = { value: '', optionVal: apo.optionVal }
-      const session = await signIn()
+      const session = await signIn(recordedByName)
       populated = await populateSubmission(newId, values, session)
       populated.attendeesMatched = att.optionVal.length
       populated.attendeesUnmatched = att.unmatched

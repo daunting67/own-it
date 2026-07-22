@@ -320,9 +320,13 @@ router.post('/run/:id', async (req, res) => {
     if (proc.structured && proc.id === 'debrief') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
+      // The person submitting via the portal is the coordinator (matches
+      // Office Minutes). Falls back to the transcript-derived name.
+      const submitter = resolveTeammateName(req.user)
+      if (submitter) parsed.coordinator = submitter
       output = renderDebriefText(parsed)
       try {
-        const tm = await submitDebrief(parsed)
+        const tm = await submitDebrief(parsed, submitter)
         output += teammateBanner(tm, 'debrief')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`

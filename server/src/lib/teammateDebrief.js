@@ -28,7 +28,10 @@ function todayNZ() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
 }
 
-async function submitDebrief(d) {
+// d = the structured debrief object; recordedByName = the portal user's name,
+// used as the coordinator (matches Office Minutes) so forms submitted by a
+// staff member land under them.
+async function submitDebrief(d, recordedByName) {
   const fd = (await tmGet('/form/data')).response_data
   const template = fd.formTemplate.find(t => (t.sortValue || '').trim() === 'debrief')
   if (!template) throw new Error('DEBRIEF form template not found in Teammate')
@@ -42,7 +45,7 @@ async function submitDebrief(d) {
   if (!branch) throw new Error(`No branch found for workplace ${workplace.name}: ${JSON.stringify(branchRes).slice(0, 200)}`)
 
   const employees = fd.listEmployee || []
-  const coordinator = findEmployee(employees, d.coordinator) || findEmployee(employees, 'Tony Daunt')
+  const coordinator = findEmployee(employees, recordedByName) || findEmployee(employees, d.coordinator) || findEmployee(employees, 'Tony Daunt')
   if (!coordinator) throw new Error('Could not resolve coordinator employee in Teammate')
 
   const tasks = (d.actions || []).slice(0, 5).map(a => {
@@ -82,13 +85,13 @@ async function submitDebrief(d) {
   // Public API drops field values — populate them via the session endpoint.
   const newId = res.response_data?._id
   let populated = null
-  if (newId && haveCreds()) {
+  if (newId && haveCreds(recordedByName)) {
     try {
       const values = {}
       for (const [fieldId, value] of Object.entries(body.fields)) {
         values[fieldId] = { value: String(value) }
       }
-      const session = await signIn()
+      const session = await signIn(recordedByName)
       populated = await populateSubmission(newId, values, session)
     } catch (fillErr) {
       populated = { error: fillErr.message }

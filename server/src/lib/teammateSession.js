@@ -10,15 +10,40 @@
 
 const ROOT = 'https://my.teammateapp.com/api'
 
-function haveCreds() {
-  return !!(process.env.TEAMMATE_USER_EMAIL && process.env.TEAMMATE_USER_PASSWORD)
+// Resolve the Teammate login to use for a given submitter name.
+//
+// Per-user logins live in the TEAMMATE_USER_LOGINS env var — a JSON object
+// keyed by the submitter's portal name (lowercased), each value being
+// { "userName": "<their Teammate email>", "password": "<their Teammate password>" }.
+// e.g.  {"sandra grace":{"userName":"sandra@pipelines.nz","password":"..."}}
+// If a submitter has no entry, we fall back to the default account
+// (TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD), so forms are still recorded
+// — just under the default login rather than the individual's.
+function loginFor(submitterName) {
+  const def = { userName: process.env.TEAMMATE_USER_EMAIL, password: process.env.TEAMMATE_USER_PASSWORD }
+  const key = String(submitterName || '').toLowerCase().trim()
+  if (!key) return def
+  let map = {}
+  try { map = JSON.parse(process.env.TEAMMATE_USER_LOGINS || '{}') } catch { map = {} }
+  const entry = map[key]
+  if (entry && entry.userName && entry.password) {
+    return { userName: entry.userName, password: entry.password }
+  }
+  return def
 }
 
-// Log in and return a session { token, companyId, userId, employeeId }.
-async function signIn() {
-  const userName = process.env.TEAMMATE_USER_EMAIL
-  const password = process.env.TEAMMATE_USER_PASSWORD
-  if (!userName || !password) throw new Error('TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD not configured')
+// Whether we have Teammate creds to submit as this person (their own or the
+// default fallback).
+function haveCreds(submitterName) {
+  const { userName, password } = loginFor(submitterName)
+  return !!(userName && password)
+}
+
+// Log in (as the submitter if they have their own creds, else the default
+// account) and return a session { token, companyId, userId, employeeId }.
+async function signIn(submitterName) {
+  const { userName, password } = loginFor(submitterName)
+  if (!userName || !password) throw new Error('No Teammate login configured (set TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD, or add the user to TEAMMATE_USER_LOGINS)')
   const res = await fetch(`${ROOT}/signIn`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
