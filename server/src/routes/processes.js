@@ -153,27 +153,33 @@ const router = Router()
 
 router.use(requireAuth)
 
-// List available processes for this user's role
+// Whether this user may see/run a process, under the department access model.
+// Administrators can access everything; adminOnly processes are admins only;
+// otherwise the user must hold the process's department.
+function canAccessProcess(user, proc) {
+  if (user?.admin) return true
+  if (proc.adminOnly) return false
+  if (proc.dept) return Array.isArray(user?.departments) && user.departments.includes(proc.dept)
+  return true
+}
+
+// List processes this user may run
 router.get('/', (req, res) => {
-  const userRole = req.user?.role
   const available = PROCESSES
-    .filter(p => !p.rolesAllowed || p.rolesAllowed.includes(userRole))
+    .filter(p => canAccessProcess(req.user, p))
     .map(({ systemPrompt, ...p }) => p) // never expose the system prompt to the frontend
   res.json(available)
 })
 
-// Get run history (last 50 runs), limited to processes this user's role may run
+// Get run history (last 50 runs), limited to processes this user may run
 router.get('/runs', async (req, res) => {
-  const userRole = req.user?.role
   let query = db
     .from('ProcessRun')
     .select('*')
     .order('createdAt', { ascending: false })
     .limit(50)
-  if (userRole !== 'super_admin') {
-    const allowedIds = PROCESSES
-      .filter(p => !p.rolesAllowed || p.rolesAllowed.includes(userRole))
-      .map(p => p.id)
+  if (!req.user?.admin) {
+    const allowedIds = PROCESSES.filter(p => canAccessProcess(req.user, p)).map(p => p.id)
     query = query.in('processId', allowedIds)
   }
   const { data, error } = await query
@@ -181,14 +187,13 @@ router.get('/runs', async (req, res) => {
   res.json(data || [])
 })
 
-// Download the stored document for a run (role-gated like the run itself)
+// Download the stored document for a run (gated like the run itself)
 router.get('/runs/:id/document', async (req, res) => {
   const { data: run, error } = await db.from('ProcessRun').select('id, processId').eq('id', req.params.id).single()
   if (error || !run) return res.status(404).json({ error: 'Run not found' })
 
   const proc = PROCESSES.find(p => p.id === run.processId)
-  const userRole = req.user?.role
-  if (userRole !== 'super_admin' && proc?.rolesAllowed && !proc.rolesAllowed.includes(userRole)) {
+  if (proc && !canAccessProcess(req.user, proc)) {
     return res.status(403).json({ error: 'You do not have permission to view this document' })
   }
 
@@ -202,8 +207,7 @@ router.post('/run/:id', async (req, res) => {
   const proc = PROCESSES.find(p => p.id === req.params.id)
   if (!proc) return res.status(404).json({ error: 'Process not found' })
 
-  const userRole = req.user?.role
-  if (proc.rolesAllowed && !proc.rolesAllowed.includes(userRole)) {
+  if (!canAccessProcess(req.user, proc)) {
     return res.status(403).json({ error: 'You do not have permission to run this process' })
   }
 

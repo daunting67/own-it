@@ -67,13 +67,16 @@ export default function App() {
         />
         <div className="content">
           <div className="content-inner">
-            {dept === 'dashboard' && <Dashboard onNavigate={setDept} />}
-            {dept === 'people' && <PeopleModule onSaveStateChange={onSaveStateChange} />}
-            {dept === 'payroll' && <PayrollModule onSaveStateChange={onSaveStateChange} />}
-            {dept === 'meetings' && <MeetingsModule />}
-            {dept === 'projects' && <ProjectManagementModule />}
-            {dept === 'users' && user?.role === 'super_admin' && <UsersModule />}
-            {!['dashboard', 'people', 'payroll', 'meetings', 'projects', 'users'].includes(dept) && <ComingSoon dept={dept} />}
+            {(() => {
+              const can = (d) => user?.admin || (user?.departments || []).includes(d)
+              if (dept === 'dashboard') return <Dashboard onNavigate={setDept} />
+              if (dept === 'people') return can('people') ? <PeopleModule onSaveStateChange={onSaveStateChange} /> : <ComingSoon dept={dept} />
+              if (dept === 'payroll') return can('payroll') ? <PayrollModule onSaveStateChange={onSaveStateChange} /> : <ComingSoon dept={dept} />
+              if (dept === 'meetings') return can('meetings') ? <MeetingsModule /> : <ComingSoon dept={dept} />
+              if (dept === 'projects') return can('projects') ? <ProjectManagementModule /> : <ComingSoon dept={dept} />
+              if (dept === 'users') return user?.admin ? <UsersModule /> : <ComingSoon dept={dept} />
+              return <ComingSoon dept={dept} />
+            })()}
           </div>
         </div>
       </main>

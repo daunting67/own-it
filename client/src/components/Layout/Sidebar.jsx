@@ -1,23 +1,13 @@
 import { useAuth } from '../../contexts/AuthContext'
 
-const ROLE_LABELS = {
-  super_admin: 'Super admin',
-  director: 'Director',
-  hr_manager: 'HR manager',
-  payroll_officer: 'Payroll officer',
-  hs_manager: 'H&S manager',
-  ops_manager: 'Ops manager',
-  site_manager: 'Site manager',
-  trainer: 'Trainer',
-  worker: 'Worker',
-}
-
+// Departments a person can be assigned. Dashboard is always visible; Users is
+// administrators only. The "soon" items are not yet built.
 const ITEMS = [
-  { id: 'dashboard',   label: 'Dashboard',         live: true },
-  { id: 'people',      label: 'HR & People',       live: true },
-  { id: 'payroll',     label: 'Payroll',           live: true },
-  { id: 'meetings',    label: 'Meetings',          live: true },
-  { id: 'projects',    label: 'Project Management', live: true },
+  { id: 'dashboard',   label: 'Dashboard',         live: true,  always: true },
+  { id: 'people',      label: 'HR & People',       live: true,  dept: 'people' },
+  { id: 'payroll',     label: 'Payroll',           live: true,  dept: 'payroll' },
+  { id: 'meetings',    label: 'Meetings',          live: true,  dept: 'meetings' },
+  { id: 'projects',    label: 'Project Management', live: true, dept: 'projects' },
   { id: 'hs',          label: 'Health & Safety',   live: false },
   { id: 'operations',  label: 'Operations',        live: false },
   { id: 'training',    label: 'Training',          live: false },
@@ -26,9 +16,13 @@ const ITEMS = [
 
 export default function Sidebar({ active, onSelect }) {
   const { user, logout } = useAuth()
-  const items = user?.role === 'super_admin'
-    ? [...ITEMS, { id: 'users', label: 'Users', live: true }]
-    : ITEMS
+  const depts = user?.departments || []
+  const visible = ITEMS.filter(item =>
+    item.always || user?.admin || !item.dept || depts.includes(item.dept)
+  )
+  const items = user?.admin
+    ? [...visible, { id: 'users', label: 'Users', live: true }]
+    : visible
 
   const initials = user?.name
     ? user.name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()
@@ -61,7 +55,7 @@ export default function Sidebar({ active, onSelect }) {
           <div className="user-avatar">{initials}</div>
           <div>
             <div className="user-name">{user?.name}</div>
-            <div className="user-role">{ROLE_LABELS[user?.role] || user?.role}</div>
+            <div className="user-role">{user?.admin ? 'Administrator' : 'Team member'}</div>
           </div>
         </div>
         <button className="signout-btn" onClick={logout}>Sign out</button>

@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
   const { login } = useAuth()
-  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,7 +13,7 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      await login(name, password)
     } catch (err) {
       setError(err.message || 'Login failed')
     } finally {
@@ -32,16 +32,16 @@ export default function Login() {
           </div>
         </div>
         <div className="login-title">Sign in</div>
-        <div className="login-sub">Use your Own It account credentials.</div>
+        <div className="login-sub">Use your Own It name and password.</div>
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Email</label>
+            <label className="form-label">Name</label>
             <input
               className="form-input"
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@company.co.nz"
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Your full name"
               required
               autoFocus
             />

@@ -8,7 +8,7 @@ const PROCESSES = [
     inputPlaceholder: 'Paste the full transcript text here...',
     inputRequired: true,
     structured: true,
-    rolesAllowed: ['super_admin', 'hr_manager', 'payroll_officer', 'site_manager', 'viewer'],
+    dept: 'meetings',
     systemPrompt: `You are an office administrator for P&I (North) Ltd (Pipeline & Infrastructure).
 You receive raw Otter.ai meeting transcripts and extract them into structured meeting minutes.
 
@@ -43,7 +43,7 @@ Keep each field concise and factual. Plain English, short sentences. Never leave
     inputPlaceholder: 'Pull from Otter or paste the full transcript (job, site, incident, or client debrief)...',
     inputRequired: true,
     structured: true,
-    rolesAllowed: ['super_admin', 'hr_manager', 'payroll_officer', 'site_manager'],
+    dept: 'meetings',
     systemPrompt: `You are an operations coordinator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
 
 You receive raw debrief transcripts (job/project debriefs, site visit debriefs, incident debriefs, or client meeting debriefs) and extract them into the company's standard debrief format, which follows the Extreme Ownership model.
@@ -77,7 +77,8 @@ Write in plain English. Be factual and neutral. Do not assign blame.`
     inputRequired: true,
     structured: true,
     maxTokens: 8192,
-    rolesAllowed: ['super_admin', 'hr_manager'],
+    dept: 'people',
+    adminOnly: true,
     systemPrompt: `You are an HR administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
 
 You receive a raw transcript of a recorded annual performance review — a one-on-one conversation run from the company's review script, which makes the assessor speak each section aloud with verbal signposts. You produce TWO outputs from one extraction:

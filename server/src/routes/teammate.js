@@ -1,5 +1,5 @@
 const { Router } = require('express')
-const { requireAuth, requireRole } = require('../middleware/auth')
+const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { tmGet, tmPost, tmPut } = require('../lib/teammate')
 const { submitDebrief } = require('../lib/teammateDebrief')
 
@@ -7,7 +7,7 @@ const router = Router()
 router.use(requireAuth)
 
 // Reference data lookups (super_admin only — used for wiring/diagnostics)
-router.get('/formdata', requireRole('super_admin'), async (req, res) => {
+router.get('/formdata', requireAdmin, async (req, res) => {
   try {
     res.json(await tmGet('/form/data'))
   } catch (err) {
@@ -15,7 +15,7 @@ router.get('/formdata', requireRole('super_admin'), async (req, res) => {
   }
 })
 
-router.post('/testsubmit', requireRole('super_admin'), async (req, res) => {
+router.post('/testsubmit', requireAdmin, async (req, res) => {
   try {
     if (req.body && req.body.formTemplateId) {
       return res.json(await tmPost('/form', req.body))
@@ -36,7 +36,7 @@ router.post('/testsubmit', requireRole('super_admin'), async (req, res) => {
   }
 })
 
-router.get('/form/:formId/detail', requireRole('super_admin'), async (req, res) => {
+router.get('/form/:formId/detail', requireAdmin, async (req, res) => {
   try {
     res.json(await tmGet(`/form/${req.params.formId}/detail`))
   } catch (err) {
@@ -44,7 +44,7 @@ router.get('/form/:formId/detail', requireRole('super_admin'), async (req, res) 
   }
 })
 
-router.put('/form/:formId', requireRole('super_admin'), async (req, res) => {
+router.put('/form/:formId', requireAdmin, async (req, res) => {
   try {
     res.json(await tmPut(`/form/${req.params.formId}`, req.body || {}))
   } catch (err) {
@@ -52,7 +52,7 @@ router.put('/form/:formId', requireRole('super_admin'), async (req, res) => {
   }
 })
 
-router.get('/branches/:workplaceId', requireRole('super_admin'), async (req, res) => {
+router.get('/branches/:workplaceId', requireAdmin, async (req, res) => {
   try {
     res.json(await tmGet(`/workplace/${req.params.workplaceId}/branch`))
   } catch (err) {
@@ -60,7 +60,7 @@ router.get('/branches/:workplaceId', requireRole('super_admin'), async (req, res
   }
 })
 
-router.get('/forms', requireRole('super_admin'), async (req, res) => {
+router.get('/forms', requireAdmin, async (req, res) => {
   try {
     res.json(await tmGet('/form'))
   } catch (err) {
@@ -68,7 +68,7 @@ router.get('/forms', requireRole('super_admin'), async (req, res) => {
   }
 })
 
-router.get('/employees', requireRole('super_admin'), async (req, res) => {
+router.get('/employees', requireAdmin, async (req, res) => {
   try {
     const qs = []
     if (req.query.page) qs.push(`page=${encodeURIComponent(req.query.page)}`)

@@ -16,8 +16,8 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false))
   }, [])
 
-  async function login(email, password) {
-    const { token, user } = await api.login(email, password)
+  async function login(name, password) {
+    const { token, user } = await api.login(name, password)
     localStorage.setItem('ownit_token', token)
     setUser(user)
   }

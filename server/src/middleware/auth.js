@@ -21,4 +21,10 @@ function requireRole(...roles) {
   }
 }
 
-module.exports = { requireAuth, requireRole, JWT_SECRET }
+// Gate for administrator-only routes (managing users, Teammate admin, etc.).
+function requireAdmin(req, res, next) {
+  if (!req.user?.admin) return res.status(403).json({ error: 'Forbidden' })
+  next()
+}
+
+module.exports = { requireAuth, requireRole, requireAdmin, JWT_SECRET }
