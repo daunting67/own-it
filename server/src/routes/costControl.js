@@ -25,8 +25,13 @@ fuel tax invoice for P&I (North) Ltd's cost-control team. Read EVERY transaction
 driver/card, sometimes under a "Cost centre" heading with a Rego). Columns are typically: Date, Time,
 Location, Transaction type/number, Item description (Diesel/91 Unleaded/Premium/Shop/Car Wash — non-fuel
 items have no litres/rates), Quantity (litre), Pump rate (incl GST), Your rate (incl GST), Amount (excl
-GST), Amount (incl GST). Also read the header (invoice number, account number, invoice/credit note date,
-total due, sub total, GST) and the Summary block (fuel total litres).
+GST), Amount (incl GST).
+
+You may be given the WHOLE invoice, or just an EXCERPT of a few pages from it (a long invoice is split
+into page-range excerpts so no single response gets too large). Always list every transaction line
+visible in what you were given. The header (invoice number, account number, invoice/credit note date,
+total due, sub total, GST) and the Summary block (fuel total litres) usually only appear on the FIRST
+page — if this excerpt doesn't show them, set those fields to null rather than guessing.
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
@@ -220,6 +225,43 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
   }
 }
 
+// Header/summary fields usually only appear on whichever excerpt contains the invoice's
+// first page — merge keeps the first non-null value seen for each, and concatenates lines.
+function mergeInvoiceParts(a, b) {
+  return {
+    invoice_number: a?.invoice_number ?? b?.invoice_number ?? null,
+    account: a?.account ?? b?.account ?? null,
+    invoice_date: a?.invoice_date ?? b?.invoice_date ?? null,
+    period_end: a?.period_end ?? b?.period_end ?? null,
+    total_due: a?.total_due ?? b?.total_due ?? null,
+    sub_total: a?.sub_total ?? b?.sub_total ?? null,
+    gst: a?.gst ?? b?.gst ?? null,
+    summary: a?.summary ?? b?.summary ?? null,
+    lines: [...(a?.lines || []), ...(b?.lines || [])],
+  }
+}
+
+// Same self-adaptive halving as extractReceiptsBatch, but for the invoice: a long invoice
+// (many transaction lines) can equally overflow one response.
+async function extractInvoiceBatch(anthropicKey, files, depth = 0) {
+  try {
+    return await extract(anthropicKey, INVOICE_PROMPT, files)
+  } catch (err) {
+    if (err.isMaxTokens && files.length > 1 && depth < 8) {
+      const mid = Math.ceil(files.length / 2)
+      const [a, b] = await Promise.all([
+        extractInvoiceBatch(anthropicKey, files.slice(0, mid), depth + 1),
+        extractInvoiceBatch(anthropicKey, files.slice(mid), depth + 1),
+      ])
+      return mergeInvoiceParts(a, b)
+    }
+    if (err.isMaxTokens) {
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this invoice page may need to be re-scanned in smaller pieces.`)
+    }
+    throw err
+  }
+}
+
 const router = Router()
 router.use(requireAuth)
 
@@ -290,19 +332,22 @@ router.post('/run', async (req, res) => {
 
     const byPath = new Map(allPaths.map((p, i) => [p, { filename: filenames[i], buffer: buffers[i] }]))
 
-    // Invoice extraction — its own call. Receipts — any multi-page batch scan is physically
-    // split into page-range chunks first, then everything is batched by total PAGE count
-    // (not file count), all calls run in parallel so wall-clock stays close to a single
-    // call regardless of how many receipts there are.
-    const invoiceFiles = invoicePaths.map(p => ({ ...byPath.get(p), label: 'SUPPLIER INVOICE' }))
+    // Both the invoice and the receipts go through the same page-split + batch +
+    // self-adaptive-retry pipeline, since either one can in principle overflow a single
+    // response (a long invoice with many lines, or a month with a lot of receipts).
+    const rawInvoiceFiles = invoicePaths.map(p => ({ ...byPath.get(p), label: 'SUPPLIER INVOICE' }))
+    const invoiceFiles = (await Promise.all(rawInvoiceFiles.map(splitPdfIfNeeded))).flat()
+    const invoiceBatches = batchByPageCount(invoiceFiles)
+
     const rawReceiptFiles = receiptPaths.map(p => ({ ...byPath.get(p), label: 'RECEIPT / PHOTO' }))
     const receiptFiles = (await Promise.all(rawReceiptFiles.map(splitPdfIfNeeded))).flat()
     const receiptBatches = batchByPageCount(receiptFiles)
 
-    const [invoiceData, ...batchResults] = await Promise.all([
-      extract(anthropicKey, INVOICE_PROMPT, invoiceFiles),
+    const [invoiceParts, ...batchResults] = await Promise.all([
+      Promise.all(invoiceBatches.map(files => extractInvoiceBatch(anthropicKey, files))),
       ...receiptBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
     ])
+    const invoiceData = invoiceParts.reduce(mergeInvoiceParts)
 
     if (!invoiceData?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
     const receipts = batchResults.flat()
