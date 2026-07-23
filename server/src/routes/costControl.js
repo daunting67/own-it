@@ -100,16 +100,25 @@ function fmtDate(iso) {
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 // A month's batch scan can be 25+ pages — as much extraction output as 25 individual
-// files, and far more than fits in one 8192-token response. So any PDF over this many
-// pages gets physically split (via pdf-lib) into page-range sub-PDFs before it ever
-// reaches Claude, and batches are sized by TOTAL PAGES, not file count.
+// files, and far more than fits in one 8192-token response. So any multi-page PDF gets
+// physically split (via pdf-lib) into small page chunks before it ever reaches Claude,
+// and batches are then sized by TOTAL PAGES (not file count) up to MAX_PAGES_PER_BATCH.
+//
+// SPLIT_CHUNK_SIZE is deliberately much smaller than MAX_PAGES_PER_BATCH. The
+// self-adaptive retry (extractReceiptsBatch/extractInvoiceBatch) can only bisect a batch
+// that contains MULTIPLE files — a single already-atomic file that overflows on its own
+// has nothing left to divide. Splitting down to small chunks up front (rather than only
+// when a file exceeds the batch cap) guarantees there's always room for the recursive
+// halving to actually do something, even for a normal-length 2-3 page invoice.
 const MAX_PAGES_PER_BATCH = 8
+const SPLIT_CHUNK_SIZE = 2
 
-// Splits a PDF into contiguous chunks of at most MAX_PAGES_PER_BATCH pages. Each chunk
-// keeps the ORIGINAL filename (so the engine's dedup/matching still treats them as one
-// logical source) plus a pageOffset — the excerpt is renumbered 1..N internally by pdf-lib,
-// so a receipt Claude finds on "page 3 of this excerpt" is really page (3 + pageOffset) of
-// the original scan. Non-PDF files (bowser photos) and short PDFs pass through untouched.
+// Splits a PDF into contiguous SPLIT_CHUNK_SIZE-page chunks. Each chunk keeps the
+// ORIGINAL filename (so the engine's dedup/matching still treats them as one logical
+// source) plus a pageOffset — the excerpt is renumbered 1..N internally by pdf-lib, so a
+// receipt Claude finds on "page 3 of this excerpt" is really page (3 + pageOffset) of the
+// original scan. Non-PDF files (bowser photos) and genuinely single-page PDFs pass through
+// untouched — there's nothing to split.
 async function splitPdfIfNeeded(f) {
   if (!f.filename.toLowerCase().endsWith('.pdf')) return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }]
   let doc
@@ -119,11 +128,11 @@ async function splitPdfIfNeeded(f) {
     return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }] // unreadable as a PDF object tree — let Claude try it whole
   }
   const total = doc.getPageCount()
-  if (total <= MAX_PAGES_PER_BATCH) return [{ ...f, pageOffset: 0, pages: total, isSplitPart: false }]
+  if (total <= 1) return [{ ...f, pageOffset: 0, pages: total, isSplitPart: false }]
 
   const chunks = []
-  for (let start = 0; start < total; start += MAX_PAGES_PER_BATCH) {
-    const end = Math.min(start + MAX_PAGES_PER_BATCH, total)
+  for (let start = 0; start < total; start += SPLIT_CHUNK_SIZE) {
+    const end = Math.min(start + SPLIT_CHUNK_SIZE, total)
     const sub = await PDFDocument.create()
     const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
     pages.forEach(p => sub.addPage(p))
