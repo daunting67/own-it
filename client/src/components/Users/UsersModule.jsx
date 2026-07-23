@@ -10,7 +10,7 @@ const DEPARTMENTS = [
   { id: 'projects', label: 'Project Management' },
 ]
 
-const EMPTY = { name: '', password: '', admin: false, departments: [] }
+const EMPTY = { name: '', email: '', password: '', admin: false, departments: [] }
 
 function accessSummary(u) {
   if (u.admin) return 'Administrator — full access'
@@ -43,7 +43,7 @@ export default function UsersModule() {
   }
 
   function openEdit(u) {
-    setForm({ name: u.name, password: '', admin: !!u.admin, departments: [...(u.departments || [])] })
+    setForm({ name: u.name, email: u.email || '', password: '', admin: !!u.admin, departments: [...(u.departments || [])] })
     setModalError('')
     setModal({ mode: 'edit', user: u })
   }
@@ -55,6 +55,7 @@ export default function UsersModule() {
     try {
       const payload = {
         name: form.name.trim(),
+        email: form.email.trim(),
         admin: form.admin,
         departments: form.admin ? [] : form.departments,
       }
@@ -149,6 +150,10 @@ export default function UsersModule() {
                 <div className="form-group">
                   <label className="form-label">Full name</label>
                   <input className="form-input" value={form.name} onChange={set('name')} required autoFocus placeholder="e.g. Sandra Grace" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional — for records & alternate login)</span></label>
+                  <input className="form-input" type="email" value={form.email} onChange={set('email')} placeholder="e.g. tony@pipelines.nz" />
                 </div>
                 <div className="form-group">
                   <label className="form-label">{modal.mode === 'add' ? 'Password' : 'New password (leave blank to keep current)'}</label>

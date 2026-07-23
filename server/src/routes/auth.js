@@ -53,27 +53,42 @@ router.get('/users', requireAuth, requireAdmin, async (req, res) => {
 })
 
 router.post('/users', requireAuth, requireAdmin, async (req, res) => {
-  const { name, password, admin, departments } = req.body
+  const { name, email, password, admin, departments } = req.body
   if (!name || !password) return res.status(400).json({ error: 'Name and password required' })
   const { data: existing } = await db.from('User').select('id').ilike('name', name.trim()).single()
   if (existing) return res.status(409).json({ error: 'That name is already in use' })
-  const email = await syntheticEmail(name)
+  // Email is optional — used for records and as an alternate login. Blank = a
+  // synthetic internal address (login is by name).
+  let finalEmail
+  if (email && email.trim()) {
+    finalEmail = email.trim().toLowerCase()
+    const { data: emailClash } = await db.from('User').select('id').eq('email', finalEmail).single()
+    if (emailClash) return res.status(409).json({ error: 'That email is already in use' })
+  } else {
+    finalEmail = await syntheticEmail(name)
+  }
   const hash = await bcrypt.hash(password, 10)
   const role = serializeAccess({ admin, departments })
   const { data } = await db.from('User')
-    .insert({ id: require('crypto').randomUUID(), email, name: name.trim(), password: hash, role })
+    .insert({ id: require('crypto').randomUUID(), email: finalEmail, name: name.trim(), password: hash, role })
     .select('id,email,name,role,createdAt').single()
   res.status(201).json(publicUser(data))
 })
 
 router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
-  const { name, password, admin, departments } = req.body
+  const { name, email, password, admin, departments } = req.body
   const updates = {}
   if (name) {
     const trimmed = name.trim()
     const { data: clash } = await db.from('User').select('id').ilike('name', trimmed).neq('id', req.params.id).single()
     if (clash) return res.status(409).json({ error: 'That name is already in use' })
     updates.name = trimmed
+  }
+  if (email !== undefined && email.trim()) {
+    const addr = email.trim().toLowerCase()
+    const { data: emailClash } = await db.from('User').select('id').eq('email', addr).neq('id', req.params.id).single()
+    if (emailClash) return res.status(409).json({ error: 'That email is already in use' })
+    updates.email = addr
   }
   // admin/departments are always sent together from the form; only rewrite the
   // access string when at least one is present in the body.
