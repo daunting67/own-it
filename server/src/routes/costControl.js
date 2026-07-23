@@ -1,5 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
+const { PDFDocument } = require('pdf-lib')
 const db = require('../lib/supabase')
 const { requireAuth } = require('../middleware/auth')
 const { reconcile } = require('../lib/fuelEngine')
@@ -72,9 +73,6 @@ Return ONLY valid JSON (no markdown fences, no explanation): an object with a "r
 Non-fuel items (Shop, Car Wash) have litres:null, rate:null, total:<amount>. Use null for anything
 genuinely unreadable rather than guessing.`
 
-// How many receipt files to send per Claude call. Kept small so each response stays well
-// under the 8192-token output budget even when a batch includes a multi-page scan.
-const RECEIPT_BATCH_SIZE = 6
 
 function stripFences(text) {
   return text.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
@@ -96,20 +94,72 @@ function fmtDate(iso) {
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
-function chunk(arr, size) {
-  const out = []
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
-  return out
+// A month's batch scan can be 25+ pages — as much extraction output as 25 individual
+// files, and far more than fits in one 8192-token response. So any PDF over this many
+// pages gets physically split (via pdf-lib) into page-range sub-PDFs before it ever
+// reaches Claude, and batches are sized by TOTAL PAGES, not file count.
+const MAX_PAGES_PER_BATCH = 8
+
+// Splits a PDF into contiguous chunks of at most MAX_PAGES_PER_BATCH pages. Each chunk
+// keeps the ORIGINAL filename (so the engine's dedup/matching still treats them as one
+// logical source) plus a pageOffset — the excerpt is renumbered 1..N internally by pdf-lib,
+// so a receipt Claude finds on "page 3 of this excerpt" is really page (3 + pageOffset) of
+// the original scan. Non-PDF files (bowser photos) and short PDFs pass through untouched.
+async function splitPdfIfNeeded(f) {
+  if (!f.filename.toLowerCase().endsWith('.pdf')) return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }]
+  let doc
+  try {
+    doc = await PDFDocument.load(f.buffer, { ignoreEncryption: true })
+  } catch {
+    return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }] // unreadable as a PDF object tree — let Claude try it whole
+  }
+  const total = doc.getPageCount()
+  if (total <= MAX_PAGES_PER_BATCH) return [{ ...f, pageOffset: 0, pages: total, isSplitPart: false }]
+
+  const chunks = []
+  for (let start = 0; start < total; start += MAX_PAGES_PER_BATCH) {
+    const end = Math.min(start + MAX_PAGES_PER_BATCH, total)
+    const sub = await PDFDocument.create()
+    const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
+    pages.forEach(p => sub.addPage(p))
+    const buf = Buffer.from(await sub.save())
+    chunks.push({ ...f, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
+  }
+  return chunks
 }
 
-// One extraction call: system prompt + a list of { filename, buffer, label }. Returns the
-// parsed JSON. Throws a clear error if the model hit its output cap (truncated JSON) so the
-// caller can surface "too much in one batch" rather than a cryptic JSON parse error.
+// Group already-page-sized entries into batches whose TOTAL page count stays under the
+// budget-safe cap. A single chunk at or over the cap (shouldn't happen post-split, but a
+// PDF that failed to parse falls through unsplit) still gets its own solo batch.
+function batchByPageCount(entries) {
+  const batches = []
+  let current = [], currentPages = 0
+  for (const f of entries) {
+    if (current.length && currentPages + f.pages > MAX_PAGES_PER_BATCH) {
+      batches.push(current)
+      current = []
+      currentPages = 0
+    }
+    current.push(f)
+    currentPages += f.pages
+  }
+  if (current.length) batches.push(current)
+  return batches
+}
+
+// One extraction call: system prompt + a list of { filename, buffer, label, pageOffset,
+// isSplitPart }. Returns the parsed JSON, with any receipt "page" corrected back to the
+// ORIGINAL scan's page number when the file was a split excerpt. Throws a clear error if
+// the model hit its output cap (truncated JSON) so the caller gets "too much in one batch"
+// rather than a cryptic JSON parse error.
 async function extract(anthropicKey, system, files) {
   const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
   for (const f of files) {
     const { kind, media_type } = mediaTypeFor(f.filename)
-    content.push({ type: 'text', text: `FILE (${f.label}): ${f.filename}` })
+    const excerptNote = f.isSplitPart
+      ? ` — EXCERPT: this is pages ${f.pageOffset + 1}-${f.pageOffset + f.pages} of the original scan, renumbered 1-${f.pages} here. Report "page" as the number you see WITHIN THIS EXCERPT (1-${f.pages}) — it will be re-aligned to the original scan afterwards.`
+      : ''
+    content.push({ type: 'text', text: `FILE (${f.label}): ${f.filename}${excerptNote}` })
     content.push({ type: kind, source: { type: 'base64', media_type, data: f.buffer.toString('base64') } })
   }
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -126,11 +176,20 @@ async function extract(anthropicKey, system, files) {
     throw new Error('A batch returned more data than fits in one response — try fewer receipt files at once, or split the batch scan.')
   }
   const raw = data.content?.[0]?.text || ''
+  let parsed
   try {
-    return JSON.parse(stripFences(raw))
+    parsed = JSON.parse(stripFences(raw))
   } catch (e) {
     throw new Error(`Could not read the extracted data (${e.message}). One of the files may be unreadable — try again or remove the problem file.`)
   }
+  if (Array.isArray(parsed?.receipts)) {
+    const offsetByFile = new Map(files.filter(f => f.isSplitPart).map(f => [f.filename, f.pageOffset]))
+    for (const r of parsed.receipts) {
+      const offset = offsetByFile.get(r.source_file)
+      if (offset && r.page != null) r.page = r.page + offset
+    }
+  }
+  return parsed
 }
 
 const router = Router()
@@ -203,11 +262,14 @@ router.post('/run', async (req, res) => {
 
     const byPath = new Map(allPaths.map((p, i) => [p, { filename: filenames[i], buffer: buffers[i] }]))
 
-    // Invoice extraction — its own call. Receipts — batched, all calls run in parallel so
-    // wall-clock stays close to a single call regardless of how many receipts there are.
+    // Invoice extraction — its own call. Receipts — any multi-page batch scan is physically
+    // split into page-range chunks first, then everything is batched by total PAGE count
+    // (not file count), all calls run in parallel so wall-clock stays close to a single
+    // call regardless of how many receipts there are.
     const invoiceFiles = invoicePaths.map(p => ({ ...byPath.get(p), label: 'SUPPLIER INVOICE' }))
-    const receiptBatches = chunk(receiptPaths, RECEIPT_BATCH_SIZE)
-      .map(batch => batch.map(p => ({ ...byPath.get(p), label: 'RECEIPT / PHOTO' })))
+    const rawReceiptFiles = receiptPaths.map(p => ({ ...byPath.get(p), label: 'RECEIPT / PHOTO' }))
+    const receiptFiles = (await Promise.all(rawReceiptFiles.map(splitPdfIfNeeded))).flat()
+    const receiptBatches = batchByPageCount(receiptFiles)
 
     const [invoiceData, ...batchResults] = await Promise.all([
       extract(anthropicKey, INVOICE_PROMPT, invoiceFiles),
