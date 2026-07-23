@@ -9,6 +9,7 @@ import PeopleModule from './components/People/PeopleModule'
 import PayrollModule from './components/Payroll/PayrollModule'
 import MeetingsModule from './components/Meetings/MeetingsModule'
 import ProjectManagementModule from './components/ProjectManagement/ProjectManagementModule'
+import CostControlModule from './components/CostControl/CostControlModule'
 import UsersModule from './components/Users/UsersModule'
 import ComingSoon from './components/ComingSoon'
 
@@ -18,6 +19,7 @@ const VIEW_TITLES = {
   payroll: 'Payroll',
   meetings: 'Meetings',
   projects: 'Project Management',
+  cost: 'Cost Control',
   users: 'Users',
   hs: 'Health & Safety',
   operations: 'Operations',
@@ -74,6 +76,7 @@ export default function App() {
               if (dept === 'payroll') return can('payroll') ? <PayrollModule onSaveStateChange={onSaveStateChange} /> : <ComingSoon dept={dept} />
               if (dept === 'meetings') return can('meetings') ? <MeetingsModule /> : <ComingSoon dept={dept} />
               if (dept === 'projects') return can('projects') ? <ProjectManagementModule /> : <ComingSoon dept={dept} />
+              if (dept === 'cost') return can('cost') ? <CostControlModule /> : <ComingSoon dept={dept} />
               if (dept === 'users') return user?.admin ? <UsersModule /> : <ComingSoon dept={dept} />
               return <ComingSoon dept={dept} />
             })()}

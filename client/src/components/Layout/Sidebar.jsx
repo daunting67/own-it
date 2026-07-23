@@ -8,6 +8,7 @@ const ITEMS = [
   { id: 'payroll',     label: 'Payroll',           live: true,  dept: 'payroll' },
   { id: 'meetings',    label: 'Meetings',          live: true,  dept: 'meetings' },
   { id: 'projects',    label: 'Project Management', live: true, dept: 'projects' },
+  { id: 'cost',        label: 'Cost Control',       live: true, dept: 'cost' },
   { id: 'hs',          label: 'Health & Safety',   live: false },
   { id: 'operations',  label: 'Operations',        live: false },
   { id: 'training',    label: 'Training',          live: false },

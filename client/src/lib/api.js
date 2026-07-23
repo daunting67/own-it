@@ -66,6 +66,13 @@ export const api = {
   getSoqUploadUrl: (filename) => request('/api/soq/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
   runSoq: (paths, projectName, notes) =>
     request('/api/soq/run', { method: 'POST', body: JSON.stringify({ paths, projectName, notes }) }),
+
+  // Cost Control — fuel receipt reconciliation
+  getCostControlRuns: () => request('/api/cost-control/runs'),
+  getCostControlRunDocument: (id) => request(`/api/cost-control/runs/${id}/document`),
+  getCostControlUploadUrl: (filename) => request('/api/cost-control/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  runCostControl: (invoicePaths, receiptPaths) =>
+    request('/api/cost-control/run', { method: 'POST', body: JSON.stringify({ invoicePaths, receiptPaths }) }),
 }
 
 // Upload a File straight to Supabase Storage via a signed upload URL (bypasses the
@@ -74,7 +81,7 @@ export const api = {
 export async function uploadToSignedUrl(signedUrl, file) {
   const res = await fetch(signedUrl, {
     method: 'PUT',
-    headers: { 'x-upsert': 'true', 'cache-control': '3600', 'content-type': 'application/pdf' },
+    headers: { 'x-upsert': 'true', 'cache-control': '3600', 'content-type': file.type || 'application/pdf' },
     body: file
   })
   if (!res.ok) {
