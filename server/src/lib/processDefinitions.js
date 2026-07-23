@@ -9,6 +9,7 @@ const PROCESSES = [
     inputRequired: true,
     structured: true,
     dept: 'meetings',
+    pickCoordinator: true,
     systemPrompt: `You are an office administrator for P&I (North) Ltd (Pipeline & Infrastructure).
 You receive raw Otter.ai meeting transcripts and extract them into structured meeting minutes.
 
@@ -44,6 +45,7 @@ Keep each field concise and factual. Plain English, short sentences. Never leave
     inputRequired: true,
     structured: true,
     dept: 'meetings',
+    pickCoordinator: true,
     systemPrompt: `You are an operations coordinator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
 
 You receive raw debrief transcripts (job/project debriefs, site visit debriefs, incident debriefs, or client meeting debriefs) and extract them into the company's standard debrief format, which follows the Extreme Ownership model.

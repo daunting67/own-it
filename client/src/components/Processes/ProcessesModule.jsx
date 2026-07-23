@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 // `only` embeds a single process (e.g. inside HR & People); `include` limits the
 // full module to a set of ids (e.g. the Meetings module); `exclude` hides ids.
 export default function ProcessesModule({ only = null, include = null, exclude = [], title = 'Processes' }) {
+  const { user } = useAuth()
   const [processes, setProcesses] = useState([])
   const [selected, setSelected] = useState(null)
   const [input, setInput] = useState('')
+  const [people, setPeople] = useState([])
+  const [coordinator, setCoordinator] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [doc, setDoc] = useState(null) // { document: base64, filename }
@@ -25,6 +29,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
   useEffect(() => {
     api.getProcesses().then(setProcesses).catch(console.error)
     api.getProcessRuns().then(setHistory).catch(console.error)
+    api.getProcessPeople().then(setPeople).catch(console.error)
   }, [])
 
   const visibleProcesses = only
@@ -44,6 +49,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
 
   function selectProcess(p) {
     setSelected(p)
+    setCoordinator(user?.name || '')
     setInput('')
     setResult(null)
     setDoc(null)
@@ -89,7 +95,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
     setError(null)
     setCopied(false)
     try {
-      const res = await api.runProcess(selected.id, input)
+      const res = await api.runProcess(selected.id, input, selected.pickCoordinator ? coordinator : undefined)
       setResult(res.output)
       if (res.document && res.filename) setDoc({ document: res.document, filename: res.filename })
       api.getProcessRuns().then(setHistory).catch(console.error)
@@ -271,6 +277,20 @@ export default function ProcessesModule({ only = null, include = null, exclude =
                   onChange={e => setInput(e.target.value)}
                   rows={10}
                 />
+              </div>
+            )}
+
+            {selected.pickCoordinator && (
+              <div className="process-input-section">
+                <label className="form-label">Coordinator (who this form is recorded under in Teammate)</label>
+                <select
+                  className="form-select"
+                  value={coordinator}
+                  onChange={e => setCoordinator(e.target.value)}
+                >
+                  {coordinator && !people.includes(coordinator) && <option value={coordinator}>{coordinator}</option>}
+                  {people.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
               </div>
             )}
 

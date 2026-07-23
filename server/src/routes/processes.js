@@ -7,7 +7,7 @@ const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
-const { rosterPromptBlock } = require('../lib/staffRoster')
+const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
@@ -163,6 +163,11 @@ function canAccessProcess(user, proc) {
   return true
 }
 
+// Staff names for the coordinator picker (from the active-staff roster).
+router.get('/people', (req, res) => {
+  res.json(STAFF.map(s => s.name).sort((a, b) => a.localeCompare(b)))
+})
+
 // List processes this user may run
 router.get('/', (req, res) => {
   const available = PROCESSES
@@ -211,7 +216,10 @@ router.post('/run/:id', async (req, res) => {
     return res.status(403).json({ error: 'You do not have permission to run this process' })
   }
 
-  const { input } = req.body
+  const { input, coordinator } = req.body
+  // Coordinator the form lands under: whoever the submitter picked in the UI,
+  // else the logged-in user. resolves to a Teammate employee downstream.
+  const coordinatorName = (coordinator && String(coordinator).trim()) || resolveTeammateName(req.user)
   if (proc.inputRequired && !input?.trim()) {
     return res.status(400).json({ error: 'Input is required for this process' })
   }
@@ -289,7 +297,7 @@ router.post('/run/:id', async (req, res) => {
         '', 'UPCOMING TRAINING', parsed.upcoming_training
       ].join('\n')
       try {
-        const tm = await submitOfficeMinutes(parsed, resolveTeammateName(req.user))
+        const tm = await submitOfficeMinutes(parsed, coordinatorName)
         output += teammateBanner(tm, 'minutes')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
@@ -320,13 +328,12 @@ router.post('/run/:id', async (req, res) => {
     if (proc.structured && proc.id === 'debrief') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
-      // The person submitting via the portal is the coordinator (matches
-      // Office Minutes). Falls back to the transcript-derived name.
-      const submitter = resolveTeammateName(req.user)
-      if (submitter) parsed.coordinator = submitter
+      // The coordinator picked in the UI (or the logged-in user) lands the
+      // form, matching Office Minutes and Teammate's own manual flow.
+      if (coordinatorName) parsed.coordinator = coordinatorName
       output = renderDebriefText(parsed)
       try {
-        const tm = await submitDebrief(parsed, submitter)
+        const tm = await submitDebrief(parsed, coordinatorName)
         output += teammateBanner(tm, 'debrief')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`

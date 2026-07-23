@@ -52,7 +52,8 @@ export const api = {
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),
-  runProcess: (id, input) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input }) }),
+  runProcess: (id, input, coordinator) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input, coordinator }) }),
+  getProcessPeople: () => request('/api/processes/people'),
   getRunDocument: (id) => request(`/api/processes/runs/${id}/document`),
 
   // Otter
