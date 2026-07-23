@@ -173,7 +173,9 @@ async function extract(anthropicKey, system, files) {
   }
   const data = await response.json()
   if (data.stop_reason === 'max_tokens') {
-    throw new Error('A batch returned more data than fits in one response — try fewer receipt files at once, or split the batch scan.')
+    const err = new Error('response exceeded the model output limit')
+    err.isMaxTokens = true
+    throw err
   }
   const raw = data.content?.[0]?.text || ''
   let parsed
@@ -190,6 +192,32 @@ async function extract(anthropicKey, system, files) {
     }
   }
   return parsed
+}
+
+// Self-adaptive wrapper around extract() for receipt batches: if a batch's response hit
+// the model's output cap, it's bisected and each half retried IN PARALLEL, recursively,
+// until every piece fits. This means the batch-size heuristic in batchByPageCount only
+// needs to be a good starting guess — verbose receipts, an unusually detailed cover-sheet
+// comment, or simply more receipts next month can never truncate a response, because any
+// batch that's still too big keeps halving itself down to individual files if it must.
+async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
+  try {
+    const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files)
+    return Array.isArray(parsed?.receipts) ? parsed.receipts : []
+  } catch (err) {
+    if (err.isMaxTokens && files.length > 1 && depth < 8) {
+      const mid = Math.ceil(files.length / 2)
+      const [a, b] = await Promise.all([
+        extractReceiptsBatch(anthropicKey, files.slice(0, mid), depth + 1),
+        extractReceiptsBatch(anthropicKey, files.slice(mid), depth + 1),
+      ])
+      return [...a, ...b]
+    }
+    if (err.isMaxTokens) {
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this file may need to be re-scanned in smaller pieces.`)
+    }
+    throw err
+  }
 }
 
 const router = Router()
@@ -273,11 +301,11 @@ router.post('/run', async (req, res) => {
 
     const [invoiceData, ...batchResults] = await Promise.all([
       extract(anthropicKey, INVOICE_PROMPT, invoiceFiles),
-      ...receiptBatches.map(files => extract(anthropicKey, RECEIPT_PROMPT, files)),
+      ...receiptBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
     ])
 
     if (!invoiceData?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
-    const receipts = batchResults.flatMap(r => Array.isArray(r?.receipts) ? r.receipts : [])
+    const receipts = batchResults.flat()
 
     const R = reconcile(invoiceData, receipts)
     const periodEndLabel = fmtDate(invoiceData.period_end)
