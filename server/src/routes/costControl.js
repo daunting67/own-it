@@ -15,48 +15,51 @@ const PROCESS_NAME = 'Fuel Receipt Reconciliation'
 // invoice + receipt/photo PDFs and images and returns structured JSON. All matching,
 // classification and validation is done deterministically afterwards by fuelEngine.js
 // (spec §4-§7), so the reconciliation numbers are reproducible, not a model guess.
-const SYSTEM_PROMPT = `You are extracting structured data from fuel-card documents for P&I (North) Ltd's
-cost-control team. You will be given, in order: one Z Energy (or similar supplier) tax invoice, then a
-number of driver "FUEL CARD RECEIPTS" cover-sheet PDFs (each wrapping a photo of a till slip, a bowser/
-pump display, or a handwritten "LOST RECEIPT" note), and possibly bowser/pump-display photos submitted
-without a cover sheet. A "receipt" file can be a MULTI-PAGE BATCH SCAN containing many distinct slips —
-extract every distinct receipt you find, one JSON object per receipt, noting its page number.
-
-Each file you are given is preceded by a text block "FILE: <filename>" (and "PAGE COUNT: N" for
-multi-page files) — use that exact filename as source_file, and the page number (1-indexed) for
-receipts found inside a multi-page file.
-
-EXTRACT TWO THINGS:
-
-1. THE INVOICE — read every transaction line (grouped by driver/card, sometimes under a "Cost centre"
-   heading with a Rego). Columns are typically: Date, Time, Location, Transaction type/number, Item
-   description (Diesel/91 Unleaded/Premium/Shop/Car Wash — non-fuel items have no litres/rates), Quantity
-   (litre), Pump rate (incl GST), Your rate (incl GST), Amount (excl GST), Amount (incl GST). Also read
-   the header (invoice number, account number, invoice/credit note date, total due) and the Summary
-   block (fuel totals by grade, litres, sub total, GST, total).
-
-2. EVERY RECEIPT — for each: the cover-sheet DATE/NAME/CARD/COMMENTS fields, and from the photo: whether
-   it's a clear till slip, a bowser/pump-display photo, or a "LOST RECEIPT" note; the station; the
-   transaction date/time if printed; litres (to 2-3dp, this is the single most important field — read it
-   carefully), rate, total; card last-4 if visible; and a product per line item (a receipt can show
-   multiple products, e.g. 91 + Diesel, or Diesel + Car Wash — list each as a separate item). If the
-   fuel grade is not legible on a blurry bowser photo, set product to null rather than guessing — litres
-   is the reliable field and the reconciliation engine matches on litres alone in that case. Mark
-   ocr_confidence "low" for blurry/glare-affected bowser photos, "high" for clear till slips.
+//
+// Extraction is split across SEPARATE Claude calls (invoice on its own, receipts in
+// parallel batches) so no single response can overflow the 8192-token output budget and
+// truncate the JSON. A month can carry 40-50 receipts; one combined call cannot hold that.
+const INVOICE_PROMPT = `You are extracting the transaction detail from a Z Energy (or similar supplier)
+fuel tax invoice for P&I (North) Ltd's cost-control team. Read EVERY transaction line (grouped by
+driver/card, sometimes under a "Cost centre" heading with a Rego). Columns are typically: Date, Time,
+Location, Transaction type/number, Item description (Diesel/91 Unleaded/Premium/Shop/Car Wash — non-fuel
+items have no litres/rates), Quantity (litre), Pump rate (incl GST), Your rate (incl GST), Amount (excl
+GST), Amount (incl GST). Also read the header (invoice number, account number, invoice/credit note date,
+total due, sub total, GST) and the Summary block (fuel total litres).
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
-  "invoice": {
-    "invoice_number": "...", "account": "...", "invoice_date": "YYYY-MM-DD",
-    "period_end": "YYYY-MM-DD",
-    "total_due": 0, "sub_total": 0, "gst": 0,
-    "summary": { "fuels_total": { "litres": 0 } },
-    "lines": [
-      { "n": 1, "date": "DD/MM/YY", "driver": "...", "card": "...", "cost_centre": null, "rego": null,
-        "product": "Diesel", "txn_type": "U", "txn_number": "...", "location": "...",
-        "litres": 0, "pump_rate": 0, "your_rate": 0, "amount_excl": 0, "amount_incl": 0 }
-    ]
-  },
+  "invoice_number": "...", "account": "...", "invoice_date": "YYYY-MM-DD", "period_end": "YYYY-MM-DD",
+  "total_due": 0, "sub_total": 0, "gst": 0,
+  "summary": { "fuels_total": { "litres": 0 } },
+  "lines": [
+    { "n": 1, "date": "DD/MM/YY", "driver": "...", "card": "...", "cost_centre": null, "rego": null,
+      "product": "Diesel", "txn_type": "U", "txn_number": "...", "location": "...",
+      "litres": 0, "pump_rate": 0, "your_rate": 0, "amount_excl": 0, "amount_incl": 0 }
+  ]
+}
+Non-fuel items (Shop, Car Wash) have litres:null, pump_rate:null, your_rate:null. period_end = the
+invoice's own date. Use null (not 0 or "") for anything genuinely unreadable.`
+
+const RECEIPT_PROMPT = `You are extracting data from driver fuel-card receipts for P&I (North) Ltd's
+cost-control team. Each file is a "FUEL CARD RECEIPTS" cover sheet (with DATE/NAME/CARD/COMMENTS fields)
+wrapping a photo of a till slip, a bowser/pump display, or a handwritten "LOST RECEIPT" note — OR it may
+be a MULTI-PAGE BATCH SCAN containing many distinct slips (extract every distinct receipt you find, one
+JSON object per receipt, with its page number), OR a plain photo of a pump display.
+
+Each file is preceded by a text block "FILE: <filename>" — use that exact filename as source_file. For a
+multi-page batch scan, set page to the 1-indexed page the receipt appears on; otherwise page is null.
+
+For each receipt: read the cover-sheet DATE/NAME/CARD/COMMENTS; whether the photo is a clear till slip,
+a bowser/pump-display photo, or a "LOST RECEIPT" note; the station; the printed transaction date/time;
+litres (to 2-3dp — the single most important field, read carefully), rate, total; card last-4 if visible;
+and a product per line item (a receipt can show multiple products, e.g. 91 + Diesel, or Diesel + Car
+Wash — list each as a separate item). If the fuel grade is not legible on a blurry bowser photo, set
+product to null rather than guessing — litres is the reliable field. Mark ocr_confidence "low" for
+blurry/glare-affected bowser photos, "high" for clear till slips.
+
+Return ONLY valid JSON (no markdown fences, no explanation): an object with a "receipts" array:
+{
   "receipts": [
     { "source_file": "...", "page": null, "cover_date": "DD/MM/YY", "cover_name": "...",
       "cover_card": "...", "comments": null, "photo_type": "till_slip",
@@ -66,8 +69,12 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
       "notes": null }
   ]
 }
-Non-fuel items (Shop, Car Wash) have litres:null, rate:null, total:<amount>. period_end = the invoice's
-own date. Use null (not 0 or "") for anything genuinely unreadable rather than guessing.`
+Non-fuel items (Shop, Car Wash) have litres:null, rate:null, total:<amount>. Use null for anything
+genuinely unreadable rather than guessing.`
+
+// How many receipt files to send per Claude call. Kept small so each response stays well
+// under the 8192-token output budget even when a batch includes a multi-page scan.
+const RECEIPT_BATCH_SIZE = 6
 
 function stripFences(text) {
   return text.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
@@ -88,6 +95,42 @@ function fmtDate(iso) {
   const d = new Date(iso + 'T00:00:00Z')
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-NZ', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
+}
+function chunk(arr, size) {
+  const out = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
+// One extraction call: system prompt + a list of { filename, buffer, label }. Returns the
+// parsed JSON. Throws a clear error if the model hit its output cap (truncated JSON) so the
+// caller can surface "too much in one batch" rather than a cryptic JSON parse error.
+async function extract(anthropicKey, system, files) {
+  const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
+  for (const f of files) {
+    const { kind, media_type } = mediaTypeFor(f.filename)
+    content.push({ type: 'text', text: `FILE (${f.label}): ${f.filename}` })
+    content.push({ type: kind, source: { type: 'base64', media_type, data: f.buffer.toString('base64') } })
+  }
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 8192, system, messages: [{ role: 'user', content }] })
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || `API error ${response.status}`)
+  }
+  const data = await response.json()
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error('A batch returned more data than fits in one response — try fewer receipt files at once, or split the batch scan.')
+  }
+  const raw = data.content?.[0]?.text || ''
+  try {
+    return JSON.parse(stripFences(raw))
+  } catch (e) {
+    throw new Error(`Could not read the extracted data (${e.message}). One of the files may be unreadable — try again or remove the problem file.`)
+  }
 }
 
 const router = Router()
@@ -158,46 +201,28 @@ router.post('/run', async (req, res) => {
     const emptyIdx = buffers.findIndex(b => !b || b.length === 0)
     if (emptyIdx !== -1) throw new Error(`"${filenames[emptyIdx]}" arrived empty — please re-upload it`)
 
-    const userContent = [{ type: 'text', text: 'Read the following files and extract the JSON as specified.' }]
-    allPaths.forEach((p, i) => {
-      const filename = filenames[i]
-      const { kind, media_type } = mediaTypeFor(filename)
-      const label = i < invoicePaths.length ? 'SUPPLIER INVOICE' : 'RECEIPT / PHOTO'
-      userContent.push({ type: 'text', text: `FILE (${label}): ${filename}` })
-      userContent.push({ type: kind, source: { type: 'base64', media_type, data: buffers[i].toString('base64') } })
-    })
+    const byPath = new Map(allPaths.map((p, i) => [p, { filename: filenames[i], buffer: buffers[i] }]))
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 8192,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userContent }]
-      })
-    })
+    // Invoice extraction — its own call. Receipts — batched, all calls run in parallel so
+    // wall-clock stays close to a single call regardless of how many receipts there are.
+    const invoiceFiles = invoicePaths.map(p => ({ ...byPath.get(p), label: 'SUPPLIER INVOICE' }))
+    const receiptBatches = chunk(receiptPaths, RECEIPT_BATCH_SIZE)
+      .map(batch => batch.map(p => ({ ...byPath.get(p), label: 'RECEIPT / PHOTO' })))
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error(err.error?.message || `API error ${response.status}`)
-    }
+    const [invoiceData, ...batchResults] = await Promise.all([
+      extract(anthropicKey, INVOICE_PROMPT, invoiceFiles),
+      ...receiptBatches.map(files => extract(anthropicKey, RECEIPT_PROMPT, files)),
+    ])
 
-    const data = await response.json()
-    const raw = data.content?.[0]?.text || ''
-    const extracted = JSON.parse(stripFences(raw))
-    if (!extracted.invoice?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
+    if (!invoiceData?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
+    const receipts = batchResults.flatMap(r => Array.isArray(r?.receipts) ? r.receipts : [])
 
-    const R = reconcile(extracted.invoice, extracted.receipts || [])
-    const periodEndLabel = fmtDate(extracted.invoice.period_end)
+    const R = reconcile(invoiceData, receipts)
+    const periodEndLabel = fmtDate(invoiceData.period_end)
     const { workbook, stats } = buildFuelReconXlsx(R, { periodEndLabel })
     const buf = await workbook.xlsx.writeBuffer()
 
-    const filename = `Fuel Reconciliation - ${extracted.invoice.invoice_number || runId.slice(0, 8)}.xlsx`
+    const filename = `Fuel Reconciliation - ${invoiceData.invoice_number || runId.slice(0, 8)}.xlsx`
     await saveCostDoc(runId, filename, buf)
 
     const output = [
