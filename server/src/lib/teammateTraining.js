@@ -8,14 +8,6 @@ const { tmGet } = require('./teammate')
 // per employee (per the OpenAPI docs — System Administration → Integration →
 // OpenAPI Documentation → API Endpoints → Human Resources) and filters by due date.
 
-function pick(obj, paths) {
-  for (const path of paths) {
-    const val = path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj)
-    if (val != null && val !== '') return val
-  }
-  return undefined
-}
-
 // Confirmed live shape (28 Jul 2026): { response_data: { total, page, pageSize, data: [...] } },
 // each row { firstName, lastName, employeeId, position, reportTo, branch, workplace }
 // — no per-row active flag, but the endpoint appears to only return active staff.
@@ -39,16 +31,24 @@ async function getAllActiveEmployees() {
   return results.filter(e => e.id)
 }
 
+// Confirmed live shape (28 Jul 2026): { response_data: { employeeDetails, skill: [...],
+// adHocTraining, qualification, attachment } }. Each skill row: { skill, certNo,
+// completedDate, expiryDate, duration, competencyLevel, groupName, isActive }.
+// `expiryDate` is the real due date — `duration` is often descriptive text
+// ("Perpetual") rather than a date, so it's not usable for expiry filtering.
 async function getCompetenciesFor(employee) {
   const body = await tmGet(`/employeeCompetencyList?employeeId=${employee.id}`)
-  const list = Array.isArray(body?.response_data) ? body.response_data : (Array.isArray(body) ? body : [])
-  return list.map(c => ({
-    employee: employee.name,
-    competency: pick(c, ['competencyName', 'name', 'competency']),
-    certNo: pick(c, ['certNo', 'certNumber', 'cert_no']),
-    dueDate: pick(c, ['dueDate', 'due_date', 'expiryDate']),
-    status: pick(c, ['status']),
-  })).filter(c => c.dueDate)
+  const list = body?.response_data?.skill || []
+  return list
+    .filter(c => c.isActive !== 'no')
+    .map(c => ({
+      employee: employee.name,
+      competency: c.skill,
+      certNo: c.certNo,
+      dueDate: c.expiryDate,
+      status: c.isActive === 'yes' ? 'Active' : c.isActive,
+    }))
+    .filter(c => c.dueDate)
 }
 
 // Returns { expired, expiringSoon } — one row per competency (an employee can

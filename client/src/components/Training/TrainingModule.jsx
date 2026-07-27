@@ -52,6 +52,11 @@ export default function TrainingModule() {
 
   useEffect(() => { load() }, [load])
 
+  const metrics = [
+    { kicker: 'Expired', num: expired ? expired.length : '…', meta: 'need action now', urgent: !!expired?.length },
+    { kicker: 'Expiring within 6 weeks', num: expiringSoon ? expiringSoon.length : '…', meta: 'plan renewals', urgent: false },
+  ]
+
   return (
     <div className="page">
       <div className="page-header">
@@ -59,6 +64,16 @@ export default function TrainingModule() {
           <div className="page-title">Training</div>
           <div className="page-subtitle">Expiring competencies, licences, and certificates from Teammate</div>
         </div>
+      </div>
+
+      <div className="metrics" style={{ marginBottom: 20 }}>
+        {metrics.map(m => (
+          <div key={m.kicker} className={`card${m.urgent ? ' urgent' : ''}`} style={{ padding: '16px 18px' }}>
+            <div className="card-kicker">{m.kicker}</div>
+            <div className="card-num">{loading ? '…' : m.num}</div>
+            <div className="card-meta">{m.meta}</div>
+          </div>
+        ))}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
