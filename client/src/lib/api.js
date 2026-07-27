@@ -51,6 +51,7 @@ export const api = {
 
   // QuickBooks Time — upcoming leave
   getQbtLeave: () => request('/api/qbt/leave'),
+  getQbtLeaveDocument: () => request('/api/qbt/leave/document'),
 
   // Processes
   getProcesses: () => request('/api/processes'),

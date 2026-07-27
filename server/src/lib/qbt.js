@@ -26,9 +26,14 @@ async function qbtGet(path, params = {}) {
   return results
 }
 
-// One row per employee, bridging any gaps between their requests in the window
-// (Tony's rule from the old Word-doc report: earliest start → latest end, hours summed,
-// leave types combined) — see ~/Documents/Claude/Projects/Staff Leave/HANDOVER.md.
+// One row per employee, bridging any gaps between their leave days in the window
+// (Tony's rule from the old Word-doc report: earliest start → latest end date, hours
+// summed, leave types combined) — see ~/Documents/Claude/Projects/Staff Leave/HANDOVER.md.
+//
+// NOTE: the /time_off_requests object itself carries no date/hours/jobcode — those live
+// on its child /time_off_request_entries (one entry per calendar day: date, duration in
+// SECONDS, jobcode_id). Only approved requests are counted (matches what the old browser
+// scrape reported — confirmed leave, not pending requests).
 async function getUpcomingLeave(daysAhead = 91) {
   const today = new Date()
   const end = new Date(today)
@@ -36,10 +41,8 @@ async function getUpcomingLeave(daysAhead = 91) {
   const startDate = today.toISOString().split('T')[0]
   const endDate = end.toISOString().split('T')[0]
 
-  // time_off_requests has no date filter params (ids/user_ids/supplemental_data/limit/page
-  // only per the API reference) — fetch all and filter to the window client-side below.
-  const [requests, users, ptoJobcodes] = await Promise.all([
-    qbtGet('/time_off_requests'),
+  const [entries, users, ptoJobcodes] = await Promise.all([
+    qbtGet('/time_off_request_entries', { status: 'approved' }),
     qbtGet('/users', { active: 'yes' }),
     qbtGet('/jobcodes', { type: 'pto' }),
   ])
@@ -54,19 +57,21 @@ async function getUpcomingLeave(daysAhead = 91) {
   }
 
   const byEmployee = {}
-  for (const r of Object.values(requests.time_off_requests || {})) {
-    if (r.start_date < startDate || r.start_date > endDate) continue
-    const entry = byEmployee[r.user_id] || (byEmployee[r.user_id] = {
-      employee: userName[r.user_id] || `User ${r.user_id}`,
-      startDate: r.start_date,
-      endDate: r.end_date,
+  for (const e of Object.values(entries.time_off_request_entries || {})) {
+    if (!e.date || e.date < startDate || e.date > endDate) continue
+    const entry = byEmployee[e.user_id] || (byEmployee[e.user_id] = {
+      employee: userName[e.user_id] || `User ${e.user_id}`,
+      startDate: e.date,
+      endDate: e.date,
       leaveTypes: new Set(),
       totalHours: 0,
+      days: 0,
     })
-    if (r.start_date < entry.startDate) entry.startDate = r.start_date
-    if (r.end_date > entry.endDate) entry.endDate = r.end_date
-    entry.leaveTypes.add(leaveTypeName[r.paid_time_off_id] || 'Leave')
-    entry.totalHours += Number(r.hours) || 0
+    if (e.date < entry.startDate) entry.startDate = e.date
+    if (e.date > entry.endDate) entry.endDate = e.date
+    entry.leaveTypes.add(leaveTypeName[e.jobcode_id] || 'Leave')
+    entry.totalHours += (Number(e.duration) || 0) / 3600
+    entry.days += 1
   }
 
   return Object.values(byEmployee)
@@ -76,6 +81,7 @@ async function getUpcomingLeave(daysAhead = 91) {
       endDate: e.endDate,
       leaveType: [...e.leaveTypes].join(' / '),
       totalHours: e.totalHours,
+      days: e.days,
     }))
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.employee.localeCompare(b.employee))
 }
