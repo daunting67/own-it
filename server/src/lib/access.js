@@ -13,6 +13,7 @@ const DEPARTMENTS = [
   { id: 'projects', label: 'Project Management' },
   { id: 'cost',     label: 'Cost Control' },
   { id: 'hs',       label: 'Health & Safety' },
+  { id: 'training', label: 'Training' },
 ]
 
 const DEPT_IDS = DEPARTMENTS.map(d => d.id)

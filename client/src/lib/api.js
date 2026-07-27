@@ -56,6 +56,9 @@ export const api = {
   // Health & Safety — recent incidents
   getRecentIncidents: () => request('/api/incidents/recent'),
 
+  // Training — expiring competencies/certificates
+  getExpiringTraining: () => request('/api/training/expiring'),
+
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),

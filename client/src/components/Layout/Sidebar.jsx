@@ -11,7 +11,7 @@ const ITEMS = [
   { id: 'cost',        label: 'Cost Control',       live: true, dept: 'cost' },
   { id: 'hs',          label: 'Health & Safety',   live: true,  dept: 'hs' },
   { id: 'operations',  label: 'Operations',        live: false },
-  { id: 'training',    label: 'Training',          live: false },
+  { id: 'training',    label: 'Training',          live: true,  dept: 'training' },
   { id: 'plant',       label: 'Plant & Equipment', live: false },
 ]
 
