@@ -13,11 +13,8 @@ router.use(requireAuth)
 router.get('/debug', requireAdmin, async (req, res) => {
   try {
     const employeeBody = await tmGet('/employee?page=1&length=3&order=employeeId&direction=asc')
-    const list = employeeBody?.response_data?.employees
-      || (Array.isArray(employeeBody?.response_data) ? employeeBody.response_data : null)
-      || employeeBody?.employees
-      || []
-    const firstId = list[0]?._id || list[0]?.id || list[0]?.employeeId
+    const list = employeeBody?.response_data?.data || []
+    const firstId = list[0]?.employeeId
     const competencyBody = firstId ? await tmGet(`/employeeCompetencyList?employeeId=${firstId}`) : null
     res.json({ employeeBody, competencyBody, firstId })
   } catch (err) {

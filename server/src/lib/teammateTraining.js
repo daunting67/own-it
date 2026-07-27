@@ -16,26 +16,20 @@ function pick(obj, paths) {
   return undefined
 }
 
-function extractList(body) {
-  return body?.response_data?.employees
-    || (Array.isArray(body?.response_data) ? body.response_data : null)
-    || body?.employees
-    || []
-}
-
+// Confirmed live shape (28 Jul 2026): { response_data: { total, page, pageSize, data: [...] } },
+// each row { firstName, lastName, employeeId, position, reportTo, branch, workplace }
+// — no per-row active flag, but the endpoint appears to only return active staff.
 async function getAllActiveEmployees() {
   const results = []
   let page = 1
   for (;;) {
     const body = await tmGet(`/employee?page=${page}&length=100&order=employeeId&direction=asc`)
-    const list = extractList(body)
+    const list = body?.response_data?.data || []
     if (!list.length) break
     for (const e of list) {
-      const active = pick(e, ['active', 'status'])
-      if (active === false || active === 'inactive' || active === 'Terminated') continue
       results.push({
-        id: pick(e, ['_id', 'id', 'employeeId']),
-        name: pick(e, ['name', 'fullName']) || [pick(e, ['firstName', 'first_name']), pick(e, ['lastName', 'last_name'])].filter(Boolean).join(' '),
+        id: e.employeeId,
+        name: [e.firstName, e.lastName].filter(Boolean).join(' '),
       })
     }
     if (list.length < 100) break
