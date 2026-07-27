@@ -49,6 +49,9 @@ export const api = {
   updateInvoice: (id, data) => request(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteInvoice: (id) => request(`/api/invoices/${id}`, { method: 'DELETE' }),
 
+  // QuickBooks Time — upcoming leave
+  getQbtLeave: () => request('/api/qbt/leave'),
+
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),

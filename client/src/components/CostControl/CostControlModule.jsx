@@ -206,7 +206,7 @@ export default function CostControlModule() {
                       onClick={() => downloadRun(run.id)}
                       disabled={historyDocFetching === run.id}
                     >
-                      {historyDocFetching === run.id ? 'Loading…' : 'Download'}
+                      {historyDocFetching === run.id ? 'Loading…' : `Download – ${run.input || 'Reconciliation'}`}
                     </button>
                   )}
                 </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import SupplierManager from './SupplierManager'
 import InvoiceList from './InvoiceList'
+import UpcomingLeave from './UpcomingLeave'
 
 export default function PayrollModule({ onSaveStateChange }) {
   const [suppliers, setSuppliers] = useState([])
@@ -90,7 +91,7 @@ export default function PayrollModule({ onSaveStateChange }) {
       </div>
 
       <div className="tabs">
-        {[['invoices', 'Invoice register'], ['suppliers', 'Suppliers & rate cards']].map(([id, label]) => (
+        {[['invoices', 'Invoice register'], ['suppliers', 'Suppliers & rate cards'], ['leave', 'Upcoming leave']].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -114,6 +115,7 @@ export default function PayrollModule({ onSaveStateChange }) {
           onDelete={deleteSupplier}
         />
       )}
+      {tab === 'leave' && <UpcomingLeave />}
     </div>
   )
 }

@@ -377,7 +377,10 @@ router.post('/run', async (req, res) => {
       'Download the .xlsx below — Missing Receipts is the chase-up worklist, Exceptions needs a decision.',
     ].filter(Boolean).join('\n')
 
-    await db.from('ProcessRun').update({ output, status: 'completed' }).eq('id', runId)
+    const invoiceLabel = `Invoice ${invoiceData.invoice_number || runId.slice(0, 8)}${
+      invoiceData.invoice_date ? ' · ' + fmtDate(invoiceData.invoice_date) : periodEndLabel ? ' · ' + periodEndLabel : ''
+    }`
+    await db.from('ProcessRun').update({ input: invoiceLabel, output, status: 'completed' }).eq('id', runId)
     removeUploads(allPaths).catch(() => {})
     res.json({ id: runId, output, document: buf.toString('base64'), filename, stats, summary: R.summary })
 
