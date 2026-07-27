@@ -11,7 +11,7 @@ async function qbtGet(path, params = {}) {
   const results = {}
   let page = 1
   for (;;) {
-    const qs = new URLSearchParams({ ...params, page, per_page: 200 })
+    const qs = new URLSearchParams({ ...params, page, limit: 200 })
     const res = await fetch(`${BASE}${path}?${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -36,8 +36,10 @@ async function getUpcomingLeave(daysAhead = 91) {
   const startDate = today.toISOString().split('T')[0]
   const endDate = end.toISOString().split('T')[0]
 
+  // time_off_requests has no date filter params (ids/user_ids/supplemental_data/limit/page
+  // only per the API reference) — fetch all and filter to the window client-side below.
   const [requests, users, ptoJobcodes] = await Promise.all([
-    qbtGet('/time_off_requests', { start_date: startDate, end_date: endDate }),
+    qbtGet('/time_off_requests'),
     qbtGet('/users', { active: 'yes' }),
     qbtGet('/jobcodes', { type: 'pto' }),
   ])
