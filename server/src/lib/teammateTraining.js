@@ -51,16 +51,38 @@ async function getCompetenciesFor(employee) {
     .filter(c => c.dueDate)
 }
 
+// Teammate's API rate-limits bursts (hit a 429 firing all 38 employeeCompetencyList
+// calls via Promise.all) — run a handful concurrently instead of all at once, with a
+// short gap between batches.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = []
+  for (let i = 0; i < items.length; i += limit) {
+    const batch = items.slice(i, i + limit)
+    const batchResults = await Promise.all(batch.map(fn))
+    results.push(...batchResults)
+    if (i + limit < items.length) await new Promise(r => setTimeout(r, 400))
+  }
+  return results
+}
+
+// Simple in-memory cache — this endpoint means 1 + N Teammate calls per load, and
+// module state survives across requests on a warm serverless instance, so a short
+// TTL avoids re-hammering Teammate on quick refreshes/repeat page loads.
+let cache = null
+const CACHE_TTL_MS = 5 * 60 * 1000
+
 // Returns { expired, expiringSoon } — one row per competency (an employee can
 // appear more than once if they hold more than one expiring ticket).
 async function getExpiringTraining(weeksAhead = 6) {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data
+
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const cutoff = new Date(today)
   cutoff.setDate(cutoff.getDate() + weeksAhead * 7)
 
   const employees = await getAllActiveEmployees()
-  const perEmployee = await Promise.all(employees.map(e => getCompetenciesFor(e).catch(() => [])))
+  const perEmployee = await mapWithConcurrency(employees, 5, e => getCompetenciesFor(e).catch(() => []))
   const all = perEmployee.flat()
 
   const expired = []
@@ -74,7 +96,10 @@ async function getExpiringTraining(weeksAhead = 6) {
 
   expired.sort((a, b) => a.dueDate.localeCompare(b.dueDate))
   expiringSoon.sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-  return { expired, expiringSoon }
+
+  const data = { expired, expiringSoon }
+  cache = { at: Date.now(), data }
+  return data
 }
 
 module.exports = { getExpiringTraining }
