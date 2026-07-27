@@ -10,6 +10,7 @@ import PayrollModule from './components/Payroll/PayrollModule'
 import MeetingsModule from './components/Meetings/MeetingsModule'
 import ProjectManagementModule from './components/ProjectManagement/ProjectManagementModule'
 import CostControlModule from './components/CostControl/CostControlModule'
+import HealthSafetyModule from './components/HealthSafety/HealthSafetyModule'
 import UsersModule from './components/Users/UsersModule'
 import ComingSoon from './components/ComingSoon'
 
@@ -77,6 +78,7 @@ export default function App() {
               if (dept === 'meetings') return can('meetings') ? <MeetingsModule /> : <ComingSoon dept={dept} />
               if (dept === 'projects') return can('projects') ? <ProjectManagementModule /> : <ComingSoon dept={dept} />
               if (dept === 'cost') return can('cost') ? <CostControlModule /> : <ComingSoon dept={dept} />
+              if (dept === 'hs') return can('hs') ? <HealthSafetyModule /> : <ComingSoon dept={dept} />
               if (dept === 'users') return user?.admin ? <UsersModule /> : <ComingSoon dept={dept} />
               return <ComingSoon dept={dept} />
             })()}

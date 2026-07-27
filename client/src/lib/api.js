@@ -53,6 +53,9 @@ export const api = {
   getQbtLeave: () => request('/api/qbt/leave'),
   getQbtLeaveDocument: () => request('/api/qbt/leave/document'),
 
+  // Health & Safety — recent incidents
+  getRecentIncidents: () => request('/api/incidents/recent'),
+
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),

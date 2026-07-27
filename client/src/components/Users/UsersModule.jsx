@@ -9,6 +9,7 @@ const DEPARTMENTS = [
   { id: 'meetings', label: 'Meetings' },
   { id: 'projects', label: 'Project Management' },
   { id: 'cost',     label: 'Cost Control' },
+  { id: 'hs',       label: 'Health & Safety' },
 ]
 
 const EMPTY = { name: '', email: '', password: '', admin: false, departments: [] }

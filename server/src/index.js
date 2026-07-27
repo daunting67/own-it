@@ -11,6 +11,7 @@ const teammateRouter = require('./routes/teammate')
 const soqRouter = require('./routes/soq')
 const costControlRouter = require('./routes/costControl')
 const qbtRouter = require('./routes/qbt')
+const incidentsRouter = require('./routes/incidents')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -39,6 +40,7 @@ app.use('/api/teammate', teammateRouter)
 app.use('/api/soq', soqRouter)
 app.use('/api/cost-control', costControlRouter)
 app.use('/api/qbt', qbtRouter)
+app.use('/api/incidents', incidentsRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-20-teammate-share-live' }))
 
