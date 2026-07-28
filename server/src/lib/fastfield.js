@@ -86,4 +86,19 @@ async function probeSubmissionEndpoints(formId) {
   return results
 }
 
-module.exports = { authenticate, probeSubmissionEndpoints, FASTFIELD_BASE }
+// Raw authenticated GET against any v3 path, returning the parsed JSON body.
+async function rawGet(path) {
+  const sessionToken = await authenticate()
+  const resp = await fetch(`${FASTFIELD_BASE}${path}`, {
+    headers: {
+      'FastField-API-Key': FASTFIELD_API_KEY,
+      Authorization: `Bearer ${sessionToken}`,
+      'X-Gatekeeper-SessionToken': sessionToken,
+    },
+  })
+  const text = await resp.text()
+  if (!resp.ok) throw new Error(`FastField GET ${path} failed (${resp.status}): ${text}`)
+  return JSON.parse(text)
+}
+
+module.exports = { authenticate, probeSubmissionEndpoints, rawGet, FASTFIELD_BASE }

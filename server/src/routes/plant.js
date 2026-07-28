@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { probeSubmissionEndpoints } = require('../lib/fastfield')
+const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
 
 const router = Router()
 router.use(requireAuth)
@@ -17,6 +17,20 @@ router.get('/_probe', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('FastField probe failed:', err)
     res.status(500).json({ error: err.message || 'FastField probe failed' })
+  }
+})
+
+// TEMPORARY, admin-only: dumps the full raw form definition (fields, layout,
+// delivery/webhook config if present) so we can inspect it ourselves.
+router.get('/_form-raw', requireAdmin, async (req, res) => {
+  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
+  if (!formId) return res.status(400).json({ error: 'formId required' })
+  try {
+    const form = await rawGet(`/forms/${formId}`)
+    res.json(form)
+  } catch (err) {
+    console.error('FastField form fetch failed:', err)
+    res.status(500).json({ error: err.message || 'FastField form fetch failed' })
   }
 })
 
