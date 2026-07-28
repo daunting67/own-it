@@ -37,7 +37,7 @@ async function getRecentIncidents(daysBack = 28) {
     const list = extractList(body)
     if (!list.length) break
     for (const f of list) {
-      const templateName = pick(f, ['formTemplate.name', 'formTemplateName', 'template.name'])
+      const templateName = pick(f, ['formTemplate', 'formTemplate.name', 'formTemplateName', 'template.name'])
       if (!templateName || !TEMPLATE_NAME_MATCH.test(templateName)) continue
       const dateStr = pick(f, ['formDate', 'date'])
       const date = dateStr ? new Date(dateStr) : null
