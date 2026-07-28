@@ -49,13 +49,18 @@ async function probeSubmissionEndpoints(formId) {
   }
 
   const candidates = [
-    { method: 'GET', path: `/submission/dispatch/status?formId=${formId}` },
-    { method: 'GET', path: `/submission/search?formId=${formId}` },
-    { method: 'GET', path: `/submission?formId=${formId}` },
-    { method: 'GET', path: `/submission/list?formId=${formId}` },
-    { method: 'GET', path: `/form/${formId}/submission` },
-    { method: 'GET', path: `/form/${formId}/submissions` },
-    { method: 'POST', path: `/submission/query`, body: { formId: Number(formId) } },
+    { method: 'GET', path: `/form` },
+    { method: 'GET', path: `/forms` },
+    { method: 'GET', path: `/form/${formId}` },
+    { method: 'GET', path: `/dispatch?formId=${formId}` },
+    { method: 'GET', path: `/dispatches?formId=${formId}` },
+    { method: 'GET', path: `/submission/dispatch?formId=${formId}` },
+    { method: 'GET', path: `/submission/dispatch/list?formId=${formId}` },
+    { method: 'GET', path: `/export?formId=${formId}` },
+    { method: 'GET', path: `/report?formId=${formId}` },
+    { method: 'GET', path: `/report/submission?formId=${formId}` },
+    { method: 'GET', path: `/submissiondata?formId=${formId}` },
+    { method: 'GET', path: `/submission/data?formId=${formId}` },
   ]
 
   const results = []
