@@ -63,4 +63,20 @@ function allSites() {
   return Object.values(SITE_FORMS)
 }
 
-module.exports = { storeSubmission, getTodaysSubmissions, allSites, siteNameForForm }
+// One-off: recompute `shifts` for existing rows stored before that column
+// existed, from their already-captured rawPayload.
+async function backfillShifts() {
+  const { data: rows, error } = await db.from('DjrCheck').select('id, rawPayload').is('shifts', null)
+  if (error) throw new Error(error.message)
+  let updated = 0
+  for (const row of rows || []) {
+    const shifts = extractShifts(row.rawPayload)
+    if (shifts.length === 0) continue
+    const { error: updErr } = await db.from('DjrCheck').update({ shifts }).eq('id', row.id)
+    if (updErr) throw new Error(updErr.message)
+    updated += 1
+  }
+  return { checked: (rows || []).length, updated }
+}
+
+module.exports = { storeSubmission, getTodaysSubmissions, allSites, siteNameForForm, backfillShifts }

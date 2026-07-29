@@ -1,6 +1,6 @@
 const { Router } = require('express')
-const { requireAuth } = require('../middleware/auth')
-const { getTodaysSubmissions, allSites } = require('../lib/djrChecks')
+const { requireAuth, requireAdmin } = require('../middleware/auth')
+const { getTodaysSubmissions, allSites, backfillShifts } = require('../lib/djrChecks')
 
 const router = Router()
 router.use(requireAuth)
@@ -16,6 +16,17 @@ router.get('/djr/today', async (req, res) => {
   } catch (err) {
     console.error('DJR fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not load DJR submissions' })
+  }
+})
+
+// TEMPORARY, admin-only: one-off backfill of `shifts` for rows stored before
+// that column existed.
+router.post('/djr/_backfill-shifts', requireAdmin, async (req, res) => {
+  try {
+    const result = await backfillShifts()
+    res.json(result)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 
