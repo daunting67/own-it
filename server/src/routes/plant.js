@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
+const { probeSubmissionEndpoints, rawGet, missingConfig } = require('../lib/fastfield')
 const { getChecksForDay, getKnownMachines, mergeChecks } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds } = require('../lib/fastfieldSubmissions')
@@ -75,14 +75,22 @@ router.get('/today', async (req, res) => {
       registerCount: register.machines.length,
       registerError: register.error || null,
       // How the checks were obtained, so the page can be honest about it.
-      feed: {
-        formIds,
-        endpoint: pulledToday.endpoint || pulledYesterday.endpoint || null,
-        pulledToday: pulledToday.checks.length,
-        pulledYesterday: pulledYesterday.checks.length,
-        truncated: !!(pulledToday.truncated || pulledYesterday.truncated),
-        error: pulledToday.error || pulledYesterday.error || null,
-      },
+      feed: (() => {
+        const error = pulledToday.error || pulledYesterday.error || null
+        const allErrors = `${error || ''} ${register.error || ''}`
+        return {
+          formIds,
+          endpoint: pulledToday.endpoint || pulledYesterday.endpoint || null,
+          pulledToday: pulledToday.checks.length,
+          pulledYesterday: pulledYesterday.checks.length,
+          truncated: !!(pulledToday.truncated || pulledYesterday.truncated),
+          error,
+          // Nothing FastField-side can work without these, and the symptom
+          // (empty dashboard, no plant list) looks identical to a code bug.
+          needsCredentials: /credentials not configured/i.test(allErrors) || missingConfig().length > 0,
+          missingEnv: missingConfig(),
+        }
+      })(),
       generatedAt: new Date().toISOString(),
       // Kept for any browser still running the previous build.
       checks: todaySummary.checks,

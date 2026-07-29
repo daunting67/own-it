@@ -9,6 +9,16 @@ const FASTFIELD_API_KEY = process.env.FASTFIELD_API_KEY || ''
 const FASTFIELD_USERNAME = process.env.FASTFIELD_USERNAME || ''
 const FASTFIELD_PASSWORD = process.env.FASTFIELD_PASSWORD || ''
 
+// Names only — never values. Lets the dashboard say exactly which server
+// settings are missing instead of failing in a way that looks like a bug.
+function missingConfig() {
+  return [
+    ['FASTFIELD_API_KEY', FASTFIELD_API_KEY],
+    ['FASTFIELD_USERNAME', FASTFIELD_USERNAME],
+    ['FASTFIELD_PASSWORD', FASTFIELD_PASSWORD],
+  ].filter(([, value]) => !value).map(([name]) => name)
+}
+
 function assertConfigured() {
   if (!FASTFIELD_API_KEY || !FASTFIELD_USERNAME || !FASTFIELD_PASSWORD) {
     throw new Error('FastField credentials not configured (FASTFIELD_API_KEY/FASTFIELD_USERNAME/FASTFIELD_PASSWORD)')
@@ -126,5 +136,6 @@ async function rawGet(path) {
 }
 
 module.exports = {
-  authenticate, getSessionToken, apiCall, probeSubmissionEndpoints, rawGet, FASTFIELD_BASE,
+  authenticate, getSessionToken, apiCall, probeSubmissionEndpoints, rawGet,
+  missingConfig, FASTFIELD_BASE,
 }

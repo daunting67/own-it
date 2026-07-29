@@ -86,7 +86,7 @@ function DayPanel({ title, data }) {
 // a terminal: what the FastField plant-list lookup returns, what the webhook
 // actually received (including the field names FastField used), and whether
 // the form has a delivery action pointing at us at all.
-function Diagnostics() {
+function Diagnostics({ autoOpen = false }) {
   const [open, setOpen] = useState(false)
   const [diag, setDiag] = useState(null)
   const [error, setError] = useState(null)
@@ -100,6 +100,16 @@ function Diagnostics() {
       .catch(err => setError(err.message || 'Diagnostics failed'))
       .finally(() => setBusy(false))
   }
+
+  // When the FastField feed is down, open and run without being asked — the
+  // answer needs to be on screen, not behind a click.
+  useEffect(() => {
+    if (autoOpen && !open) {
+      setOpen(true)
+      run()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen])
 
   const label = { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }
   const mono = { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }
@@ -292,6 +302,28 @@ export default function PlantModule() {
         </div>
       )}
 
+      {data?.feed?.needsCredentials && (
+        <div style={{ padding: 14, background: '#fff4e5', border: '1px solid #e8a33d', borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
+          <strong>FastField isn't connected, so this page can only show checks that were pushed to it.</strong>
+          <div style={{ marginTop: 6 }}>
+            {data.feed.missingEnv?.length > 0
+              ? <>The server is missing these settings: <code>{data.feed.missingEnv.join(', ')}</code>.</>
+              : <>The server has FastField credentials but they were rejected.</>}
+            {' '}Add them to the <strong>backend</strong> project in Vercel (same place as the Otter and Teammate logins), then redeploy.
+          </div>
+        </div>
+      )}
+
+      {data?.feed && !data.feed.endpoint && !data.feed.needsCredentials && (
+        <div style={{ padding: 14, background: '#fdeaea', border: '1px solid #d88', borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
+          <strong>Couldn't read submitted checklists from FastField.</strong>
+          <div style={{ marginTop: 6 }}>
+            {data.feed.error || 'No working submissions endpoint found.'} Showing only checks FastField pushed to the portal.
+            {user?.admin && ' Diagnostics below have run automatically.'}
+          </div>
+        </div>
+      )}
+
       {!error && data?.knownMachineCount === 0 && (
         <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
           No machines seen yet — the machine list builds itself from checks as they're submitted in FastField.
@@ -330,7 +362,7 @@ export default function PlantModule() {
         </div>
       )}
 
-      {user?.admin && <Diagnostics />}
+      {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint} />}
     </div>
   )
 }
