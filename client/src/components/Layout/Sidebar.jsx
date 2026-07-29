@@ -12,7 +12,7 @@ const ITEMS = [
   { id: 'hs',          label: 'Health & Safety',   live: true,  dept: 'hs' },
   { id: 'operations',  label: 'Operations',        live: false },
   { id: 'training',    label: 'Training',          live: true,  dept: 'training' },
-  { id: 'plant',       label: 'Plant & Equipment', live: false },
+  { id: 'plant',       label: 'Plant & Equipment', live: true, dept: 'plant' },
 ]
 
 export default function Sidebar({ active, onSelect }) {
