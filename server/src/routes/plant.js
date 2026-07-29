@@ -1,9 +1,25 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
+const { getTodaysChecks, getKnownMachines } = require('../lib/plantChecks')
 
 const router = Router()
 router.use(requireAuth)
+
+// Today's Mobile Plant Checks submissions (captured via the FastField
+// webhook — see routes/plantWebhook.js), plus which known machines have
+// NOT checked in today.
+router.get('/today', async (req, res) => {
+  try {
+    const [checks, knownMachines] = await Promise.all([getTodaysChecks(), getKnownMachines()])
+    const checkedMachines = new Set(checks.map(c => c.machine).filter(Boolean))
+    const missing = knownMachines.filter(m => !checkedMachines.has(m))
+    res.json({ checks, missing, knownMachineCount: knownMachines.length, generatedAt: new Date().toISOString() })
+  } catch (err) {
+    console.error('Plant checks fetch failed:', err)
+    res.status(500).json({ error: err.message || 'Could not load plant checks' })
+  }
+})
 
 // TEMPORARY, admin-only: probes candidate FastField v3 endpoints for listing
 // submissions so we can find the one that actually works, then remove this
