@@ -8,21 +8,25 @@ async function qbtGet(path, params = {}) {
   const token = process.env.QBT_ACCESS_TOKEN
   if (!token) throw new Error('QBT_ACCESS_TOKEN is not set')
 
+  const t0 = Date.now()
   const results = {}
   let page = 1
   for (;;) {
+    const pageStart = Date.now()
     const qs = new URLSearchParams({ ...params, page, limit: 200 })
     const res = await fetch(`${BASE}${path}?${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) throw new Error(`QBT ${path} failed: ${res.status} ${await res.text()}`)
     const body = await res.json()
+    console.log(`QBT ${path} page ${page}: ${Date.now() - pageStart}ms, more=${!!body.more}`)
     for (const key of Object.keys(body.results || {})) {
       Object.assign(results[key] || (results[key] = {}), body.results[key])
     }
     if (!body.more) break
     page += 1
   }
+  console.log(`QBT ${path} total: ${Date.now() - t0}ms across ${page} page(s)`)
   return results
 }
 
