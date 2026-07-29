@@ -102,6 +102,13 @@ router.get('/_lookup-probe', requireAdmin, async (req, res) => {
   const lookupListId = req.query.lookupListId || 'lookup_eb389c0932544272981996bc1042d82a'
   try {
     const candidates = [
+      // List-all first: if one of these works we can find the plant list by
+      // name instead of relying on a hardcoded id.
+      '/lookupList',
+      '/lookupLists',
+      '/lookuplist',
+      '/lookuplists',
+      '/lookupList/list',
       `/lookupList/${lookupListId}`,
       `/lookupLists/${lookupListId}`,
       `/lookupList/${lookupListId}/items`,
