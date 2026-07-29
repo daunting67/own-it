@@ -6,6 +6,15 @@ function fmtTime(d) {
   return new Date(d).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' })
 }
 
+function fmtShifts(shifts) {
+  if (!Array.isArray(shifts) || shifts.length === 0) return '—'
+  return shifts.map((s, i) => (
+    <div key={i} style={{ whiteSpace: 'nowrap' }}>
+      {s.employee || 'Unknown'}: {fmtTime(s.start)}–{fmtTime(s.finish)} ({s.hours ?? '—'}h)
+    </div>
+  ))
+}
+
 export default function OperationsModule() {
   const [submissions, setSubmissions] = useState(null)
   const [missing, setMissing] = useState([])
@@ -93,6 +102,7 @@ export default function OperationsModule() {
                 <th>Site</th>
                 <th>Form</th>
                 <th>Submitted by</th>
+                <th>Shift times</th>
               </tr>
             </thead>
             <tbody>
@@ -102,6 +112,7 @@ export default function OperationsModule() {
                   <td>{s.site || '—'}</td>
                   <td>{s.formName || '—'}</td>
                   <td>{s.operator || '—'}</td>
+                  <td>{fmtShifts(s.shifts)}</td>
                 </tr>
               ))}
             </tbody>

@@ -16,6 +16,20 @@ function siteNameForForm(formId) {
   return SITE_FORMS[Number(formId)] || `Unknown form ${formId}`
 }
 
+// The "shift" field is a SubForm array — one row per crew member on the DJR
+// (emp/start/fin/hrs/sch/break/total), confirmed on a live 101 Bruce Rd test.
+function extractShifts(body) {
+  const shifts = Array.isArray(body?.shift) ? body.shift : []
+  return shifts.map(s => ({
+    employee: Array.isArray(s.emp) ? (s.emp[0]?.name || s.emp[0]) : s.emp || null,
+    start: s.start || null,
+    finish: s.fin || null,
+    hours: s.total ?? s.hrs ?? null,
+    scheduledHours: s.sch ?? null,
+    breakHours: s.break ?? null,
+  }))
+}
+
 async function storeSubmission(body) {
   const formId = body?.formId
   const { data, error } = await db
@@ -25,6 +39,7 @@ async function storeSubmission(body) {
       site: siteNameForForm(formId),
       formName: body?.formName || null,
       operator: body?.userName || null,
+      shifts: extractShifts(body),
       rawPayload: body,
     })
     .select()
