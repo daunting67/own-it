@@ -16,6 +16,20 @@ const { apiCall } = require('./fastfield')
 
 const FORM_NAME_MATCH = process.env.FASTFIELD_PLANT_FORM_NAME || 'operator checklist'
 
+// The plant code reads FASTFIELD_PLANT_FORM_ID, but the live backend only has
+// FASTFIELD_FORM_ID — so it ran with NO form id, which quietly cut the endpoint
+// sweep down to the few paths that don't take one.
+//
+// FASTFIELD_FORM_ID is deliberately NOT used as a fallback: it's the PO tool's
+// variable (purchase orders), and pulling that form into the plant dashboard
+// would fill it with junk. 681653 is the Mobile Plant checklist id recorded
+// when this module was built, and stays the fallback.
+const RECORDED_PLANT_FORM_ID = '681653'
+
+function envFormId() {
+  return process.env.FASTFIELD_PLANT_FORM_ID || RECORDED_PLANT_FORM_ID
+}
+
 // Every plausible spelling of "list this form's submissions". Cheap to try —
 // they share one session — and the failures are informative: a 400 with a
 // validation message means the path exists but wants different arguments,
@@ -234,6 +248,10 @@ async function fetchSubmissions({ formIds = [], startUtc, endUtc, deadline = 0 }
       for (const sub of list) {
         const check = normaliseSubmission(sub, formId)
         if (!check.receivedAt) continue
+        // A plant check always names a machine. Anything without one is either
+        // a different form entirely or unreadable, and belongs nowhere near a
+        // compliance count.
+        if (!check.machine) continue
         if (startUtc && check.receivedAt < startUtc) continue
         if (endUtc && check.receivedAt >= endUtc) continue
         checks.push(check)
@@ -258,7 +276,7 @@ let formIdCache = { at: 0, ids: null }
 
 async function getPlantFormIds() {
   if (formIdCache.ids && Date.now() - formIdCache.at < FORM_IDS_TTL_MS) return formIdCache.ids
-  const fallback = process.env.FASTFIELD_PLANT_FORM_ID ? [process.env.FASTFIELD_PLANT_FORM_ID] : []
+  const fallback = envFormId() ? [envFormId()] : []
   try {
     const { forms } = await findPlantForms()
     const ids = (forms || []).map(f => f.id).filter(Boolean)
@@ -273,5 +291,5 @@ async function getPlantFormIds() {
 module.exports = {
   probeSubmissionListing, findPlantForms, submissionCandidates, FORM_NAME_MATCH,
   fetchSubmissions, getPlantFormIds, normaliseSubmission, submissionArray,
-  submissionTimestamp, discoverListingCall,
+  submissionTimestamp, discoverListingCall, envFormId,
 }

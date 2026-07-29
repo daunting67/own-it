@@ -1,9 +1,9 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { probeSubmissionEndpoints, rawGet, missingConfig } = require('../lib/fastfield')
+const { probeSubmissionEndpoints, rawGet, missingConfig, getSessionToken } = require('../lib/fastfield')
 const { getChecksForDay, getKnownMachines, mergeChecks } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
-const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds } = require('../lib/fastfieldSubmissions')
+const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange } = require('../lib/nzDay')
 const db = require('../lib/supabase')
 
@@ -87,7 +87,10 @@ router.get('/today', async (req, res) => {
           error,
           // Nothing FastField-side can work without these, and the symptom
           // (empty dashboard, no plant list) looks identical to a code bug.
-          needsCredentials: /credentials not configured/i.test(allErrors) || missingConfig().length > 0,
+          // Unset credentials and rejected credentials need the same action
+          // from Tony (fix them in Vercel), so both raise the same flag.
+          needsCredentials: /credentials not configured|authentication failed/i.test(allErrors)
+            || missingConfig().length > 0,
           missingEnv: missingConfig(),
         }
       })(),
@@ -137,7 +140,24 @@ router.get('/diagnostics', requireAdmin, async (req, res) => {
   const out = { generatedAt: new Date().toISOString() }
   const deadline = Date.now() + 7000
 
-  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
+  // 0. Does the FastField sign-in itself work? One line that separates "wrong
+  //    credentials" from "wrong endpoint" — every other section is ambiguous
+  //    about it, since a 401 from a probe looks much like a 404.
+  out.auth = { missingEnv: missingConfig() }
+  if (out.auth.missingEnv.length === 0) {
+    try {
+      await getSessionToken()
+      out.auth.ok = true
+    } catch (err) {
+      out.auth.ok = false
+      out.auth.error = String(err.message).slice(0, 300)
+    }
+  } else {
+    out.auth.ok = false
+    out.auth.error = `not configured: ${out.auth.missingEnv.join(', ')}`
+  }
+
+  const formId = req.query.formId || envFormId()
   out.formId = formId || null
 
   clearRegisterCache()
@@ -204,9 +224,18 @@ router.get('/diagnostics', requireAdmin, async (req, res) => {
   // better lead than a 404.
   try {
     const probeFormId = out.plantForms?.forms?.[0]?.id || formId
+    const results = await probeSubmissionListing(probeFormId, { deadline: Date.now() + 6000 })
+    // Counts by status make the pattern obvious at a glance: all 404 means
+    // wrong paths, all 401 means the session isn't accepted on these routes.
+    const statusSummary = results.reduce((acc, r) => {
+      const key = r.status ?? (r.error ? 'error' : 'none')
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
     out.submissionProbe = {
       formId: probeFormId || null,
-      results: await probeSubmissionListing(probeFormId, { deadline: Date.now() + 6000 }),
+      statusSummary,
+      results,
     }
   } catch (err) {
     out.submissionProbe = { error: String(err.message).slice(0, 300) }
@@ -238,8 +267,8 @@ router.get('/_recent', requireAdmin, async (req, res) => {
 // submissions so we can find the one that actually works, then remove this
 // and build the real /today route on top of it.
 router.get('/_probe', requireAdmin, async (req, res) => {
-  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
-  if (!formId) return res.status(400).json({ error: 'formId required (query param or FASTFIELD_PLANT_FORM_ID env var)' })
+  const formId = req.query.formId || envFormId()
+  if (!formId) return res.status(400).json({ error: 'formId required (query param, or FASTFIELD_PLANT_FORM_ID/FASTFIELD_FORM_ID env var)' })
   try {
     const results = await probeSubmissionEndpoints(formId)
     res.json({ formId, results })
@@ -252,7 +281,7 @@ router.get('/_probe', requireAdmin, async (req, res) => {
 // TEMPORARY, admin-only: dumps the full raw form definition (fields, layout,
 // delivery/webhook config if present) so we can inspect it ourselves.
 router.get('/_form-raw', requireAdmin, async (req, res) => {
-  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
+  const formId = req.query.formId || envFormId()
   if (!formId) return res.status(400).json({ error: 'formId required' })
   try {
     const form = await rawGet(`/forms/${formId}`)

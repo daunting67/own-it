@@ -133,6 +133,15 @@ function Diagnostics({ autoOpen = false }) {
 
           {error && <div style={{ ...mono, color: '#a33' }}>{error}</div>}
 
+          {diag?.auth && (
+            <div>
+              <div style={label}>0. FastField sign-in</div>
+              <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: diag.auth.ok ? '#2a7' : '#a33' }}>
+                {diag.auth.ok ? 'WORKS — credentials are good' : `FAILED — ${diag.auth.error || 'unknown reason'}`}
+              </div>
+            </div>
+          )}
+
           {diag?.register && (
             <div>
               <div style={label}>1. FastField plant list</div>
@@ -190,6 +199,11 @@ function Diagnostics({ autoOpen = false }) {
           {diag?.submissionProbe && (
             <div>
               <div style={label}>5. Can we pull submitted checklists? (form {diag.submissionProbe.formId || '?'})</div>
+              {diag.submissionProbe.statusSummary && (
+                <div style={{ ...mono, fontWeight: 700, marginBottom: 6 }}>
+                  {Object.entries(diag.submissionProbe.statusSummary).map(([status, n]) => `${n}× ${status}`).join(', ')}
+                </div>
+              )}
               <div style={mono}>
                 {diag.submissionProbe.error
                   ? diag.submissionProbe.error
