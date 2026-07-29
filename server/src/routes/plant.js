@@ -2,29 +2,49 @@ const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
 const { getChecksForDay, getKnownMachines } = require('../lib/plantChecks')
+const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const db = require('../lib/supabase')
 
 const router = Router()
 router.use(requireAuth)
 
+// Machine names come from two places (the FastField lookup list and the
+// submissions themselves) so compare them loosely — a stray double space or a
+// capital letter shouldn't make one machine look like two.
+const normalise = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+
 // Mobile Plant Checks for today AND yesterday (NZ days), captured via the
 // FastField webhook — see routes/plantWebhook.js — so the two can be compared
-// side by side. Each day also reports which known machines did NOT check in.
+// side by side. Each day reports every machine on the register that did NOT
+// check in, which is the question Tony actually needs answered each morning.
 router.get('/today', async (req, res) => {
   try {
-    const [today, yesterday, knownMachines] = await Promise.all([
+    const [today, yesterday, seenMachines, register] = await Promise.all([
       getChecksForDay(0),
       getChecksForDay(-1),
       getKnownMachines(),
+      getPlantRegister(),
     ])
+
+    // The register is the authority on what should be checked; machines seen
+    // in submissions but absent from it are still listed (plant retired from
+    // the list, or a name that doesn't match) so nothing goes unaccounted for.
+    const knownMachines = [...register.machines]
+    const registered = new Set(register.machines.map(normalise))
+    const extraSeen = seenMachines.filter(m => m && !registered.has(normalise(m)))
+    knownMachines.push(...extraSeen)
 
     const summarise = ({ day, checks }) => {
       const checkedMachines = [...new Set(checks.map(c => c.machine).filter(Boolean))]
+      const checked = new Set(checkedMachines.map(normalise))
       return {
         day,
         checks,
         checkedMachines,
-        missing: knownMachines.filter(m => !checkedMachines.includes(m)),
+        missing: knownMachines.filter(m => !checked.has(normalise(m))),
+        // Checks whose machine isn't on the register — worth surfacing rather
+        // than silently counting them as compliant.
+        unregistered: checkedMachines.filter(m => !registered.has(normalise(m))),
       }
     }
 
@@ -34,7 +54,11 @@ router.get('/today', async (req, res) => {
     res.json({
       today: todaySummary,
       yesterday: yesterdaySummary,
+      knownMachines,
       knownMachineCount: knownMachines.length,
+      registerSource: register.source || 'submissions',
+      registerCount: register.machines.length,
+      registerError: register.error || null,
       generatedAt: new Date().toISOString(),
       // Kept for any browser still running the previous build.
       checks: todaySummary.checks,
@@ -43,6 +67,25 @@ router.get('/today', async (req, res) => {
   } catch (err) {
     console.error('Plant checks fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not load plant checks' })
+  }
+})
+
+// The plant register itself (FastField lookup list), so the list the
+// dashboard measures against can be eyeballed. ?refresh=1 bypasses the
+// 15-minute cache after plant is added or retired in FastField.
+router.get('/register', async (req, res) => {
+  try {
+    if (req.query.refresh) clearRegisterCache()
+    const register = await getPlantRegister()
+    res.json({
+      source: register.source || 'unavailable',
+      path: register.path || null,
+      count: register.machines.length,
+      machines: register.machines,
+      error: register.error || null,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 

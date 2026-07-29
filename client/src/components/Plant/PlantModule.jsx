@@ -30,10 +30,18 @@ function DayPanel({ title, data }) {
 
       {missing.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>Not checked</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+            Not inspected ({missing.length})
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {missing.map(m => <span key={m} className="badge badge-danger">{m}</span>)}
           </div>
+        </div>
+      )}
+
+      {(data?.unregistered?.length || 0) > 0 && (
+        <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          Checked but not on the FastField plant list: {data.unregistered.join(', ')}
         </div>
       )}
 
@@ -119,9 +127,9 @@ export default function PlantModule() {
           <div className="metric-value">{yesterdayMachines.length}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Not checked today</div>
+          <div className="metric-label">Not inspected today</div>
           <div className="metric-value" style={{ color: 'var(--danger)' }}>{today?.missing?.length || 0}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>of {data?.knownMachineCount || 0} known machines</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>of {data?.knownMachineCount || 0} machines on the plant list</div>
         </div>
       </div>
 
@@ -130,6 +138,13 @@ export default function PlantModule() {
           {data?.generatedAt && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               Live from FastField · updated {new Date(data.generatedAt).toLocaleString('en-NZ')}
+            </div>
+          )}
+          {data && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {data.registerSource === 'fastfield-lookup'
+                ? `Measured against the FastField plant list (${data.registerCount} machines)`
+                : 'FastField plant list unavailable — measured against machines seen in previous checks only'}
             </div>
           )}
         </div>
