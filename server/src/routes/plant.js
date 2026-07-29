@@ -34,4 +34,36 @@ router.get('/_form-raw', requireAdmin, async (req, res) => {
   }
 })
 
+// TEMPORARY, admin-only: probes candidate endpoints for reading a lookup
+// list's items (the "plant" field is a LookupListPicker referencing a
+// FastField Lookup List — that list may be the self-maintained machine
+// registry we need for the Plant & Equipment dashboard).
+router.get('/_lookup-probe', requireAdmin, async (req, res) => {
+  const lookupListId = req.query.lookupListId || 'lookup_eb389c0932544272981996bc1042d82a'
+  try {
+    const candidates = [
+      `/lookupList/${lookupListId}`,
+      `/lookupLists/${lookupListId}`,
+      `/lookupList/${lookupListId}/items`,
+      `/lookupLists/${lookupListId}/items`,
+      `/lookupList/${lookupListId}/rows`,
+      `/lookupList/${lookupListId}/data`,
+      `/lookuplist/${lookupListId}`,
+      `/lookuplist/${lookupListId}/values`,
+    ]
+    const results = []
+    for (const path of candidates) {
+      try {
+        const data = await rawGet(path)
+        results.push({ path, ok: true, preview: JSON.stringify(data).slice(0, 800) })
+      } catch (err) {
+        results.push({ path, ok: false, error: err.message.slice(0, 200) })
+      }
+    }
+    res.json({ lookupListId, results })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
