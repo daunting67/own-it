@@ -4,16 +4,18 @@ const db = require('./supabase')
 // submission automatically (confirmed via a live Mobile Plant Checks test),
 // so one shared webhook can serve all 5 site DJR forms — the form itself
 // tells us which site it's for.
-const SITE_FORMS = {
-  1213930: '101 Bruce Rd',
-  1169827: '206 Manukau Rd',
-  888637: 'Waitoki Yard',
-  864934: 'EBA',
-  903980: 'EBA (Nightshift)',
-}
+// Order here is the display order (Object key order can't be trusted since
+// JS reorders numeric-looking keys — so this is a plain array, not a map).
+const SITE_FORMS = [
+  { formId: 1213930, site: '101 Bruce Rd' },
+  { formId: 1169827, site: '206 Manukau Rd' },
+  { formId: 888637, site: 'Waitoki Yard' },
+  { formId: 864934, site: 'EBA' },
+  { formId: 903980, site: 'EBA (Nightshift)' },
+]
 
 function siteNameForForm(formId) {
-  return SITE_FORMS[Number(formId)] || `Unknown form ${formId}`
+  return SITE_FORMS.find(f => f.formId === Number(formId))?.site || `Unknown form ${formId}`
 }
 
 // The "shift" field is a SubForm array — one row per crew member on the DJR
@@ -60,7 +62,7 @@ async function getTodaysSubmissions() {
 }
 
 function allSites() {
-  return Object.values(SITE_FORMS)
+  return SITE_FORMS.map(f => f.site)
 }
 
 // One-off: recompute `shifts` for existing rows stored before that column
