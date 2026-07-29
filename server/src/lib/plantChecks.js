@@ -1,59 +1,21 @@
 const db = require('./supabase')
 const { nzDayRange } = require('./nzDay')
+const { extractCheckFields } = require('./plantFields')
 
-// Extracts the plain value out of a FastField LookupListPicker / ListPicker
-// field, which arrives as an array of {name/value} objects (or plain
-// strings for simple text fields). Defensive since we haven't seen every
-// shape FastField can send yet.
-function extractValue(field) {
-  if (field == null) return null
-  if (Array.isArray(field)) {
-    const first = field[0]
-    if (first == null) return null
-    if (typeof first === 'string') return first
-    return first.name || first.value || first.col_Name || null
-  }
-  if (typeof field === 'object') return field.name || field.value || null
-  return field
-}
-
-function findField(values, keys) {
-  if (!values) return null
-  for (const key of keys) {
-    if (values[key] != null) return values[key]
-  }
-  return null
-}
-
-// FastField's HTTP/HTTPS delivery action posts a JSON body whose exact shape
-// we confirm on the first real test submission. We handle a couple of
-// plausible shapes defensively: a top-level {fields:[{fieldKey,value}]} array,
-// or a flat {values:{fieldKey:value}} map.
+// Webhook payloads are read by the same pattern-matching extractor used for
+// pulled submissions (lib/plantFields.js). The previous version looked for
+// exact field names and a real submission using Mobile_Plant / Site_Location /
+// Operator_Name stored completely blank because of it.
 function parseSubmission(body) {
-  let values = {}
-  if (Array.isArray(body?.fields)) {
-    for (const f of body.fields) values[f.fieldKey] = f.value
-  } else if (body?.values && typeof body.values === 'object') {
-    values = body.values
-  } else if (typeof body === 'object') {
-    values = body
-  }
-
-  // FastField always sends the submitting account (userName) on the delivery
-  // payload, so it's a reliable fallback when the form's own Operator field
-  // is empty or named something we don't recognise — otherwise a whole
-  // operator's checks show as "—" and look like they're missing.
-  const operator = extractValue(findField(values, ['operator', 'Operator']))
-    || values.userName || values.userEmail || null
-
+  const fields = extractCheckFields(body)
   return {
-    machine: extractValue(findField(values, ['plant', 'Mobile Plant'])),
-    site: extractValue(findField(values, ['site', 'Site/Location '])),
-    date: findField(values, ['date', 'Date']) || null,
-    operator,
-    hourClock: findField(values, ['hour', 'Hubodometer/Odometer/Hour Clock']),
-    serviceDueAt: findField(values, ['due', 'Service Due At']),
-    hoursToService: findField(values, ['service', 'Hours To Service']),
+    machine: fields.machine,
+    site: fields.site,
+    date: fields.date,
+    operator: fields.operator,
+    hourClock: fields.hourClock,
+    serviceDueAt: fields.serviceDueAt,
+    hoursToService: fields.hoursToService,
     raw: body,
   }
 }
@@ -93,6 +55,30 @@ async function storeSubmission(body) {
 }
 
 // All checks received during one NZ calendar day (0 = today, -1 = yesterday).
+// Same machine, same day, same hour-clock reading = the same check arriving by
+// both routes (pulled from FastField and pushed to the webhook). Hour clock is
+// included because a machine legitimately gets checked twice in a day on a
+// double shift, and those readings differ.
+function dedupeKey(check) {
+  const machine = String(check.machine || '').trim().toLowerCase()
+  const hour = check.hourClock == null ? '' : String(check.hourClock).trim()
+  const day = String(check.receivedAt || '').slice(0, 10)
+  return `${machine}|${hour}|${day}`
+}
+
+// Stored (webhook) rows win over pulled ones on a tie: they're the original
+// payload and carry rawPayload for diagnostics.
+function mergeChecks(stored, pulled) {
+  const seen = new Set(stored.map(dedupeKey))
+  const extra = pulled.filter(c => {
+    const key = dedupeKey(c)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return [...stored, ...extra].sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))
+}
+
 async function getChecksForDay(offsetDays = 0) {
   const { day, startUtc, endUtc } = nzDayRange(offsetDays)
   const { data, error } = await db
@@ -121,4 +107,7 @@ async function getKnownMachines() {
   return [...new Set((data || []).map(r => r.machine))].sort()
 }
 
-module.exports = { parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines }
+module.exports = {
+  parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines,
+  mergeChecks, dedupeKey,
+}

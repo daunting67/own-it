@@ -273,6 +273,13 @@ export default function PlantModule() {
                 : 'FastField plant list unavailable — measured against machines seen in previous checks only'}
             </div>
           )}
+          {data?.feed && (
+            <div style={{ fontSize: 11, color: data.feed.endpoint ? 'var(--text-muted)' : '#a33' }}>
+              {data.feed.endpoint
+                ? `Fetched direct from FastField (${data.feed.pulledToday} today, ${data.feed.pulledYesterday} yesterday)${data.feed.truncated ? ' — more exist than were returned, paging still to do' : ''}`
+                : `Could not read submissions from FastField — showing only checks pushed to the portal${data.feed.error ? ` (${data.feed.error})` : ''}`}
+            </div>
+          )}
         </div>
         <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}

@@ -1,9 +1,10 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
-const { getChecksForDay, getKnownMachines } = require('../lib/plantChecks')
+const { getChecksForDay, getKnownMachines, mergeChecks } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
-const { probeSubmissionListing, findPlantForms } = require('../lib/fastfieldSubmissions')
+const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds } = require('../lib/fastfieldSubmissions')
+const { nzDayRange } = require('../lib/nzDay')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -20,12 +21,25 @@ const normalise = name => String(name || '').trim().replace(/\s+/g, ' ').toLower
 // check in, which is the question Tony actually needs answered each morning.
 router.get('/today', async (req, res) => {
   try {
-    const [today, yesterday, seenMachines, register] = await Promise.all([
+    const deadline = Date.now() + 7000
+    const [today, yesterday, seenMachines, register, formIds] = await Promise.all([
       getChecksForDay(0),
       getChecksForDay(-1),
       getKnownMachines(),
-      getPlantRegister(),
+      getPlantRegister({ deadline }),
+      getPlantFormIds().catch(() => []),
     ])
+
+    // Pull the submitted checklists straight from FastField as well, so a
+    // check appears whether or not FastField pushed it to our webhook. The
+    // webhook has only ever delivered a couple of submissions; this is the
+    // path that actually sees every operator's check.
+    const [pulledToday, pulledYesterday] = await Promise.all([
+      fetchSubmissions({ formIds, startUtc: nzDayRange(0).startUtc, endUtc: nzDayRange(0).endUtc, deadline }),
+      fetchSubmissions({ formIds, startUtc: nzDayRange(-1).startUtc, endUtc: nzDayRange(-1).endUtc, deadline }),
+    ])
+    today.checks = mergeChecks(today.checks, pulledToday.checks)
+    yesterday.checks = mergeChecks(yesterday.checks, pulledYesterday.checks)
 
     // The register is the authority on what should be checked; machines seen
     // in submissions but absent from it are still listed (plant retired from
@@ -60,6 +74,15 @@ router.get('/today', async (req, res) => {
       registerSource: register.source || 'submissions',
       registerCount: register.machines.length,
       registerError: register.error || null,
+      // How the checks were obtained, so the page can be honest about it.
+      feed: {
+        formIds,
+        endpoint: pulledToday.endpoint || pulledYesterday.endpoint || null,
+        pulledToday: pulledToday.checks.length,
+        pulledYesterday: pulledYesterday.checks.length,
+        truncated: !!(pulledToday.truncated || pulledYesterday.truncated),
+        error: pulledToday.error || pulledYesterday.error || null,
+      },
       generatedAt: new Date().toISOString(),
       // Kept for any browser still running the previous build.
       checks: todaySummary.checks,
