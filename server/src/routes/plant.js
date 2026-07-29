@@ -89,6 +89,78 @@ router.get('/register', async (req, res) => {
   }
 })
 
+// Admin-only, and deliberately surfaced in the UI (Plant & Equipment →
+// Diagnostics) rather than being curl-only: everything needed to work out why
+// checks aren't landing, gathered in one call.
+//   1. what the lookup-list probe actually returns, path by path
+//   2. the last few submissions the webhook received, with the field names
+//      FastField sent — an all-empty row means the names don't match what
+//      parseSubmission() looks for
+//   3. whether the form even has an HTTP delivery action pointing at us
+router.get('/diagnostics', requireAdmin, async (req, res) => {
+  const out = { generatedAt: new Date().toISOString() }
+
+  clearRegisterCache()
+  try {
+    const register = await getPlantRegister()
+    out.register = {
+      source: register.source || 'unavailable',
+      path: register.path || null,
+      count: register.machines.length,
+      machines: register.machines.slice(0, 200),
+      error: register.error || null,
+    }
+  } catch (err) {
+    out.register = { source: 'unavailable', error: err.message }
+  }
+
+  try {
+    const { data, error } = await db
+      .from('PlantCheck')
+      .select('id, receivedAt, machine, operator, rawPayload')
+      .order('receivedAt', { ascending: false })
+      .limit(5)
+    if (error) throw new Error(error.message)
+    out.recentSubmissions = (data || []).map(row => {
+      const raw = row.rawPayload || {}
+      const nested = raw.values && typeof raw.values === 'object' ? raw.values : null
+      return {
+        id: row.id,
+        receivedAt: row.receivedAt,
+        machine: row.machine,
+        operator: row.operator,
+        topLevelKeys: Object.keys(raw),
+        valueKeys: nested ? Object.keys(nested) : null,
+        // Truncated so a photo-heavy payload can't blow the response up.
+        rawPreview: JSON.stringify(raw).slice(0, 4000),
+      }
+    })
+    out.totalStoredNote = 'Newest 5 submissions ever received by the webhook'
+  } catch (err) {
+    out.recentSubmissions = { error: err.message }
+  }
+
+  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
+  out.formId = formId || null
+  if (formId) {
+    try {
+      const form = await rawGet(`/forms/${formId}`)
+      const json = JSON.stringify(form)
+      out.form = {
+        name: form?.name || form?.data?.name || null,
+        topLevelKeys: Object.keys(form || {}),
+        // Does the form definition mention our webhook at all?
+        mentionsOwnItWebhook: /own-it|plant-webhook/i.test(json),
+        deliveryMentions: (json.match(/"[^"]*(deliver|webhook|integration|http)[^"]*"\s*:/gi) || []).slice(0, 40),
+      }
+    } catch (err) {
+      out.form = { error: String(err.message).slice(0, 300) }
+    }
+  }
+
+  res.json(out)
+})
+
 // Admin-only diagnostic: every check captured in the last N hours (default 48)
 // with no day-windowing at all, so we can tell "the webhook never received it"
 // apart from "it was filtered out of the day view".

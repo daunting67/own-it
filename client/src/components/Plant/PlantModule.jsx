@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
 
 function fmtTime(d) {
   if (!d) return '—'
@@ -81,7 +82,106 @@ function DayPanel({ title, data }) {
   )
 }
 
+// Admin-only. Answers "why isn't this check showing?" without anyone needing
+// a terminal: what the FastField plant-list lookup returns, what the webhook
+// actually received (including the field names FastField used), and whether
+// the form has a delivery action pointing at us at all.
+function Diagnostics() {
+  const [open, setOpen] = useState(false)
+  const [diag, setDiag] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const run = () => {
+    setBusy(true)
+    setError(null)
+    api.getPlantDiagnostics()
+      .then(setDiag)
+      .catch(err => setError(err.message || 'Diagnostics failed'))
+      .finally(() => setBusy(false))
+  }
+
+  const label = { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }
+  const mono = { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }
+
+  return (
+    <div style={{ marginTop: 32, borderTop: '1px solid var(--pi-border, #ddd)', paddingTop: 16 }}>
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={() => { setOpen(o => !o); if (!diag && !open) run() }}
+      >
+        {open ? 'Hide diagnostics' : 'Diagnostics'}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 16, display: 'grid', gap: 20 }}>
+          <div>
+            <button className="btn btn-secondary btn-sm" onClick={run} disabled={busy}>
+              {busy ? 'Checking…' : 'Re-run checks'}
+            </button>
+          </div>
+
+          {error && <div style={{ ...mono, color: '#a33' }}>{error}</div>}
+
+          {diag?.register && (
+            <div>
+              <div style={label}>1. FastField plant list</div>
+              <div style={mono}>
+                source: {diag.register.source}{diag.register.path ? `  (${diag.register.path})` : ''}
+                {'\n'}machines found: {diag.register.count}
+              </div>
+              {diag.register.count > 0 && (
+                <div style={{ ...mono, marginTop: 6 }}>{diag.register.machines.join('\n')}</div>
+              )}
+              {diag.register.error && (
+                <div style={{ ...mono, marginTop: 6, color: 'var(--text-muted)' }}>
+                  {String(diag.register.error).split(' | ').join('\n')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {Array.isArray(diag?.recentSubmissions) && (
+            <div>
+              <div style={label}>2. Last submissions the portal received ({diag.recentSubmissions.length})</div>
+              {diag.recentSubmissions.length === 0 && (
+                <div style={mono}>Nothing has ever reached the webhook.</div>
+              )}
+              {diag.recentSubmissions.map(s => (
+                <div key={s.id} style={{ marginBottom: 14 }}>
+                  <div style={mono}>
+                    {new Date(s.receivedAt).toLocaleString('en-NZ')} · machine: {s.machine || '(none)'} · operator: {s.operator || '(none)'}
+                    {'\n'}field names sent: {(s.valueKeys || s.topLevelKeys || []).join(', ') || '(none)'}
+                  </div>
+                  <details>
+                    <summary style={{ fontSize: 11, cursor: 'pointer', color: 'var(--text-muted)' }}>raw payload</summary>
+                    <div style={{ ...mono, maxHeight: 220, overflow: 'auto', background: 'rgba(0,0,0,0.04)', padding: 8 }}>
+                      {s.rawPreview}
+                    </div>
+                  </details>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {diag?.form && (
+            <div>
+              <div style={label}>3. FastField form {diag.formId}</div>
+              <div style={mono}>
+                {diag.form.error
+                  ? `could not read form: ${diag.form.error}`
+                  : `name: ${diag.form.name || '(unknown)'}\nform definition mentions our webhook: ${diag.form.mentionsOwnItWebhook ? 'YES' : 'NO'}\ndelivery-related keys: ${(diag.form.deliveryMentions || []).join(' ') || '(none found)'}`}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PlantModule() {
+  const { user } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -196,6 +296,8 @@ export default function PlantModule() {
           <DayPanel title="Yesterday" data={yesterday} />
         </div>
       )}
+
+      {user?.admin && <Diagnostics />}
     </div>
   )
 }
