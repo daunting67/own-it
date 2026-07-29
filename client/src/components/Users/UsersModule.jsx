@@ -12,6 +12,7 @@ const DEPARTMENTS = [
   { id: 'hs',       label: 'Health & Safety' },
   { id: 'training', label: 'Training' },
   { id: 'plant',    label: 'Plant & Equipment' },
+  { id: 'operations', label: 'Operations' },
 ]
 
 const EMPTY = { name: '', email: '', password: '', admin: false, departments: [] }

@@ -62,6 +62,9 @@ export const api = {
   // Plant & Equipment — today's Mobile Plant Checks (FastField)
   getPlantChecksToday: () => request('/api/plant/today'),
 
+  // Operations — today's site DJR submissions (FastField)
+  getDjrToday: () => request('/api/operations/djr/today'),
+
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),

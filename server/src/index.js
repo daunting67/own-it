@@ -15,6 +15,8 @@ const incidentsRouter = require('./routes/incidents')
 const trainingRouter = require('./routes/training')
 const plantRouter = require('./routes/plant')
 const plantWebhookRouter = require('./routes/plantWebhook')
+const operationsRouter = require('./routes/operations')
+const djrWebhookRouter = require('./routes/djrWebhook')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -47,6 +49,8 @@ app.use('/api/incidents', incidentsRouter)
 app.use('/api/training', trainingRouter)
 app.use('/api/plant', plantRouter)
 app.use('/api/plant-webhook', plantWebhookRouter)
+app.use('/api/operations', operationsRouter)
+app.use('/api/djr-webhook', djrWebhookRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-20-teammate-share-live' }))
 
