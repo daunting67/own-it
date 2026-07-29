@@ -1,23 +1,67 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
-const { getTodaysChecks, getKnownMachines } = require('../lib/plantChecks')
+const { getChecksForDay, getKnownMachines } = require('../lib/plantChecks')
+const db = require('../lib/supabase')
 
 const router = Router()
 router.use(requireAuth)
 
-// Today's Mobile Plant Checks submissions (captured via the FastField
-// webhook — see routes/plantWebhook.js), plus which known machines have
-// NOT checked in today.
+// Mobile Plant Checks for today AND yesterday (NZ days), captured via the
+// FastField webhook — see routes/plantWebhook.js — so the two can be compared
+// side by side. Each day also reports which known machines did NOT check in.
 router.get('/today', async (req, res) => {
   try {
-    const [checks, knownMachines] = await Promise.all([getTodaysChecks(), getKnownMachines()])
-    const checkedMachines = new Set(checks.map(c => c.machine).filter(Boolean))
-    const missing = knownMachines.filter(m => !checkedMachines.has(m))
-    res.json({ checks, missing, knownMachineCount: knownMachines.length, generatedAt: new Date().toISOString() })
+    const [today, yesterday, knownMachines] = await Promise.all([
+      getChecksForDay(0),
+      getChecksForDay(-1),
+      getKnownMachines(),
+    ])
+
+    const summarise = ({ day, checks }) => {
+      const checkedMachines = [...new Set(checks.map(c => c.machine).filter(Boolean))]
+      return {
+        day,
+        checks,
+        checkedMachines,
+        missing: knownMachines.filter(m => !checkedMachines.includes(m)),
+      }
+    }
+
+    const todaySummary = summarise(today)
+    const yesterdaySummary = summarise(yesterday)
+
+    res.json({
+      today: todaySummary,
+      yesterday: yesterdaySummary,
+      knownMachineCount: knownMachines.length,
+      generatedAt: new Date().toISOString(),
+      // Kept for any browser still running the previous build.
+      checks: todaySummary.checks,
+      missing: todaySummary.missing,
+    })
   } catch (err) {
     console.error('Plant checks fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not load plant checks' })
+  }
+})
+
+// Admin-only diagnostic: every check captured in the last N hours (default 48)
+// with no day-windowing at all, so we can tell "the webhook never received it"
+// apart from "it was filtered out of the day view".
+router.get('/_recent', requireAdmin, async (req, res) => {
+  try {
+    const hours = Math.min(Number(req.query.hours) || 48, 24 * 14)
+    const since = new Date(Date.now() - hours * 3600000).toISOString()
+    const { data, error } = await db
+      .from('PlantCheck')
+      .select('id, receivedAt, checkDate, machine, site, operator')
+      .gte('receivedAt', since)
+      .order('receivedAt', { ascending: false })
+    if (error) throw new Error(error.message)
+    res.json({ since, hours, count: (data || []).length, rows: data || [] })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 

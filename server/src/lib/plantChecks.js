@@ -1,4 +1,5 @@
 const db = require('./supabase')
+const { nzDayRange } = require('./nzDay')
 
 // Extracts the plain value out of a FastField LookupListPicker / ListPicker
 // field, which arrives as an array of {name/value} objects (or plain
@@ -38,11 +39,18 @@ function parseSubmission(body) {
     values = body
   }
 
+  // FastField always sends the submitting account (userName) on the delivery
+  // payload, so it's a reliable fallback when the form's own Operator field
+  // is empty or named something we don't recognise — otherwise a whole
+  // operator's checks show as "—" and look like they're missing.
+  const operator = extractValue(findField(values, ['operator', 'Operator']))
+    || values.userName || values.userEmail || null
+
   return {
     machine: extractValue(findField(values, ['plant', 'Mobile Plant'])),
     site: extractValue(findField(values, ['site', 'Site/Location '])),
     date: findField(values, ['date', 'Date']) || null,
-    operator: extractValue(findField(values, ['operator', 'Operator'])),
+    operator,
     hourClock: findField(values, ['hour', 'Hubodometer/Odometer/Hour Clock']),
     serviceDueAt: findField(values, ['due', 'Service Due At']),
     hoursToService: findField(values, ['service', 'Hours To Service']),
@@ -52,33 +60,53 @@ function parseSubmission(body) {
 
 async function storeSubmission(body) {
   const parsed = parseSubmission(body)
-  const { data, error } = await db
-    .from('PlantCheck')
-    .insert({
-      machine: parsed.machine,
-      site: parsed.site,
-      checkDate: parsed.date,
-      operator: parsed.operator,
-      hourClock: parsed.hourClock,
-      serviceDueAt: parsed.serviceDueAt,
-      hoursToService: parsed.hoursToService,
-      rawPayload: parsed.raw,
-    })
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-  return data
+  const row = {
+    machine: parsed.machine,
+    site: parsed.site,
+    checkDate: parsed.date,
+    operator: parsed.operator,
+    hourClock: parsed.hourClock,
+    serviceDueAt: parsed.serviceDueAt,
+    hoursToService: parsed.hoursToService,
+    rawPayload: parsed.raw,
+  }
+
+  const { data, error } = await db.from('PlantCheck').insert(row).select().single()
+  if (!error) return data
+
+  // Never lose a submission because one field wouldn't go in the column.
+  // FastField lets operators type free text where we expect a number
+  // ("n/a", "1,240", a blank string), and a rejected insert means that
+  // operator's check simply never appears on the dashboard. Fall back to
+  // storing the identifying columns plus the full raw payload, so the check
+  // is on the board and the detail can still be read out of rawPayload.
+  console.error('PlantCheck full insert failed, retrying minimal row:', error.message)
+  const minimal = {
+    machine: parsed.machine,
+    site: parsed.site,
+    operator: parsed.operator,
+    rawPayload: parsed.raw,
+  }
+  const retry = await db.from('PlantCheck').insert(minimal).select().single()
+  if (retry.error) throw new Error(`${error.message} (minimal retry also failed: ${retry.error.message})`)
+  return retry.data
 }
 
-async function getTodaysChecks() {
-  const today = new Date().toISOString().slice(0, 10)
+// All checks received during one NZ calendar day (0 = today, -1 = yesterday).
+async function getChecksForDay(offsetDays = 0) {
+  const { day, startUtc, endUtc } = nzDayRange(offsetDays)
   const { data, error } = await db
     .from('PlantCheck')
     .select('*')
-    .gte('receivedAt', `${today}T00:00:00.000Z`)
+    .gte('receivedAt', startUtc)
+    .lt('receivedAt', endUtc)
     .order('receivedAt', { ascending: false })
   if (error) throw new Error(error.message)
-  return data || []
+  return { day, checks: data || [] }
+}
+
+async function getTodaysChecks() {
+  return (await getChecksForDay(0)).checks
 }
 
 // Every distinct machine name ever seen, as a stand-in machine roster (grows
@@ -93,4 +121,4 @@ async function getKnownMachines() {
   return [...new Set((data || []).map(r => r.machine))].sort()
 }
 
-module.exports = { parseSubmission, storeSubmission, getTodaysChecks, getKnownMachines }
+module.exports = { parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines }

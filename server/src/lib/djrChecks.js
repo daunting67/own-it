@@ -1,4 +1,5 @@
 const db = require('./supabase')
+const { nzDayRange } = require('./nzDay')
 
 // FastField's HTTP/HTTPS delivery action includes formId/formName on every
 // submission automatically (confirmed via a live Mobile Plant Checks test),
@@ -51,11 +52,12 @@ async function storeSubmission(body) {
 }
 
 async function getTodaysSubmissions() {
-  const today = new Date().toISOString().slice(0, 10)
+  const { startUtc, endUtc } = nzDayRange(0)
   const { data, error } = await db
     .from('DjrCheck')
     .select('*')
-    .gte('receivedAt', `${today}T00:00:00.000Z`)
+    .gte('receivedAt', startUtc)
+    .lt('receivedAt', endUtc)
     .order('receivedAt', { ascending: false })
   if (error) throw new Error(error.message)
   return data || []
