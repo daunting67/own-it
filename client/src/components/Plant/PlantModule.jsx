@@ -164,9 +164,35 @@ function Diagnostics() {
             </div>
           )}
 
+          {diag?.plantForms && (
+            <div>
+              <div style={label}>4. FastField forms matching "Operator Checklist - Mobile Plant"</div>
+              <div style={mono}>
+                {diag.plantForms.error
+                  ? diag.plantForms.error
+                  : (diag.plantForms.forms || []).length === 0
+                    ? `no match (searched ${diag.plantForms.totalForms} forms)`
+                    : diag.plantForms.forms.map(f => `${f.id}  ${f.name}`).join('\n')}
+              </div>
+            </div>
+          )}
+
+          {diag?.submissionProbe && (
+            <div>
+              <div style={label}>5. Can we pull submitted checklists? (form {diag.submissionProbe.formId || '?'})</div>
+              <div style={mono}>
+                {diag.submissionProbe.error
+                  ? diag.submissionProbe.error
+                  : (diag.submissionProbe.results || [])
+                      .map(r => `${r.looksLikeSubmissions ? '>>> ' : '    '}${r.status ?? 'ERR'}  ${r.call}\n        ${(r.preview || r.error || '').replace(/\s+/g, ' ').slice(0, 160)}`)
+                      .join('\n')}
+              </div>
+            </div>
+          )}
+
           {diag?.form && (
             <div>
-              <div style={label}>3. FastField form {diag.formId}</div>
+              <div style={label}>6. FastField form {diag.formId} (recorded id)</div>
               <div style={mono}>
                 {diag.form.error
                   ? `could not read form: ${diag.form.error}`

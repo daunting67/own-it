@@ -3,6 +3,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet } = require('../lib/fastfield')
 const { getChecksForDay, getKnownMachines } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
+const { probeSubmissionListing, findPlantForms } = require('../lib/fastfieldSubmissions')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -97,21 +98,48 @@ router.get('/register', async (req, res) => {
 //      FastField sent — an all-empty row means the names don't match what
 //      parseSubmission() looks for
 //   3. whether the form even has an HTTP delivery action pointing at us
+//   4. which forms are actually named "Operator Checklist - Mobile Plant"
+//   5. whether submitted checklists can be PULLED instead of pushed
+// The FastField probes share one session and run concurrently under a time
+// budget, since a serverless request gets ~10 seconds.
 router.get('/diagnostics', requireAdmin, async (req, res) => {
   const out = { generatedAt: new Date().toISOString() }
+  const deadline = Date.now() + 7000
+
+  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
+  out.formId = formId || null
 
   clearRegisterCache()
-  try {
-    const register = await getPlantRegister()
-    out.register = {
-      source: register.source || 'unavailable',
-      path: register.path || null,
-      count: register.machines.length,
-      machines: register.machines.slice(0, 200),
-      error: register.error || null,
+  const [register, plantForms, form] = await Promise.all([
+    getPlantRegister({ deadline }).catch(err => ({ machines: [], source: null, error: err.message })),
+    findPlantForms(req.query.match || undefined).catch(err => ({ forms: [], error: String(err.message).slice(0, 300) })),
+    formId
+      ? rawGet(`/forms/${formId}`).catch(err => ({ __error: String(err.message).slice(0, 300) }))
+      : Promise.resolve(null),
+  ])
+
+  out.register = {
+    source: register.source || 'unavailable',
+    path: register.path || null,
+    count: register.machines.length,
+    machines: register.machines.slice(0, 200),
+    error: register.error || null,
+  }
+  out.plantForms = plantForms
+
+  if (form) {
+    if (form.__error) {
+      out.form = { error: form.__error }
+    } else {
+      const json = JSON.stringify(form)
+      out.form = {
+        name: form?.name || form?.data?.name || null,
+        topLevelKeys: Object.keys(form || {}),
+        // Does the form definition mention our webhook at all?
+        mentionsOwnItWebhook: /own-it|plant-webhook/i.test(json),
+        deliveryMentions: (json.match(/"[^"]*(deliver|webhook|integration|http)[^"]*"\s*:/gi) || []).slice(0, 40),
+      }
     }
-  } catch (err) {
-    out.register = { source: 'unavailable', error: err.message }
   }
 
   try {
@@ -140,22 +168,17 @@ router.get('/diagnostics', requireAdmin, async (req, res) => {
     out.recentSubmissions = { error: err.message }
   }
 
-  const formId = req.query.formId || process.env.FASTFIELD_PLANT_FORM_ID
-  out.formId = formId || null
-  if (formId) {
-    try {
-      const form = await rawGet(`/forms/${formId}`)
-      const json = JSON.stringify(form)
-      out.form = {
-        name: form?.name || form?.data?.name || null,
-        topLevelKeys: Object.keys(form || {}),
-        // Does the form definition mention our webhook at all?
-        mentionsOwnItWebhook: /own-it|plant-webhook/i.test(json),
-        deliveryMentions: (json.match(/"[^"]*(deliver|webhook|integration|http)[^"]*"\s*:/gi) || []).slice(0, 40),
-      }
-    } catch (err) {
-      out.form = { error: String(err.message).slice(0, 300) }
+  // Can we PULL submitted checklists instead of waiting to be pushed? Sweeps
+  // the plausible listing endpoints; a 400 with a validation message is a
+  // better lead than a 404.
+  try {
+    const probeFormId = out.plantForms?.forms?.[0]?.id || formId
+    out.submissionProbe = {
+      formId: probeFormId || null,
+      results: await probeSubmissionListing(probeFormId, { deadline: Date.now() + 6000 }),
     }
+  } catch (err) {
+    out.submissionProbe = { error: String(err.message).slice(0, 300) }
   }
 
   res.json(out)

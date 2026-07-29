@@ -15,6 +15,38 @@ function assertConfigured() {
   }
 }
 
+// One sign-in serves many calls. Without this, sweeping 20-odd candidate
+// endpoints means 20-odd sign-ins and the request times out on Vercel.
+const SESSION_TTL_MS = 20 * 60 * 1000
+let sessionCache = { token: null, at: 0 }
+
+async function getSessionToken() {
+  if (sessionCache.token && Date.now() - sessionCache.at < SESSION_TTL_MS) return sessionCache.token
+  const token = await authenticate()
+  sessionCache = { token, at: Date.now() }
+  return token
+}
+
+function authHeaders(sessionToken) {
+  return {
+    'FastField-API-Key': FASTFIELD_API_KEY,
+    Authorization: `Bearer ${sessionToken}`,
+    'X-Gatekeeper-SessionToken': sessionToken,
+  }
+}
+
+// Raw call that reports the status instead of throwing, for probing.
+async function apiCall(method, path, body) {
+  const sessionToken = await getSessionToken()
+  const resp = await fetch(`${FASTFIELD_BASE}${path}`, {
+    method,
+    headers: body ? { ...authHeaders(sessionToken), 'Content-Type': 'application/json' } : authHeaders(sessionToken),
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const text = await resp.text().catch(() => '')
+  return { status: resp.status, ok: resp.ok, text }
+}
+
 async function authenticate() {
   assertConfigured()
   const basic = Buffer.from(`${FASTFIELD_USERNAME}:${FASTFIELD_PASSWORD}`).toString('base64')
@@ -88,17 +120,11 @@ async function probeSubmissionEndpoints(formId) {
 
 // Raw authenticated GET against any v3 path, returning the parsed JSON body.
 async function rawGet(path) {
-  const sessionToken = await authenticate()
-  const resp = await fetch(`${FASTFIELD_BASE}${path}`, {
-    headers: {
-      'FastField-API-Key': FASTFIELD_API_KEY,
-      Authorization: `Bearer ${sessionToken}`,
-      'X-Gatekeeper-SessionToken': sessionToken,
-    },
-  })
-  const text = await resp.text()
-  if (!resp.ok) throw new Error(`FastField GET ${path} failed (${resp.status}): ${text}`)
+  const { ok, status, text } = await apiCall('GET', path)
+  if (!ok) throw new Error(`FastField GET ${path} failed (${status}): ${text}`)
   return JSON.parse(text)
 }
 
-module.exports = { authenticate, probeSubmissionEndpoints, rawGet, FASTFIELD_BASE }
+module.exports = {
+  authenticate, getSessionToken, apiCall, probeSubmissionEndpoints, rawGet, FASTFIELD_BASE,
+}

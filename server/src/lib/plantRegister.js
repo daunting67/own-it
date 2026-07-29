@@ -71,7 +71,7 @@ function extractMachines(payload) {
 
 // { machines, source, path, error } — never throws, so a FastField outage
 // can't take the dashboard down.
-async function getPlantRegister() {
+async function getPlantRegister({ deadline = 0 } = {}) {
   if (cache.source && Date.now() - cache.at < CACHE_MS) {
     return { machines: cache.machines, source: cache.source, path: cache.path, cached: true }
   }
@@ -81,6 +81,10 @@ async function getPlantRegister() {
 
   const errors = []
   for (const path of candidatePaths(LOOKUP_ID)) {
+    if (deadline && Date.now() > deadline) {
+      errors.push('(stopped early — remaining paths not tried)')
+      break
+    }
     try {
       const machines = extractMachines(await rawGet(path))
       if (machines.length > 0) {
