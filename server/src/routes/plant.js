@@ -82,4 +82,18 @@ router.get('/_lookup-probe', requireAdmin, async (req, res) => {
   }
 })
 
+// TEMPORARY, admin-only: lists all FastField forms (paginating /forms),
+// optionally filtered by a case-insensitive name substring, so we can find
+// form IDs without guessing.
+router.get('/_forms-list', requireAdmin, async (req, res) => {
+  try {
+    const match = (req.query.match || '').toLowerCase()
+    const all = await rawGet('/forms')
+    const filtered = match ? all.filter(f => (f.name || '').toLowerCase().includes(match)) : all
+    res.json(filtered.map(f => ({ id: f.id, name: f.name, updatedAt: f.updatedAt })))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 module.exports = router
