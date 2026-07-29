@@ -1,6 +1,7 @@
 const { Router } = require('express')
 const { requireAuth } = require('../middleware/auth')
 const { getUpcomingLeave } = require('../lib/qbt')
+const { requireAdmin } = require('../middleware/auth')
 const { buildLeaveDocx, leaveFilename } = require('../lib/buildLeaveDocx')
 
 const router = Router()
@@ -27,6 +28,19 @@ router.get('/leave/document', async (req, res) => {
   } catch (err) {
     console.error('QBT leave document build failed:', err)
     res.status(500).json({ error: err.message || 'Could not build the leave document' })
+  }
+})
+
+// TEMPORARY, admin-only: same fetch, but returns per-call/per-page timing so
+// we can find the slow leg without server log access.
+router.get('/_leave-timing', requireAdmin, async (req, res) => {
+  const timingLog = []
+  const t0 = Date.now()
+  try {
+    const rows = await getUpcomingLeave(91, timingLog)
+    res.json({ totalMs: Date.now() - t0, rowCount: rows.length, timingLog })
+  } catch (err) {
+    res.status(500).json({ error: err.message, totalMs: Date.now() - t0, timingLog })
   }
 })
 

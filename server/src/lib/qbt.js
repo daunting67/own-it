@@ -4,13 +4,14 @@
 // QBT screen and update the Vercel env var when getUpcomingLeave() starts 401ing.
 const BASE = 'https://rest.tsheets.com/api/v1'
 
-async function qbtGet(path, params = {}) {
+async function qbtGet(path, params = {}, timingLog = null) {
   const token = process.env.QBT_ACCESS_TOKEN
   if (!token) throw new Error('QBT_ACCESS_TOKEN is not set')
 
   const t0 = Date.now()
   const results = {}
   let page = 1
+  const pageTimes = []
   for (;;) {
     const pageStart = Date.now()
     const qs = new URLSearchParams({ ...params, page, limit: 200 })
@@ -19,14 +20,14 @@ async function qbtGet(path, params = {}) {
     })
     if (!res.ok) throw new Error(`QBT ${path} failed: ${res.status} ${await res.text()}`)
     const body = await res.json()
-    console.log(`QBT ${path} page ${page}: ${Date.now() - pageStart}ms, more=${!!body.more}`)
+    pageTimes.push(Date.now() - pageStart)
     for (const key of Object.keys(body.results || {})) {
       Object.assign(results[key] || (results[key] = {}), body.results[key])
     }
     if (!body.more) break
     page += 1
   }
-  console.log(`QBT ${path} total: ${Date.now() - t0}ms across ${page} page(s)`)
+  if (timingLog) timingLog.push({ path, totalMs: Date.now() - t0, pages: pageTimes.length, pageTimes })
   return results
 }
 
@@ -38,7 +39,7 @@ async function qbtGet(path, params = {}) {
 // on its child /time_off_request_entries (one entry per calendar day: date, duration in
 // SECONDS, jobcode_id). Only approved requests are counted (matches what the old browser
 // scrape reported — confirmed leave, not pending requests).
-async function getUpcomingLeave(daysAhead = 91) {
+async function getUpcomingLeave(daysAhead = 91, timingLog = null) {
   const today = new Date()
   const end = new Date(today)
   end.setDate(end.getDate() + daysAhead)
@@ -46,9 +47,9 @@ async function getUpcomingLeave(daysAhead = 91) {
   const endDate = end.toISOString().split('T')[0]
 
   const [entries, users, ptoJobcodes] = await Promise.all([
-    qbtGet('/time_off_request_entries', { status: 'approved', start_date: startDate, end_date: endDate }),
-    qbtGet('/users', { active: 'yes' }),
-    qbtGet('/jobcodes', { type: 'pto' }),
+    qbtGet('/time_off_request_entries', { status: 'approved', start_date: startDate, end_date: endDate }, timingLog),
+    qbtGet('/users', { active: 'yes' }, timingLog),
+    qbtGet('/jobcodes', { type: 'pto' }, timingLog),
   ])
 
   const userName = {}
@@ -90,4 +91,4 @@ async function getUpcomingLeave(daysAhead = 91) {
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.employee.localeCompare(b.employee))
 }
 
-module.exports = { getUpcomingLeave }
+module.exports = { getUpcomingLeave, qbtGet }
