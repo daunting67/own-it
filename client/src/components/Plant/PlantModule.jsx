@@ -99,6 +99,9 @@ export default function PlantModule() {
                 <th>Machine</th>
                 <th>Site</th>
                 <th>Operator</th>
+                <th>Hubodometer/Odometer/Hour Clock</th>
+                <th>Service Due At</th>
+                <th>Hours To Service</th>
               </tr>
             </thead>
             <tbody>
@@ -108,6 +111,9 @@ export default function PlantModule() {
                   <td>{c.machine || '—'}</td>
                   <td>{c.site || '—'}</td>
                   <td>{c.operator || '—'}</td>
+                  <td>{c.hourClock ?? '—'}</td>
+                  <td>{c.serviceDueAt ?? '—'}</td>
+                  <td>{c.hoursToService ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

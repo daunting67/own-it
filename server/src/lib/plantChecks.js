@@ -43,6 +43,9 @@ function parseSubmission(body) {
     site: extractValue(findField(values, ['site', 'Site/Location '])),
     date: findField(values, ['date', 'Date']) || null,
     operator: extractValue(findField(values, ['operator', 'Operator'])),
+    hourClock: findField(values, ['hour', 'Hubodometer/Odometer/Hour Clock']),
+    serviceDueAt: findField(values, ['due', 'Service Due At']),
+    hoursToService: findField(values, ['service', 'Hours To Service']),
     raw: body,
   }
 }
@@ -56,6 +59,9 @@ async function storeSubmission(body) {
       site: parsed.site,
       checkDate: parsed.date,
       operator: parsed.operator,
+      hourClock: parsed.hourClock,
+      serviceDueAt: parsed.serviceDueAt,
+      hoursToService: parsed.hoursToService,
       rawPayload: parsed.raw,
     })
     .select()
