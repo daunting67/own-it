@@ -89,7 +89,11 @@ export default function PlantModule() {
 
   useEffect(() => { load() }, [load])
 
-  const today = data?.today
+  // Fall back to the previous single-day response shape, in case the browser
+  // reaches a backend build that predates the today/yesterday split.
+  const today = data?.today || (data?.checks
+    ? { checks: data.checks, missing: data.missing || [], checkedMachines: [...new Set(data.checks.map(c => c.machine).filter(Boolean))] }
+    : null)
   const yesterday = data?.yesterday
   const todayMachines = today?.checkedMachines || []
   const yesterdayMachines = yesterday?.checkedMachines || []
