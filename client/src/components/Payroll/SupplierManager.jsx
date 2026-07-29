@@ -4,7 +4,7 @@ function RateCardModal({ supplier, onSave, onClose }) {
   const [rates, setRates] = useState(supplier?.rates ? JSON.parse(JSON.stringify(supplier.rates)) : [])
 
   function addRow() {
-    setRates(prev => [...prev, { role: '', ordinary: '', overtime: '', weekend: '' }])
+    setRates(prev => [...prev, { firstName: '', surname: '', role: '', ordinary: '', overtime: '', weekend: '' }])
   }
 
   function updateRow(i, field, val) {
@@ -19,6 +19,8 @@ function RateCardModal({ supplier, onSave, onClose }) {
     const cleaned = rates
       .filter(r => r.role.trim())
       .map(r => ({
+        firstName: (r.firstName || '').trim(),
+        surname: (r.surname || '').trim(),
         role: r.role.trim(),
         ordinary: parseFloat(r.ordinary) || 0,
         overtime: parseFloat(r.overtime) || 0,
@@ -40,6 +42,8 @@ function RateCardModal({ supplier, onSave, onClose }) {
               <table>
                 <thead>
                   <tr>
+                    <th>First Name</th>
+                    <th>Surname</th>
                     <th>Role</th>
                     <th>Ordinary ($/hr)</th>
                     <th>Overtime ($/hr)</th>
@@ -50,6 +54,8 @@ function RateCardModal({ supplier, onSave, onClose }) {
                 <tbody>
                   {rates.map((r, i) => (
                     <tr key={i}>
+                      <td><input className="form-input" value={r.firstName || ''} onChange={e => updateRow(i, 'firstName', e.target.value)} placeholder="e.g. John" /></td>
+                      <td><input className="form-input" value={r.surname || ''} onChange={e => updateRow(i, 'surname', e.target.value)} placeholder="e.g. Smith" /></td>
                       <td><input className="form-input" value={r.role} onChange={e => updateRow(i, 'role', e.target.value)} placeholder="e.g. Labourer" /></td>
                       <td><input className="form-input" type="number" step="0.01" value={r.ordinary} onChange={e => updateRow(i, 'ordinary', e.target.value)} /></td>
                       <td><input className="form-input" type="number" step="0.01" value={r.overtime} onChange={e => updateRow(i, 'overtime', e.target.value)} /></td>
