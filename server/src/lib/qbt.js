@@ -42,7 +42,7 @@ async function getUpcomingLeave(daysAhead = 91) {
   const endDate = end.toISOString().split('T')[0]
 
   const [entries, users, ptoJobcodes] = await Promise.all([
-    qbtGet('/time_off_request_entries', { status: 'approved' }),
+    qbtGet('/time_off_request_entries', { status: 'approved', start_date: startDate, end_date: endDate }),
     qbtGet('/users', { active: 'yes' }),
     qbtGet('/jobcodes', { type: 'pto' }),
   ])
