@@ -9,9 +9,9 @@ const db = require('./supabase')
 const SITE_FORMS = [
   { formId: 1213930, site: '101 Bruce Rd' },
   { formId: 1169827, site: '206 Manukau Rd' },
-  { formId: 888637, site: 'Waitoki Yard' },
   { formId: 864934, site: 'EBA' },
   { formId: 903980, site: 'EBA (Nightshift)' },
+  { formId: 888637, site: 'Waitoki Yard' },
 ]
 
 function siteNameForForm(formId) {
