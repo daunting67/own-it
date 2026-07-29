@@ -2,32 +2,30 @@
 // Auth: static access token generated in QBT (Feature Add-ons → API → Own It Portal app),
 // stored as env QBT_ACCESS_TOKEN. These tokens expire (60 days) — regenerate in the same
 // QBT screen and update the Vercel env var when getUpcomingLeave() starts 401ing.
-const BASE = 'https://rest.tsheets.com/api/v1'
+const db = require('./supabase')
 
-async function qbtGet(path, params = {}, timingLog = null) {
+const BASE = 'https://rest.tsheets.com/api/v1'
+const CACHE_TTL_MS = 15 * 60 * 1000
+
+async function qbtGet(path, params = {}) {
   const token = process.env.QBT_ACCESS_TOKEN
   if (!token) throw new Error('QBT_ACCESS_TOKEN is not set')
 
-  const t0 = Date.now()
   const results = {}
   let page = 1
-  const pageTimes = []
   for (;;) {
-    const pageStart = Date.now()
     const qs = new URLSearchParams({ ...params, page, limit: 200 })
     const res = await fetch(`${BASE}${path}?${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) throw new Error(`QBT ${path} failed: ${res.status} ${await res.text()}`)
     const body = await res.json()
-    pageTimes.push(Date.now() - pageStart)
     for (const key of Object.keys(body.results || {})) {
       Object.assign(results[key] || (results[key] = {}), body.results[key])
     }
     if (!body.more) break
     page += 1
   }
-  if (timingLog) timingLog.push({ path, totalMs: Date.now() - t0, pages: pageTimes.length, pageTimes })
   return results
 }
 
@@ -39,7 +37,12 @@ async function qbtGet(path, params = {}, timingLog = null) {
 // on its child /time_off_request_entries (one entry per calendar day: date, duration in
 // SECONDS, jobcode_id). Only approved requests are counted (matches what the old browser
 // scrape reported — confirmed leave, not pending requests).
-async function getUpcomingLeave(daysAhead = 91, timingLog = null) {
+//
+// PERFORMANCE: /time_off_request_entries doesn't support server-side date filtering
+// (QBT rejects start_date/end_date with a 417) — it always returns the account's full
+// history, so this call is inherently slow (measured ~130s). getCachedUpcomingLeave()
+// below wraps this with a cache so most page loads don't pay that cost.
+async function getUpcomingLeave(daysAhead = 91) {
   const today = new Date()
   const end = new Date(today)
   end.setDate(end.getDate() + daysAhead)
@@ -47,9 +50,9 @@ async function getUpcomingLeave(daysAhead = 91, timingLog = null) {
   const endDate = end.toISOString().split('T')[0]
 
   const [entries, users, ptoJobcodes] = await Promise.all([
-    qbtGet('/time_off_request_entries', { status: 'approved', start_date: startDate, end_date: endDate }, timingLog),
-    qbtGet('/users', { active: 'yes' }, timingLog),
-    qbtGet('/jobcodes', { type: 'pto' }, timingLog),
+    qbtGet('/time_off_request_entries', { status: 'approved' }),
+    qbtGet('/users', { active: 'yes' }),
+    qbtGet('/jobcodes', { type: 'pto' }),
   ])
 
   const userName = {}
@@ -91,4 +94,18 @@ async function getUpcomingLeave(daysAhead = 91, timingLog = null) {
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.employee.localeCompare(b.employee))
 }
 
-module.exports = { getUpcomingLeave, qbtGet }
+// Cached wrapper — serves a stored copy when fresh (<15min old) so the Payroll
+// page loads fast; only pays the ~130s QBT cost when the cache has gone stale.
+async function getCachedUpcomingLeave() {
+  const { data: cached } = await db.from('QbtLeaveCache').select('*').eq('id', 'singleton').maybeSingle()
+  if (cached && Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) {
+    return { rows: cached.rows, generatedAt: cached.generatedAt }
+  }
+
+  const rows = await getUpcomingLeave()
+  const generatedAt = new Date().toISOString()
+  await db.from('QbtLeaveCache').upsert({ id: 'singleton', rows, generatedAt })
+  return { rows, generatedAt }
+}
+
+module.exports = { getUpcomingLeave, getCachedUpcomingLeave, qbtGet }
