@@ -49,7 +49,7 @@ function TeammatePanel({ member }) {
     `Email: ${member.email || '—'}`,
     `Start date: ${fmtDate(member.startDate)}`,
     member.hireType === 'Labour hire' ? `Supplier: ${member.supplier?.name || '—'}` : '',
-    rateInfo ? `\nRate card (${rateInfo.role}):\n  Ordinary: $${rateInfo.ordinary}/hr\n  Overtime: $${rateInfo.overtime}/hr\n  Weekend:  $${rateInfo.weekend}/hr` : '',
+    rateInfo ? `\nRate card (${rateInfo.role}):\n  Ordinary: $${rateInfo.ordinary}/hr` : '',
   ].filter(Boolean).join('\n')
 
   function copy() {
@@ -161,16 +161,6 @@ export default function StaffModal({ member, onClose, onUpdate, onDelete }) {
               <div className="metric-card">
                 <div className="metric-label">Ordinary</div>
                 <div className="metric-value">${rateCard.ordinary}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>/hr</div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Overtime</div>
-                <div className="metric-value">${rateCard.overtime}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>/hr</div>
-              </div>
-              <div className="metric-card">
-                <div className="metric-label">Weekend</div>
-                <div className="metric-value">${rateCard.weekend}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>/hr</div>
               </div>
             </div>
