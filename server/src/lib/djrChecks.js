@@ -70,6 +70,10 @@ function decorate(row) {
   const p = row?.rawPayload || {}
   return {
     ...row,
+    // Re-resolve the site from formId rather than trusting the string stored
+    // at webhook time: adding a form to SITE_FORMS has to fix the rows that
+    // already came in as "Unknown form <id>", not just future ones.
+    site: row?.formId != null ? siteNameForForm(row.formId) : row?.site || null,
     djrDate: djrDate(p),
     // sequenceNumber is the short human reference; submissionId is the full
     // UUID, kept alongside it for looking a submission up in FastField.
