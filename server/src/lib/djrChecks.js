@@ -13,6 +13,7 @@ const SITE_FORMS = [
   { formId: 864934, site: 'EBA' },
   { formId: 903980, site: 'EBA (Nightshift)' },
   { formId: 888637, site: 'Waitoki Yard' },
+  { formId: 1183653, site: 'Wainui School' },
 ]
 
 function siteNameForForm(formId) {

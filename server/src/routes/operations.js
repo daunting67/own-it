@@ -12,7 +12,15 @@ router.get('/djr/today', async (req, res) => {
     const submissions = await getTodaysSubmissions()
     const submittedSites = new Set(submissions.map(s => s.site))
     const missing = allSites().filter(s => !submittedSites.has(s))
-    res.json({ submissions, missing, totalSites: allSites().length, generatedAt: new Date().toISOString() })
+    // `sites` is the canonical display order, so the page can show a panel
+    // per site — including the ones that haven't submitted anything today.
+    res.json({
+      submissions,
+      missing,
+      sites: allSites(),
+      totalSites: allSites().length,
+      generatedAt: new Date().toISOString(),
+    })
   } catch (err) {
     console.error('DJR fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not load DJR submissions' })

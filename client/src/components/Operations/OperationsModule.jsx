@@ -22,9 +22,75 @@ function fmtShifts(shifts) {
   ))
 }
 
+// One site's DJRs. The Site column is dropped inside the panel — the heading
+// already says which site it is.
+function SitePanel({ site, rows }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>{site}</div>
+        {rows.length === 0
+          ? <span className="badge badge-danger">Not submitted today</span>
+          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {rows.length} DJR{rows.length === 1 ? '' : 's'}
+            </span>}
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No DJR submitted yet today.</div>
+      ) : (
+        <div className="table-wrap table-dense">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Submission</th>
+                <th>Form</th>
+                <th>Submitted by</th>
+                <th>Shift times</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(s => (
+                <tr key={s.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{s.djrDate || '—'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(s.receivedAt)}</td>
+                  {/* Short reference in the cell; the full FastField UUID on
+                      hover, so it's readable here but still lookup-able. */}
+                  <td style={{ whiteSpace: 'nowrap' }} title={s.submissionId || ''}>
+                    {s.submissionNumber || '—'}
+                  </td>
+                  <td>{s.formName || '—'}</td>
+                  <td>{s.operator || '—'}</td>
+                  <td>{fmtShifts(s.shifts)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Known sites in their canonical order, then any site that turned up in a
+// submission but isn't on the list (an unrecognised form id) — appended
+// rather than dropped, so those DJRs can never silently vanish.
+function groupBySite(sites, submissions) {
+  const grouped = new Map(sites.map(s => [s, []]))
+  for (const sub of submissions) {
+    const key = sub.site || 'Unknown site'
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key).push(sub)
+  }
+  return [...grouped.entries()]
+}
+
 export default function OperationsModule() {
   const [submissions, setSubmissions] = useState(null)
   const [missing, setMissing] = useState([])
+  const [sites, setSites] = useState([])
   const [totalSites, setTotalSites] = useState(0)
   const [generatedAt, setGeneratedAt] = useState(null)
   const [error, setError] = useState(null)
@@ -37,6 +103,7 @@ export default function OperationsModule() {
       .then(res => {
         setSubmissions(res.submissions)
         setMissing(res.missing)
+        setSites(res.sites || [])
         setTotalSites(res.totalSites)
         setGeneratedAt(res.generatedAt)
       })
@@ -89,55 +156,11 @@ export default function OperationsModule() {
         </div>
       )}
 
-      {!error && missing.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>Not submitted today</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {missing.map(s => (
-              <span key={s} className="badge badge-danger">{s}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!error && submissions && submissions.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Submission</th>
-                <th>Site</th>
-                <th>Form</th>
-                <th>Submitted by</th>
-                <th>Shift times</th>
-              </tr>
-            </thead>
-            <tbody>
-              {submissions.map(s => (
-                <tr key={s.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{s.djrDate || '—'}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(s.receivedAt)}</td>
-                  {/* Short reference in the cell; the full FastField UUID on
-                      hover, so it's readable here but still lookup-able. */}
-                  <td style={{ whiteSpace: 'nowrap' }} title={s.submissionId || ''}>
-                    {s.submissionNumber || '—'}
-                  </td>
-                  <td>{s.site || '—'}</td>
-                  <td>{s.formName || '—'}</td>
-                  <td>{s.operator || '—'}</td>
-                  <td>{fmtShifts(s.shifts)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {!error && submissions && submissions.length === 0 && (
-        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No DJRs submitted yet today.</div>
-      )}
+      {/* Each panel reports its own empty state, so there's no separate
+          "nothing submitted yet" line to duplicate it. */}
+      {!error && submissions && groupBySite(sites, submissions).map(([site, rows]) => (
+        <SitePanel key={site} site={site} rows={rows} />
+      ))}
     </div>
   )
 }
