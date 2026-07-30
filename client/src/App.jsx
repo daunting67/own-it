@@ -31,6 +31,11 @@ const VIEW_TITLES = {
   plant: 'Plant & Equipment',
 }
 
+// Views that show two tables side by side and need more than the standard
+// reading width — at 1020px the Plant day panels clipped their last two
+// columns (Service due at / Hrs to service) behind a hidden scrollbar.
+const WIDE_VIEWS = new Set(['plant'])
+
 export default function App() {
   const { user, loading } = useAuth()
   const [dept, setDept] = useState('dashboard')
@@ -72,7 +77,7 @@ export default function App() {
           onAlert={() => setDept('payroll')}
         />
         <div className="content">
-          <div className="content-inner">
+          <div className={`content-inner${WIDE_VIEWS.has(dept) ? ' content-inner-wide' : ''}`}>
             {(() => {
               const can = (d) => user?.admin || (user?.departments || []).includes(d)
               if (dept === 'dashboard') return <Dashboard onNavigate={setDept} />

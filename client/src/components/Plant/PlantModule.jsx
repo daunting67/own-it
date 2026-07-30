@@ -49,7 +49,7 @@ function DayPanel({ title, data }) {
       {checks.length === 0 ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No Mobile Plant Checks submitted.</div>
       ) : (
-        <div className="table-wrap" style={{ overflowX: 'auto' }}>
+        <div className="table-wrap table-dense" style={{ overflowX: 'auto' }}>
           <table>
             <thead>
               <tr>
@@ -542,7 +542,7 @@ export default function PlantModule() {
       )}
 
       {!error && data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: 24, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(520px, 1fr))', gap: 24, alignItems: 'start' }}>
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
         </div>
