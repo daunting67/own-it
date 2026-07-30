@@ -298,10 +298,12 @@ export default function PlantModule() {
             </div>
           )}
           {data?.feed && (
-            <div style={{ fontSize: 11, color: data.feed.endpoint ? 'var(--text-muted)' : '#a33' }}>
+            <div style={{ fontSize: 11, color: data.feed.endpoint || data.feed.pullDisabled ? 'var(--text-muted)' : '#a33' }}>
               {data.feed.endpoint
                 ? `Fetched direct from FastField (${data.feed.pulledToday} today, ${data.feed.pulledYesterday} yesterday)${data.feed.truncated ? ' — more exist than were returned, paging still to do' : ''}`
-                : `Could not read submissions from FastField — showing only checks pushed to the portal${data.feed.error ? ` (${data.feed.error})` : ''}`}
+                : data.feed.pullDisabled
+                  ? 'Checks arrive from FastField by delivery action (webhook), same as the site DJRs'
+                  : `Could not read submissions from FastField — showing only checks pushed to the portal${data.feed.error ? ` (${data.feed.error})` : ''}`}
             </div>
           )}
         </div>
@@ -328,7 +330,7 @@ export default function PlantModule() {
         </div>
       )}
 
-      {data?.feed && !data.feed.endpoint && !data.feed.needsCredentials && (
+      {data?.feed && !data.feed.endpoint && !data.feed.needsCredentials && !data.feed.pullDisabled && (
         <div style={{ padding: 14, background: '#fdeaea', border: '1px solid #d88', borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
           <strong>Couldn't read submitted checklists from FastField.</strong>
           <div style={{ marginTop: 6 }}>
@@ -376,7 +378,7 @@ export default function PlantModule() {
         </div>
       )}
 
-      {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint} />}
+      {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint && !data.feed.pullDisabled} />}
     </div>
   )
 }

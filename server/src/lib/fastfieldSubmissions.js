@@ -145,9 +145,15 @@ function pinnedCall() {
   return { method, path: process.env.FASTFIELD_SUBMISSIONS_PATH }
 }
 
-async function discoverListingCall(formId, { deadline = 0 } = {}) {
+async function discoverListingCall(formId, { deadline = 0, allowProbe = false } = {}) {
   const pinned = pinnedCall()
   if (pinned) return pinned
+
+  // The DJR feed proves the WEBHOOK is the working mechanism (all 5 site forms
+  // deliver to it), so a dashboard load shouldn't spend seconds sweeping for an
+  // API endpoint that may not exist. The sweep now runs only on demand
+  // (Diagnostics) or when FASTFIELD_PULL_PROBE is set.
+  if (!allowProbe && !process.env.FASTFIELD_PULL_PROBE) return null
 
   const age = Date.now() - discovery.at
   if (discovery.call && age < DISCOVERY_TTL_MS) return discovery.call
@@ -217,17 +223,25 @@ function normaliseSubmission(sub, formId) {
 // Pull submitted checklists for the given forms and keep those inside
 // [startUtc, endUtc). Returns { checks, endpoint, truncated, error } and never
 // throws — a FastField outage must not take the dashboard down.
-async function fetchSubmissions({ formIds = [], startUtc, endUtc, deadline = 0 } = {}) {
+async function fetchSubmissions({ formIds = [], startUtc, endUtc, deadline = 0, allowProbe = false } = {}) {
   const ids = formIds.filter(Boolean)
   if (ids.length === 0) return { checks: [], endpoint: null, error: 'no form ids' }
 
   let call
   try {
-    call = await discoverListingCall(ids[0], { deadline })
+    call = await discoverListingCall(ids[0], { deadline, allowProbe })
   } catch (err) {
     return { checks: [], endpoint: null, error: `endpoint discovery failed: ${err.message}` }
   }
-  if (!call) return { checks: [], endpoint: null, error: 'no working submissions endpoint found' }
+  if (!call) {
+    const probed = allowProbe || !!process.env.FASTFIELD_PULL_PROBE
+    return {
+      checks: [],
+      endpoint: null,
+      disabled: !probed,
+      error: probed ? 'no working submissions endpoint found' : 'API pull not enabled (checks arrive by webhook)',
+    }
+  }
 
   const checks = []
   let truncated = false

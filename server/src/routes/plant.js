@@ -85,6 +85,8 @@ router.get('/today', async (req, res) => {
           pulledYesterday: pulledYesterday.checks.length,
           truncated: !!(pulledToday.truncated || pulledYesterday.truncated),
           error,
+          // Not an error state: checks are expected to arrive by webhook.
+          pullDisabled: !!(pulledToday.disabled && pulledYesterday.disabled),
           // Nothing FastField-side can work without these, and the symptom
           // (empty dashboard, no plant list) looks identical to a code bug.
           // Unset credentials and rejected credentials need the same action
@@ -224,6 +226,7 @@ router.get('/diagnostics', requireAdmin, async (req, res) => {
   // better lead than a 404.
   try {
     const probeFormId = out.plantForms?.forms?.[0]?.id || formId
+    // On demand only: /today no longer sweeps, this is where it still happens.
     const results = await probeSubmissionListing(probeFormId, { deadline: Date.now() + 6000 })
     // Counts by status make the pattern obvious at a glance: all 404 means
     // wrong paths, all 401 means the session isn't accepted on these routes.
