@@ -5,7 +5,7 @@ const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks } = require
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange } = require('../lib/nzDay')
-const { parseCsv, recordsToChecks } = require('../lib/plantImport')
+const { csvToRecords, recordsToChecks } = require('../lib/plantImport')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -154,14 +154,14 @@ router.post('/import', requireAdmin, async (req, res) => {
   try {
     const csv = req.body?.csv
     if (!csv || typeof csv !== 'string') return res.status(400).json({ error: 'csv text required' })
-    if (csv.length > 4 * 1024 * 1024) return res.status(413).json({ error: 'file too large — export a single day at a time' })
+    if (csv.length > 4 * 1024 * 1024) return res.status(413).json({ error: 'file too large' })
 
-    const { headers, records } = parseCsv(csv)
-    if (records.length === 0) return res.status(400).json({ error: 'no rows found in that file', headers })
+    const { records, layout } = csvToRecords(csv)
+    if (records.length === 0) return res.status(400).json({ error: 'no submissions found in that file' })
 
     const { checks, skipped } = recordsToChecks(records, { fallbackDay: req.body?.day || null })
     const stored = await insertChecks(checks)
-    res.json({ headers, rows: records.length, readable: checks.length, skipped, ...stored })
+    res.json({ layout, rows: records.length, readable: checks.length, skipped, ...stored })
   } catch (err) {
     console.error('Plant CSV import failed:', err)
     res.status(500).json({ error: err.message || 'Import failed' })

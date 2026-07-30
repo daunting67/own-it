@@ -46,6 +46,34 @@ function parseCsv(text) {
   return { headers, records }
 }
 
+// FastField only exports ONE submission at a time, and a single-submission
+// export is usually written the other way up: field name in the first column,
+// value in the second, one field per row — not a header row plus a data row.
+// Detect which we're looking at rather than making the user care.
+function csvToRecords(text) {
+  const { headers, records } = parseCsv(text)
+
+  // A proper table: several columns and at least one data row.
+  if (headers.length >= 3 && records.length >= 1) {
+    return { layout: 'table', records }
+  }
+
+  // Field/value pairs: two columns, several rows. Fold into one record, using
+  // the header row too since it's a pair itself, not a heading.
+  const { records: allRows } = parseCsv(`__a,__b\n${text}`)
+  if (headers.length <= 2 && allRows.length >= 3) {
+    const record = {}
+    for (const row of allRows) {
+      const key = String(row.__a || '').trim()
+      const value = String(row.__b || '').trim()
+      if (key && value && record[key] == null) record[key] = value
+    }
+    return { layout: 'field-value', records: Object.keys(record).length ? [record] : [] }
+  }
+
+  return { layout: records.length ? 'table' : 'unknown', records }
+}
+
 // Exports are written in local time, and NZ dates are day-first: 30/07/2026
 // is July, not 30 July read as month 30. Date.parse would either fail or
 // (worse) read it as a US date, so day-first is handled explicitly.
@@ -125,4 +153,4 @@ function recordsToChecks(records, { fallbackDay = null } = {}) {
   return { checks, skipped }
 }
 
-module.exports = { parseCsv, parseNzDateTime, recordsToChecks, recordTimestamp }
+module.exports = { parseCsv, csvToRecords, parseNzDateTime, recordsToChecks, recordTimestamp }

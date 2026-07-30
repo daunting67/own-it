@@ -116,14 +116,49 @@ function Backload({ onDone }) {
       .finally(() => setBusy(null))
   }
 
-  const onFile = event => {
-    const file = event.target.files?.[0]
-    if (!file) return
+  const readAsText = file => new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => run('import', () => api.importPlantChecks(String(reader.result)))
-    reader.onerror = () => setError('Could not read that file')
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`))
     reader.readAsText(file)
+  })
+
+  // FastField exports one submission per file, so take a whole selection at
+  // once and total up the results.
+  const onFiles = event => {
+    const files = [...(event.target.files || [])]
     event.target.value = ''
+    if (files.length === 0) return
+
+    setBusy('import')
+    setError(null)
+    setResult(null)
+
+    const totals = { inserted: 0, duplicates: 0, rows: 0, readable: 0, skipped: [], failed: [], failures: [] }
+    files.reduce(
+      (chain, file) => chain.then(async () => {
+        try {
+          const res = await api.importPlantChecks(await readAsText(file))
+          totals.inserted += res.inserted || 0
+          totals.duplicates += res.duplicates || 0
+          totals.rows += res.rows || 0
+          totals.readable += res.readable || 0
+          totals.skipped.push(...(res.skipped || []))
+          totals.failed.push(...(res.failed || []))
+        } catch (err) {
+          totals.failures.push(`${file.name}: ${err.message}`)
+        }
+      }),
+      Promise.resolve(),
+    )
+      .then(() => {
+        const parts = [summarise(totals), `${files.length} file${files.length === 1 ? '' : 's'}`]
+        if (totals.failures.length) parts.push(`couldn't read ${totals.failures.length}`)
+        setResult(parts.join(' · '))
+        if (totals.failures.length) setError(totals.failures.slice(0, 3).join(' | '))
+        onDone?.()
+      })
+      .finally(() => setBusy(null))
   }
 
   return (
@@ -133,7 +168,8 @@ function Backload({ onDone }) {
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
         FastField only sends checks submitted <em>after</em> the delivery action is set up. To see today and
-        yesterday now, try the API, or export those days from FastField and drop the file in.
+        yesterday now, try the API, or export the submissions from FastField — one file per submission is
+        fine, select them all at once — and drop them in.
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -146,8 +182,15 @@ function Backload({ onDone }) {
         </button>
 
         <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: busy ? 'default' : 'pointer' }}>
-          {busy === 'import' ? 'Reading file…' : 'Import FastField export (.csv)'}
-          <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={!!busy} style={{ display: 'none' }} />
+          {busy === 'import' ? 'Reading files…' : 'Import FastField exports (.csv — select as many as you like)'}
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            multiple
+            onChange={onFiles}
+            disabled={!!busy}
+            style={{ display: 'none' }}
+          />
         </label>
       </div>
 
