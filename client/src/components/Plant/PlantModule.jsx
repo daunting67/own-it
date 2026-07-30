@@ -200,6 +200,56 @@ function Backload({ onDone }) {
   )
 }
 
+// Admin-only. The plant register — what "not inspected" is measured against.
+// FastField's API won't hand over a Lookup List, so it comes from the
+// Download List export on Lookup Lists → Plant List.
+function RegisterImport({ data, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+
+  const onFile = event => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setBusy(true)
+    setError(null)
+    setResult(null)
+    const reader = new FileReader()
+    reader.onload = () => {
+      api.importPlantRegister(String(reader.result))
+        .then(res => { setResult(`Plant list saved — ${res.count} machines`); onDone?.() })
+        .catch(err => setError(err.message || 'Import failed'))
+        .finally(() => setBusy(false))
+    }
+    reader.onerror = () => { setError(`Could not read ${file.name}`); setBusy(false) }
+    reader.readAsText(file)
+  }
+
+  const source = data?.registerSource
+  const status = source === 'fastfield-lookup'
+    ? `Reading the plant list live from FastField (${data.registerCount} machines)`
+    : source === 'imported-list'
+      ? `Using the imported plant list — ${data.registerCount} machines${data.registerImportedAt ? `, imported ${new Date(data.registerImportedAt).toLocaleDateString('en-NZ')}` : ''}`
+      : 'No plant list yet — "not inspected" can only count machines that have checked in before'
+
+  return (
+    <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--pi-border, #ddd)', borderRadius: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Plant list</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+        {status}. To update it: in FastField go to <strong>Lists → Lookup Lists → Plant List → Actions → Download List</strong>,
+        then drop that file in here.
+      </div>
+      <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: busy ? 'default' : 'pointer' }}>
+        {busy ? 'Reading…' : 'Import plant list (.csv)'}
+        <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} style={{ display: 'none' }} />
+      </label>
+      {result && <div style={{ marginTop: 10, fontSize: 12, color: '#2a7' }}>{result}</div>}
+      {error && <div style={{ marginTop: 10, fontSize: 12, color: '#a33' }}>{error}</div>}
+    </div>
+  )
+}
+
 // Admin-only. Answers "why isn't this check showing?" without anyone needing
 // a terminal: what the FastField plant-list lookup returns, what the webhook
 // actually received (including the field names FastField used), and whether
@@ -412,7 +462,9 @@ export default function PlantModule() {
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               {data.registerSource === 'fastfield-lookup'
                 ? `Measured against the FastField plant list (${data.registerCount} machines)`
-                : 'FastField plant list unavailable — measured against machines seen in previous checks only'}
+                : data.registerSource === 'imported-list'
+                  ? `Measured against the imported plant list (${data.registerCount} machines)`
+                  : 'No plant list yet — measured against machines seen in previous checks only'}
             </div>
           )}
           {data?.feed && (
@@ -496,6 +548,7 @@ export default function PlantModule() {
         </div>
       )}
 
+      {user?.admin && <RegisterImport data={data} onDone={load} />}
       {user?.admin && <Backload onDone={load} />}
       {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint && !data.feed.pullDisabled} />}
     </div>

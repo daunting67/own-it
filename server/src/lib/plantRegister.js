@@ -15,6 +15,7 @@
 // previous behaviour rather than breaking.
 
 const { rawGet } = require('./fastfield')
+const { loadRegister } = require('./plantRegisterStore')
 
 // Set FASTFIELD_PLANT_LOOKUP_ID (and optionally FASTFIELD_PLANT_LOOKUP_PATH,
 // once we know which path works) to avoid the probing entirely.
@@ -76,6 +77,11 @@ async function getPlantRegister({ deadline = 0 } = {}) {
     return { machines: cache.machines, source: cache.source, path: cache.path, cached: true }
   }
   if (failureCache.error && Date.now() - failureCache.at < FAILURE_CACHE_MS) {
+    // Skip re-probing, but still serve the imported register if there is one.
+    const imported = await loadRegister().catch(() => null)
+    if (imported?.machines?.length) {
+      return { machines: imported.machines, source: 'imported-list', importedAt: imported.importedAt, cached: true }
+    }
     return { machines: [], source: null, error: failureCache.error, cached: true }
   }
 
@@ -96,6 +102,16 @@ async function getPlantRegister({ deadline = 0 } = {}) {
       errors.push(`${path}: ${String(err.message).slice(0, 120)}`)
     }
   }
+
+  // No lookup endpoint answered. Fall back to the register imported from
+  // FastField's "Download List" export, which is the practical way in.
+  try {
+    const imported = await loadRegister()
+    if (imported?.machines?.length) {
+      cache = { at: Date.now(), machines: imported.machines, source: 'imported-list', path: null }
+      return { machines: imported.machines, source: 'imported-list', importedAt: imported.importedAt }
+    }
+  } catch { /* fall through to reporting the probe failure */ }
 
   const error = errors.join(' | ')
   failureCache = { at: Date.now(), error }

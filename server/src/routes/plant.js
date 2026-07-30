@@ -6,6 +6,7 @@ const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/pla
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange } = require('../lib/nzDay')
 const { csvToRecords, recordsToChecks } = require('../lib/plantImport')
+const { machinesFromCsv, saveRegister, clearCache: clearRegisterStoreCache } = require('../lib/plantRegisterStore')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -74,6 +75,7 @@ router.get('/today', async (req, res) => {
       knownMachineCount: knownMachines.length,
       registerSource: register.source || 'submissions',
       registerCount: register.machines.length,
+      registerImportedAt: register.importedAt || null,
       registerError: register.error || null,
       // How the checks were obtained, so the page can be honest about it.
       feed: (() => {
@@ -184,6 +186,28 @@ router.get('/register', async (req, res) => {
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+// Import the plant register from FastField's Lookup Lists → Plant List →
+// "Download List" export. The public API has no lookup-list endpoint, so this
+// is the way the real machine list gets in; without it, "not inspected" can
+// only be measured against machines that have already submitted a check.
+router.post('/register/import', requireAdmin, async (req, res) => {
+  try {
+    const csv = req.body?.csv
+    if (!csv || typeof csv !== 'string') return res.status(400).json({ error: 'csv text required' })
+
+    const machines = machinesFromCsv(csv)
+    if (machines.length === 0) return res.status(400).json({ error: 'no machine names found in that file' })
+
+    await saveRegister(machines, { importedBy: req.user?.name || null })
+    clearRegisterStoreCache()
+    clearRegisterCache()
+    res.json({ count: machines.length, machines })
+  } catch (err) {
+    console.error('Plant register import failed:', err)
+    res.status(500).json({ error: err.message || 'Import failed' })
   }
 })
 
