@@ -342,7 +342,7 @@ router.get('/_recent', requireAdmin, async (req, res) => {
     const since = new Date(Date.now() - hours * 3600000).toISOString()
     const { data, error } = await db
       .from('PlantCheck')
-      .select('id, receivedAt, checkDate, machine, site, operator')
+      .select('id, receivedAt, checkDate, machine, site, operator, hourClock, serviceDueAt, hoursToService, rawPayload')
       .gte('receivedAt', since)
       .order('receivedAt', { ascending: false })
     if (error) throw new Error(error.message)
