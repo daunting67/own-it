@@ -40,12 +40,6 @@ function DayPanel({ title, data }) {
         </div>
       )}
 
-      {(data?.unregistered?.length || 0) > 0 && (
-        <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-          Checked but not on the FastField plant list: {data.unregistered.join(', ')}
-        </div>
-      )}
-
       {checks.length === 0 ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No Mobile Plant Checks submitted.</div>
       ) : (
@@ -453,27 +447,13 @@ export default function PlantModule() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <div>
-          {data?.generatedAt && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              Live from FastField · updated {new Date(data.generatedAt).toLocaleString('en-NZ')}
-            </div>
-          )}
-          {data && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              {data.registerSource === 'fastfield-lookup'
-                ? `Measured against the FastField plant list (${data.registerCount} machines)`
-                : data.registerSource === 'imported-list'
-                  ? `Measured against the imported plant list (${data.registerCount} machines)`
-                  : 'No plant list yet — measured against machines seen in previous checks only'}
-            </div>
-          )}
-          {data?.feed && (
-            <div style={{ fontSize: 11, color: data.feed.endpoint || data.feed.pullDisabled ? 'var(--text-muted)' : '#a33' }}>
-              {data.feed.endpoint
-                ? `Fetched direct from FastField (${data.feed.pulledToday} today, ${data.feed.pulledYesterday} yesterday)${data.feed.truncated ? ' — more exist than were returned, paging still to do' : ''}`
-                : data.feed.pullDisabled
-                  ? 'Checks arrive from FastField by delivery action (webhook), same as the site DJRs'
-                  : `Could not read submissions from FastField — showing only checks pushed to the portal${data.feed.error ? ` (${data.feed.error})` : ''}`}
+          {/* Only a genuine read failure is worth saying out loud — the
+              routine "live from FastField / measured against / arrives by
+              webhook" notes were noise on an otherwise clean page. */}
+          {data?.feed && !data.feed.endpoint && !data.feed.pullDisabled && (
+            <div style={{ fontSize: 11, color: '#a33' }}>
+              Could not read submissions from FastField — showing only checks pushed to the portal
+              {data.feed.error ? ` (${data.feed.error})` : ''}
             </div>
           )}
         </div>
