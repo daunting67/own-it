@@ -123,8 +123,12 @@ function isoDate(value) {
 function numericish(value) {
   if (value == null || value === '') return null
   if (typeof value === 'number') return value
-  const cleaned = String(value).replace(/[,\s]/g, '')
-  const asNumber = Number(cleaned)
+  // Strip thousands separators and any trailing/leading unit text ("hrs",
+  // "km", "hours") so "4,821 hrs" and "5000km" still yield a real number
+  // instead of silently going null.
+  const match = String(value).replace(/,/g, '').match(/-?\d+(\.\d+)?/)
+  if (!match) return null
+  const asNumber = Number(match[0])
   return Number.isFinite(asNumber) ? asNumber : null
 }
 

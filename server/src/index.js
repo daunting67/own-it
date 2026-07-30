@@ -55,7 +55,7 @@ app.use('/api/plant-webhook', plantWebhookRouter)
 app.use('/api/operations', operationsRouter)
 app.use('/api/djr-webhook', djrWebhookRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-30-plant-register-7' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-31-plant-numericish-8' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
