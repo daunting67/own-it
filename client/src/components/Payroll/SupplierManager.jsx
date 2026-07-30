@@ -1,5 +1,20 @@
 import { useState } from 'react'
 
+// Rate rows are stored as a JSON blob, and rows saved before the rate card
+// had First Name / Surname fields carry only a role and a rate — so treat a
+// missing name as normal rather than rendering "undefined undefined".
+function personName(rate) {
+  if (!rate) return ''
+  const joined = [rate.firstName, rate.surname].filter(Boolean).join(' ').trim()
+  return joined || (rate.name || '').trim()
+}
+
+function formatRate(value) {
+  const n = Number(value)
+  if (value === '' || value == null || !Number.isFinite(n) || n === 0) return '—'
+  return `$${n.toFixed(2)}`
+}
+
 function RateCardModal({ supplier, onSave, onClose }) {
   const [rates, setRates] = useState(supplier?.rates ? JSON.parse(JSON.stringify(supplier.rates)) : [])
 
@@ -156,34 +171,50 @@ export default function SupplierManager({ suppliers, onAdd, onUpdate, onDelete }
       <div className="table-wrap">
         {suppliers.length > 0 && (
           <table>
-            <thead><tr><th>Supplier</th><th>Contact</th><th>Email</th><th>Roles</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th>Supplier</th><th>Contact</th><th>Email</th>
+                <th>Name</th><th>Role</th><th>Rate</th><th></th>
+              </tr>
+            </thead>
             <tbody>
-              {suppliers.map(s => (
-                <tr key={s.id}>
-                  <td style={{ fontWeight: 500 }}>{s.name}</td>
-                  <td style={{ color: 'var(--text-muted)' }}>{s.contact || '—'}</td>
-                  <td style={{ color: 'var(--text-muted)' }}>{s.email || '—'}</td>
-                  <td>
-                    {(s.rates || []).length > 0
-                      ? (s.rates || []).map(r => r.role).join(', ')
-                      : <span style={{ color: 'var(--text-light)' }}>No rates</span>
-                    }
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setRateCardFor(s)}>Rate card</button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setEditing(s)}>Edit</button>
-                      {confirmDelete === s.id
-                        ? <>
-                            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(s.id)}>Delete</button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                          </>
-                        : <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirmDelete(s.id)}>✕</button>
-                      }
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {/* One line per person on the supplier's rate card. The supplier,
+                  contact, email and action cells span the group so a supplier
+                  with several people still reads as one block. */}
+              {suppliers.map(s => {
+                const rates = s.rates || []
+                const lines = rates.length > 0 ? rates : [null]
+                const span = lines.length
+                return lines.map((r, i) => (
+                  <tr key={`${s.id}:${i}`}>
+                    {i === 0 && (
+                      <>
+                        <td rowSpan={span} style={{ fontWeight: 500 }}>{s.name}</td>
+                        <td rowSpan={span} style={{ color: 'var(--text-muted)' }}>{s.contact || '—'}</td>
+                        <td rowSpan={span} style={{ color: 'var(--text-muted)' }}>{s.email || '—'}</td>
+                      </>
+                    )}
+                    <td>{personName(r) || '—'}</td>
+                    <td>{r?.role || '—'}</td>
+                    <td>{formatRate(r?.ordinary)}</td>
+                    {i === 0 && (
+                      <td rowSpan={span}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setRateCardFor(s)}>Rate card</button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(s)}>Edit</button>
+                          {confirmDelete === s.id
+                            ? <>
+                                <button className="btn btn-danger btn-sm" onClick={() => handleDelete(s.id)}>Delete</button>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setConfirmDelete(null)}>Cancel</button>
+                              </>
+                            : <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirmDelete(s.id)}>✕</button>
+                          }
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))
+              })}
             </tbody>
           </table>
         )}
