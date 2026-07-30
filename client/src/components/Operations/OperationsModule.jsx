@@ -46,7 +46,6 @@ function SitePanel({ site, rows }) {
                 <th>Date</th>
                 <th>Time</th>
                 <th>Submission</th>
-                <th>Form</th>
                 <th>Submitted by</th>
                 <th>Shift times</th>
               </tr>
@@ -61,7 +60,6 @@ function SitePanel({ site, rows }) {
                   <td style={{ whiteSpace: 'nowrap' }} title={s.submissionId || ''}>
                     {s.submissionNumber || '—'}
                   </td>
-                  <td>{s.formName || '—'}</td>
                   <td>{s.operator || '—'}</td>
                   <td>{fmtShifts(s.shifts)}</td>
                 </tr>
