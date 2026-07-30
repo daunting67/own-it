@@ -548,9 +548,6 @@ export default function PlantModule() {
         </div>
       )}
 
-      {user?.admin && <RegisterImport data={data} onDone={load} />}
-      {user?.admin && <Backload onDone={load} />}
-      {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint && !data.feed.pullDisabled} />}
     </div>
   )
 }
