@@ -1,7 +1,7 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet, missingConfig, getSessionToken } = require('../lib/fastfield')
-const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks } = require('../lib/plantChecks')
+const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks, getRecentWebhookFailures } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange } = require('../lib/nzDay')
@@ -278,6 +278,7 @@ router.get('/diagnostics', requireAdmin, async (req, res) => {
       }
     })
     out.totalStoredNote = 'Newest 5 submissions ever received by the webhook'
+    out.webhookFailures = getRecentWebhookFailures()
   } catch (err) {
     out.recentSubmissions = { error: err.message }
   }

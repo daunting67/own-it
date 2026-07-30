@@ -1,6 +1,7 @@
 const db = require('./supabase')
 const { nzDayRange } = require('./nzDay')
 const { extractCheckFields } = require('./plantFields')
+const { isoDate, numericish } = require('./plantImport')
 
 // Webhook payloads are read by the same pattern-matching extractor used for
 // pulled submissions (lib/plantFields.js). The previous version looked for
@@ -25,11 +26,11 @@ async function storeSubmission(body) {
   const row = {
     machine: parsed.machine,
     site: parsed.site,
-    checkDate: parsed.date,
+    checkDate: isoDate(parsed.date),
     operator: parsed.operator,
-    hourClock: parsed.hourClock,
-    serviceDueAt: parsed.serviceDueAt,
-    hoursToService: parsed.hoursToService,
+    hourClock: numericish(parsed.hourClock),
+    serviceDueAt: numericish(parsed.serviceDueAt),
+    hoursToService: numericish(parsed.hoursToService),
     rawPayload: parsed.raw,
   }
 
@@ -50,8 +51,33 @@ async function storeSubmission(body) {
     rawPayload: parsed.raw,
   }
   const retry = await db.from('PlantCheck').insert(minimal).select().single()
-  if (retry.error) throw new Error(`${error.message} (minimal retry also failed: ${retry.error.message})`)
-  return retry.data
+  if (!retry.error) return retry.data
+
+  // Last resort: the payload alone. A row with only rawPayload can be repaired
+  // later; a 500 back to FastField means the check has to be reprocessed by
+  // hand. Only if even this fails do we refuse, so FastField keeps it queued
+  // as Failed rather than us silently swallowing a check.
+  const rawOnly = await db.from('PlantCheck').insert({ rawPayload: parsed.raw }).select().single()
+  if (rawOnly.error) {
+    recordWebhookFailure(`${error.message} | minimal: ${retry.error.message} | raw-only: ${rawOnly.error.message}`)
+    throw new Error(`${error.message} (minimal retry also failed: ${retry.error.message})`)
+  }
+  recordWebhookFailure(`stored payload only — ${error.message}`)
+  return rawOnly.data
+}
+
+// A 500 in FastField's delivery log says nothing about why. Keep the last few
+// reasons in memory so Diagnostics can show them (lambdas are recycled, so this
+// is a best-effort aid, not a record).
+const recentFailures = []
+
+function recordWebhookFailure(message) {
+  recentFailures.unshift({ at: new Date().toISOString(), message: String(message).slice(0, 400) })
+  recentFailures.length = Math.min(recentFailures.length, 5)
+}
+
+function getRecentWebhookFailures() {
+  return recentFailures
 }
 
 // All checks received during one NZ calendar day (0 = today, -1 = yesterday).
@@ -148,5 +174,5 @@ async function insertChecks(checks) {
 
 module.exports = {
   parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines,
-  mergeChecks, dedupeKey, insertChecks,
+  mergeChecks, dedupeKey, insertChecks, getRecentWebhookFailures, recordWebhookFailure,
 }

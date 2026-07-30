@@ -102,6 +102,32 @@ function parseNzDateTime(value) {
   return Number.isNaN(ms) ? null : new Date(ms).toISOString()
 }
 
+// The form's Date field sends NZ day-first text ("30/07/2026"). Postgres reads
+// that as month 30 and rejects the INSERT outright, which is what made the
+// webhook answer 500 and FastField mark every real check as Failed. Store an
+// ISO date or nothing.
+function isoDate(value) {
+  if (value == null || value === '') return null
+  const iso = parseNzDateTime(value)
+  if (!iso) return null
+  // Format back in NZ, not UTC: NZ midnight is the previous day in UTC, so
+  // slicing the instant would file every check under yesterday.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(iso))
+}
+
+// Hour-clock readings are typed by hand, so "4,821" and "4821 hrs" turn up.
+// Give the column a clean number when there is one, otherwise leave it out
+// rather than fail the whole insert.
+function numericish(value) {
+  if (value == null || value === '') return null
+  if (typeof value === 'number') return value
+  const cleaned = String(value).replace(/[,\s]/g, '')
+  const asNumber = Number(cleaned)
+  return Number.isFinite(asNumber) ? asNumber : null
+}
+
 const TIMESTAMP_HEADER = /(submit|complete|created|received|timestamp|date.?time|^date$|^time$)/i
 
 function recordTimestamp(record) {
@@ -141,10 +167,10 @@ function recordsToChecks(records, { fallbackDay = null } = {}) {
       machine: fields.machine,
       site: fields.site,
       operator: fields.operator,
-      checkDate: fields.date,
-      hourClock: fields.hourClock,
-      serviceDueAt: fields.serviceDueAt,
-      hoursToService: fields.hoursToService,
+      checkDate: isoDate(fields.date),
+      hourClock: numericish(fields.hourClock),
+      serviceDueAt: numericish(fields.serviceDueAt),
+      hoursToService: numericish(fields.hoursToService),
       receivedAt,
       rawPayload: record,
     })
@@ -153,4 +179,4 @@ function recordsToChecks(records, { fallbackDay = null } = {}) {
   return { checks, skipped }
 }
 
-module.exports = { parseCsv, csvToRecords, parseNzDateTime, recordsToChecks, recordTimestamp }
+module.exports = { parseCsv, csvToRecords, parseNzDateTime, isoDate, numericish, recordsToChecks, recordTimestamp }

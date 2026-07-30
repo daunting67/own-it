@@ -1,5 +1,5 @@
 const { Router } = require('express')
-const { storeSubmission } = require('../lib/plantChecks')
+const { storeSubmission, recordWebhookFailure } = require('../lib/plantChecks')
 
 const router = Router()
 
@@ -15,6 +15,7 @@ router.post('/', async (req, res) => {
     res.json({ ok: true, id: saved.id })
   } catch (err) {
     console.error('Plant check webhook failed to store submission:', err)
+    recordWebhookFailure(err.message || 'unknown error')
     res.status(500).json({ error: err.message || 'Failed to store submission' })
   }
 })
