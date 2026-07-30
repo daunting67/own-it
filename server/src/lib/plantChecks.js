@@ -107,7 +107,46 @@ async function getKnownMachines() {
   return [...new Set((data || []).map(r => r.machine))].sort()
 }
 
+// Insert back-loaded checks, skipping any that are already stored. Used by
+// both back-load routes (API pull and CSV import) — re-running either is
+// harmless, which matters when someone clicks the button twice.
+async function insertChecks(checks) {
+  if (checks.length === 0) return { inserted: 0, duplicates: 0, failed: [] }
+
+  const times = checks.map(c => c.receivedAt).filter(Boolean).sort()
+  const { data: existingRows, error } = await db
+    .from('PlantCheck')
+    .select('machine, hourClock, receivedAt')
+    .gte('receivedAt', times[0])
+    .lte('receivedAt', times[times.length - 1])
+  if (error) throw new Error(error.message)
+
+  const existing = new Set((existingRows || []).map(dedupeKey))
+  const failed = []
+  let inserted = 0
+  let duplicates = 0
+
+  for (const check of checks) {
+    if (existing.has(dedupeKey(check))) { duplicates += 1; continue }
+    const { error: insErr } = await db.from('PlantCheck').insert(check)
+    if (insErr) {
+      // Most likely a value that won't fit its column; keep the check rather
+      // than lose it, same as the webhook path does.
+      const { machine, site, operator, receivedAt, rawPayload } = check
+      const retry = await db.from('PlantCheck').insert({ machine, site, operator, receivedAt, rawPayload })
+      if (retry.error) {
+        failed.push({ machine: check.machine, error: insErr.message })
+        continue
+      }
+    }
+    existing.add(dedupeKey(check))
+    inserted += 1
+  }
+
+  return { inserted, duplicates, failed }
+}
+
 module.exports = {
   parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines,
-  mergeChecks, dedupeKey,
+  mergeChecks, dedupeKey, insertChecks,
 }

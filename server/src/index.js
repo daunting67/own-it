@@ -32,7 +32,10 @@ app.use(cors({
   },
   credentials: true
 }))
-app.use(express.json())
+// 5mb, not the 100kb default: a FastField CSV export of a day's plant checks
+// is posted as JSON to /api/plant/import. Vercel rejects bodies over ~4.5mb at
+// the edge anyway, and the route caps the text itself.
+app.use(express.json({ limit: '5mb' }))
 
 app.use('/api/auth', authRouter)
 app.use('/api/staff', staffRouter)
@@ -52,7 +55,7 @@ app.use('/api/plant-webhook', plantWebhookRouter)
 app.use('/api/operations', operationsRouter)
 app.use('/api/djr-webhook', djrWebhookRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-30-plant-webhook-3' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-30-plant-backload-4' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))

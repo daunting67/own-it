@@ -62,6 +62,8 @@ export const api = {
   // Plant & Equipment — today's Mobile Plant Checks (FastField)
   getPlantChecksToday: () => request('/api/plant/today'),
   getPlantDiagnostics: () => request('/api/plant/diagnostics'),
+  backloadPlantChecks: () => request('/api/plant/backload', { method: 'POST' }),
+  importPlantChecks: (csv, day) => request('/api/plant/import', { method: 'POST', body: JSON.stringify({ csv, day }) }),
 
   // Operations — today's site DJR submissions (FastField)
   getDjrToday: () => request('/api/operations/djr/today'),

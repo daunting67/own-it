@@ -103,12 +103,36 @@ function extractCheckFields(payload) {
   })
 
   // The submitting FastField account is a reliable last resort for operator:
-  // it's always sent, and a check with no name against it is near-useless.
-  if (!found.operator) {
-    found.operator = plainValue(payload?.userName) || plainValue(payload?.userEmail)
-      || plainValue(payload?.user?.name) || plainValue(payload?.submittedBy) || null
-  }
+  // it's always present, and a check with no name against it is near-useless.
+  // Matched loosely because a CSV export heads the same thing "User Name".
+  if (!found.operator) found.operator = submitterName(payload)
   return found
+}
+
+const SUBMITTER_KEY = /^(user ?name|user ?email|submitted ?by|completed ?by|created ?by|email)$/
+
+function submitterName(node, depth = 0) {
+  if (node == null || typeof node !== 'object' || depth > 3) return null
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = submitterName(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  for (const [rawKey, value] of Object.entries(node)) {
+    if (SUBMITTER_KEY.test(normaliseKey(rawKey))) {
+      const simple = plainValue(value)
+      if (simple) return simple
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') {
+      const found = submitterName(value, depth + 1)
+      if (found) return found
+    }
+  }
+  return null
 }
 
 module.exports = { extractCheckFields, plainValue }

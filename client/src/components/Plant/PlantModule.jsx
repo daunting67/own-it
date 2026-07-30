@@ -82,6 +82,81 @@ function DayPanel({ title, data }) {
   )
 }
 
+// Admin-only. Delivery actions only fire on NEW submissions, so checks already
+// sitting in FastField never arrive by webhook — they have to be back-loaded.
+// Two routes because the API may not support listing submissions at all: one
+// click to try it, and a CSV export from FastField that always works.
+function Backload({ onDone }) {
+  const [busy, setBusy] = useState(null)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+
+  const summarise = res => {
+    const bits = [`${res.inserted} added`]
+    if (res.duplicates) bits.push(`${res.duplicates} already there`)
+    if (res.readable != null && res.rows != null) bits.push(`${res.readable} of ${res.rows} rows readable`)
+    if (res.skipped?.length) bits.push(`${res.skipped.length} skipped (${res.skipped[0].reason})`)
+    if (res.failed?.length) bits.push(`${res.failed.length} failed to store`)
+    if (res.days) {
+      const found = res.days.map(d => `${d.day}: ${d.found}`).join(', ')
+      bits.push(`found — ${found}`)
+      const why = res.days.find(d => d.error)?.error
+      if (why && !res.inserted) bits.push(why)
+    }
+    return bits.join(' · ')
+  }
+
+  const run = (label, fn) => {
+    setBusy(label)
+    setError(null)
+    setResult(null)
+    fn()
+      .then(res => { setResult(summarise(res)); onDone?.() })
+      .catch(err => setError(err.message || 'Failed'))
+      .finally(() => setBusy(null))
+  }
+
+  const onFile = event => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => run('import', () => api.importPlantChecks(String(reader.result)))
+    reader.onerror = () => setError('Could not read that file')
+    reader.readAsText(file)
+    event.target.value = ''
+  }
+
+  return (
+    <div style={{ marginTop: 24, padding: 14, border: '1px solid var(--pi-border, #ddd)', borderRadius: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>
+        Back-load past checks
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+        FastField only sends checks submitted <em>after</em> the delivery action is set up. To see today and
+        yesterday now, try the API, or export those days from FastField and drop the file in.
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          className="btn btn-secondary btn-sm"
+          disabled={!!busy}
+          onClick={() => run('api', api.backloadPlantChecks)}
+        >
+          {busy === 'api' ? 'Trying FastField…' : 'Back-load today & yesterday from FastField'}
+        </button>
+
+        <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: busy ? 'default' : 'pointer' }}>
+          {busy === 'import' ? 'Reading file…' : 'Import FastField export (.csv)'}
+          <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={!!busy} style={{ display: 'none' }} />
+        </label>
+      </div>
+
+      {result && <div style={{ marginTop: 10, fontSize: 12, color: '#2a7' }}>{result}</div>}
+      {error && <div style={{ marginTop: 10, fontSize: 12, color: '#a33' }}>{error}</div>}
+    </div>
+  )
+}
+
 // Admin-only. Answers "why isn't this check showing?" without anyone needing
 // a terminal: what the FastField plant-list lookup returns, what the webhook
 // actually received (including the field names FastField used), and whether
@@ -378,6 +453,7 @@ export default function PlantModule() {
         </div>
       )}
 
+      {user?.admin && <Backload onDone={load} />}
       {user?.admin && <Diagnostics autoOpen={!!data?.feed && !data.feed.endpoint && !data.feed.pullDisabled} />}
     </div>
   )

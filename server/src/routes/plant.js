@@ -1,10 +1,11 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet, missingConfig, getSessionToken } = require('../lib/fastfield')
-const { getChecksForDay, getKnownMachines, mergeChecks } = require('../lib/plantChecks')
+const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange } = require('../lib/nzDay')
+const { parseCsv, recordsToChecks } = require('../lib/plantImport')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -104,6 +105,66 @@ router.get('/today', async (req, res) => {
   } catch (err) {
     console.error('Plant checks fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not load plant checks' })
+  }
+})
+
+// Back-load today's and yesterday's checks from FastField's API. Delivery
+// actions only fire on NEW submissions, so anything submitted before the
+// portal was listening can only be recovered this way (or by CSV import
+// below). Probing is allowed here — unlike on a page load — because this is a
+// deliberate one-off the user is waiting on.
+router.post('/backload', requireAdmin, async (req, res) => {
+  try {
+    const formIds = await getPlantFormIds()
+    const deadline = Date.now() + 8000
+    const days = [0, -1]
+    const results = []
+    let all = []
+
+    for (const offset of days) {
+      const { day, startUtc, endUtc } = nzDayRange(offset)
+      const pulled = await fetchSubmissions({ formIds, startUtc, endUtc, deadline, allowProbe: true })
+      results.push({ day, found: pulled.checks.length, endpoint: pulled.endpoint, error: pulled.error || null })
+      all = all.concat(pulled.checks.map(c => ({
+        machine: c.machine,
+        site: c.site,
+        operator: c.operator,
+        checkDate: c.checkDate,
+        hourClock: c.hourClock,
+        serviceDueAt: c.serviceDueAt,
+        hoursToService: c.hoursToService,
+        receivedAt: c.receivedAt,
+        rawPayload: { source: 'fastfield-api-backload', formId: c.formId, externalId: c.externalId },
+      })))
+    }
+
+    const stored = await insertChecks(all)
+    res.json({ formIds, days: results, ...stored })
+  } catch (err) {
+    console.error('Plant back-load failed:', err)
+    res.status(500).json({ error: err.message || 'Back-load failed' })
+  }
+})
+
+// Back-load from a FastField CSV/Excel export — the route that always works,
+// since FastField's own UI can always export submissions even when its API
+// won't list them. Column headings are matched by pattern, so whatever the
+// export calls things, it reads.
+router.post('/import', requireAdmin, async (req, res) => {
+  try {
+    const csv = req.body?.csv
+    if (!csv || typeof csv !== 'string') return res.status(400).json({ error: 'csv text required' })
+    if (csv.length > 4 * 1024 * 1024) return res.status(413).json({ error: 'file too large — export a single day at a time' })
+
+    const { headers, records } = parseCsv(csv)
+    if (records.length === 0) return res.status(400).json({ error: 'no rows found in that file', headers })
+
+    const { checks, skipped } = recordsToChecks(records, { fallbackDay: req.body?.day || null })
+    const stored = await insertChecks(checks)
+    res.json({ headers, rows: records.length, readable: checks.length, skipped, ...stored })
+  } catch (err) {
+    console.error('Plant CSV import failed:', err)
+    res.status(500).json({ error: err.message || 'Import failed' })
   }
 })
 
