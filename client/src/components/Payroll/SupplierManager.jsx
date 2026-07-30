@@ -17,29 +17,47 @@ function formatRate(value) {
 
 function RateCardModal({ supplier, onSave, onClose }) {
   const [rates, setRates] = useState(supplier?.rates ? JSON.parse(JSON.stringify(supplier.rates)) : [])
+  const [warning, setWarning] = useState(null)
 
   function addRow() {
     setRates(prev => [...prev, { firstName: '', surname: '', role: '', ordinary: '' }])
   }
 
   function updateRow(i, field, val) {
+    setWarning(null)
     setRates(prev => prev.map((r, ri) => ri === i ? { ...r, [field]: val } : r))
   }
 
   function removeRow(i) {
+    setWarning(null)
     setRates(prev => prev.filter((_, ri) => ri !== i))
   }
 
+  // A row is only genuinely empty if nothing at all was typed into it —
+  // those are dropped silently, since an untouched "+ Add person" row is
+  // not something anyone meant to save. But a row with a name or a rate and
+  // no role used to be discarded just as quietly, losing a real person on
+  // save; say so instead and let it be fixed or removed deliberately.
   function handleSave() {
-    const cleaned = rates
-      .filter(r => r.role.trim())
-      .map(r => ({
-        firstName: (r.firstName || '').trim(),
-        surname: (r.surname || '').trim(),
-        role: r.role.trim(),
-        ordinary: parseFloat(r.ordinary) || 0,
-      }))
-    onSave(cleaned)
+    const touched = rates.filter(r =>
+      (r.firstName || '').trim() || (r.surname || '').trim() ||
+      (r.role || '').trim() || String(r.ordinary ?? '').trim())
+
+    const missingRole = touched.filter(r => !(r.role || '').trim())
+    if (missingRole.length > 0) {
+      const who = missingRole
+        .map(r => personName(r) || 'a row with no name')
+        .join(', ')
+      setWarning(`${who} ${missingRole.length === 1 ? 'has' : 'have'} no role — add one, or remove the row.`)
+      return
+    }
+
+    onSave(touched.map(r => ({
+      firstName: (r.firstName || '').trim(),
+      surname: (r.surname || '').trim(),
+      role: r.role.trim(),
+      ordinary: parseFloat(r.ordinary) || 0,
+    })))
   }
 
   return (
@@ -47,12 +65,26 @@ function RateCardModal({ supplier, onSave, onClose }) {
       <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Rate card — {supplier.name}</h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {rates.length} {rates.length === 1 ? 'person' : 'people'}
+            </span>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          </div>
         </div>
         <div className="modal-body">
           {rates.length > 0 && (
             <div className="table-wrap">
               <table>
+                {/* Role needs the most room — job titles like "Excavator
+                    Operator" were unreadable in an equal-width column. */}
+                <colgroup>
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '19%' }} />
+                  <col style={{ width: '32%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '10%' }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>First Name</th>
@@ -68,7 +100,19 @@ function RateCardModal({ supplier, onSave, onClose }) {
                       <td><input className="form-input" value={r.firstName || ''} onChange={e => updateRow(i, 'firstName', e.target.value)} placeholder="e.g. John" /></td>
                       <td><input className="form-input" value={r.surname || ''} onChange={e => updateRow(i, 'surname', e.target.value)} placeholder="e.g. Smith" /></td>
                       <td><input className="form-input" value={r.role} onChange={e => updateRow(i, 'role', e.target.value)} placeholder="e.g. Labourer" /></td>
-                      <td><input className="form-input" type="number" step="0.01" value={r.ordinary} onChange={e => updateRow(i, 'ordinary', e.target.value)} /></td>
+                      <td>
+                        {/* Blur on wheel: hovering a number input and scrolling
+                            the modal would otherwise silently change a pay rate. */}
+                        <input
+                          className="form-input no-spinner"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={r.ordinary}
+                          onWheel={e => e.currentTarget.blur()}
+                          onChange={e => updateRow(i, 'ordinary', e.target.value)}
+                        />
+                      </td>
                       <td><button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => removeRow(i)}>✕</button></td>
                     </tr>
                   ))}
@@ -76,7 +120,12 @@ function RateCardModal({ supplier, onSave, onClose }) {
               </table>
             </div>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={addRow}>+ Add role</button>
+          <button className="btn btn-secondary btn-sm" onClick={addRow}>+ Add person</button>
+          {warning && (
+            <div style={{ marginTop: 12, padding: '10px 12px', background: '#fdeaea', border: '1px solid #d88', borderRadius: 6, fontSize: 13, color: '#a33' }}>
+              ⚠️ {warning}
+            </div>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>

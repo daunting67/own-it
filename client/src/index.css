@@ -339,6 +339,11 @@ tbody tr:hover td { background: rgba(232,91,26,.06); }
    the panel instead of the last ones being scrolled out of sight. */
 .table-dense th, .table-dense td { padding-left: 8px; padding-right: 8px; }
 
+/* Money fields: the spinner arrows invite nudging a pay rate by a cent. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spinner { -moz-appearance: textfield; appearance: textfield; }
+
 /* ── Tabs ────────────────────────────────────────────────── */
 .tabs { display: flex; gap: 4px; border-bottom: 2px solid rgba(0,0,0,.15); margin-bottom: 20px; }
 .tab-btn {

@@ -6,11 +6,18 @@ function fmtTime(d) {
   return new Date(d).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' })
 }
 
+// 10.666666666666666 is what a 10h40m shift divides to — show it as 10.67.
+function fmtHours(hours) {
+  const n = Number(hours)
+  if (hours == null || hours === '' || !Number.isFinite(n)) return '—'
+  return String(Math.round(n * 100) / 100)
+}
+
 function fmtShifts(shifts) {
   if (!Array.isArray(shifts) || shifts.length === 0) return '—'
   return shifts.map((s, i) => (
     <div key={i} style={{ whiteSpace: 'nowrap' }}>
-      {s.employee || 'Unknown'}: {fmtTime(s.start)}–{fmtTime(s.finish)} ({s.hours ?? '—'}h)
+      {s.employee || 'Unknown'}: {fmtTime(s.start)}–{fmtTime(s.finish)} ({fmtHours(s.hours)}h)
     </div>
   ))
 }
@@ -98,7 +105,9 @@ export default function OperationsModule() {
           <table>
             <thead>
               <tr>
+                <th>Date</th>
                 <th>Time</th>
+                <th>Submission</th>
                 <th>Site</th>
                 <th>Form</th>
                 <th>Submitted by</th>
@@ -108,7 +117,13 @@ export default function OperationsModule() {
             <tbody>
               {submissions.map(s => (
                 <tr key={s.id}>
-                  <td>{fmtTime(s.receivedAt)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{s.djrDate || '—'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(s.receivedAt)}</td>
+                  {/* Short reference in the cell; the full FastField UUID on
+                      hover, so it's readable here but still lookup-able. */}
+                  <td style={{ whiteSpace: 'nowrap' }} title={s.submissionId || ''}>
+                    {s.submissionNumber || '—'}
+                  </td>
                   <td>{s.site || '—'}</td>
                   <td>{s.formName || '—'}</td>
                   <td>{s.operator || '—'}</td>

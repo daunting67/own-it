@@ -51,6 +51,32 @@ async function storeSubmission(body) {
   return data
 }
 
+// The DJR's own date and FastField's reference for the submission. Both come
+// out of rawPayload rather than a column, so no table change is needed. The
+// date matters on its own: a DJR for the 30th is routinely submitted on the
+// 31st, so "Time" alone doesn't say which day the work was done.
+function djrDate(payload) {
+  const raw = payload?.date || payload?.creationTimeStamp || null
+  if (!raw) return null
+  const when = new Date(raw)
+  if (Number.isNaN(when.getTime())) return null
+  return new Intl.DateTimeFormat('en-NZ', {
+    timeZone: 'Pacific/Auckland', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(when)
+}
+
+function decorate(row) {
+  const p = row?.rawPayload || {}
+  return {
+    ...row,
+    djrDate: djrDate(p),
+    // sequenceNumber is the short human reference; submissionId is the full
+    // UUID, kept alongside it for looking a submission up in FastField.
+    submissionNumber: p.sequenceNumber != null ? String(p.sequenceNumber) : null,
+    submissionId: p.submissionId || p.submitId || null,
+  }
+}
+
 async function getTodaysSubmissions() {
   const { startUtc, endUtc } = nzDayRange(0)
   const { data, error } = await db
@@ -60,7 +86,7 @@ async function getTodaysSubmissions() {
     .lt('receivedAt', endUtc)
     .order('receivedAt', { ascending: false })
   if (error) throw new Error(error.message)
-  return data || []
+  return (data || []).map(decorate)
 }
 
 function allSites() {
