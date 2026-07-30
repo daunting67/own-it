@@ -57,9 +57,9 @@ function DayPanel({ title, data }) {
                 <th>Machine</th>
                 <th>Site</th>
                 <th>Operator</th>
-                <th>Hour clock</th>
-                <th>Service due at</th>
-                <th>Hrs to service</th>
+                <th>Hour<br />clock</th>
+                <th>Service<br />due at</th>
+                <th>Hrs to<br />service</th>
               </tr>
             </thead>
             <tbody>
