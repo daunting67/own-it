@@ -50,8 +50,7 @@ export default function Sidebar({ active, onSelect }) {
         ))}
       </nav>
       <div className="sidebar-foot">
-        <div className="motto-1">One mission. One team.</div>
-        <div className="motto-2">We build what matters.</div>
+        <div className="motto-1">Seeing difficult differently</div>
         <div className="user-row">
           <div className="user-avatar">{initials}</div>
           <div>
