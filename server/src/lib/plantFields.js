@@ -42,6 +42,20 @@ const METADATA_KEYS = /^(formid|formname|formtype|submissionid|id|userid|userema
 
 const normaliseKey = key => String(key).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 
+// The webhook's raw payload keys the plant checklist's own field ALIASES
+// (short internal names set in the form builder), not the readable labels —
+// e.g. a real submission carries {hour:3599, due:4000, service:401} for
+// Hour Clock / Service Due At / Hours To Service (due - hour = service,
+// confirmed against a live payload). These one-word keys are too generic for
+// the fuzzy RULES below ("hour" alone matches nothing there, and matching it
+// loosely would wrongly catch other forms' fields), so match them exactly
+// and only when the whole normalised key is just that one word.
+const EXACT_KEYS = {
+  hour: 'hourClock',
+  due: 'serviceDueAt',
+  service: 'hoursToService',
+}
+
 // Walk the payload collecting the first plausible value for each field. Depth
 // limited, and photo/signature blobs are skipped so a big base64 string can't
 // be mistaken for an answer.
@@ -65,6 +79,11 @@ function applyRules(rawKey, value, found) {
   if (METADATA_KEYS.test(key.replace(/\s+/g, ''))) return
   const simple = plainValue(value)
   if (simple == null || (typeof simple === 'string' && simple.length > 200)) return
+  const exactField = EXACT_KEYS[key]
+  if (exactField) {
+    if (found[exactField] == null) found[exactField] = simple
+    return
+  }
   for (const [field, pattern] of RULES) {
     if (found[field] == null && pattern.test(key)) {
       found[field] = simple
