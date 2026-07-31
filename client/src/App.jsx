@@ -35,8 +35,6 @@ const VIEW_TITLES = {
 // reading width — at 1020px the Plant day panels clipped their last two
 // columns (Service due at / Hrs to service) behind a hidden scrollbar.
 const WIDE_VIEWS = new Set(['plant'])
-// Views whose tables need every pixel of the window, not a reading column.
-const FULL_VIEWS = new Set(['plant'])
 
 export default function App() {
   const { user, loading } = useAuth()
@@ -79,7 +77,7 @@ export default function App() {
           onAlert={() => setDept('payroll')}
         />
         <div className="content">
-          <div className={`content-inner${WIDE_VIEWS.has(dept) ? ' content-inner-wide' : ''}${FULL_VIEWS.has(dept) ? ' content-inner-full' : ''}`}>
+          <div className={`content-inner${WIDE_VIEWS.has(dept) ? ' content-inner-wide' : ''}`}>
             {(() => {
               const can = (d) => user?.admin || (user?.departments || []).includes(d)
               if (dept === 'dashboard') return <Dashboard onNavigate={setDept} />
