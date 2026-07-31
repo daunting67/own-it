@@ -2,11 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 
-function fmtTime(d) {
-  if (!d) return '—'
-  return new Date(d).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' })
-}
-
 function fmtDay(day) {
   if (!day) return ''
   // day is YYYY-MM-DD in NZ terms — render it without letting the browser
@@ -40,7 +35,6 @@ function DayPanel({ title, data }) {
           <table>
             <thead>
               <tr>
-                <th>Time</th>
                 <th>Machine</th>
                 <th>Site</th>
                 <th>Operator</th>
@@ -52,7 +46,6 @@ function DayPanel({ title, data }) {
             <tbody>
               {checks.map(c => (
                 <tr key={c.id}>
-                  <td>{fmtTime(c.receivedAt)}</td>
                   <td>{c.machine || '—'}</td>
                   <td>{c.site || '—'}</td>
                   <td>{c.operator || '—'}</td>
