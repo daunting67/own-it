@@ -69,7 +69,7 @@ function DayPanel({ title, data }) {
 // Plant List → Download List), each with whether it checked in today and
 // yesterday. The two day panels answer "what came in"; this one answers "what
 // should have".
-function RegisterPanel({ rows, source, count, importedAt, lookbackDays }) {
+function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check }) {
   const label = source === 'fastfield-lookup'
     ? 'live from FastField'
     : source === 'imported-list'
@@ -101,13 +101,40 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays }) {
     )
   }
 
-  // How stale the list itself is. FastField's API won't serve a lookup list, so
-  // the portal can't refresh it on its own — it checks the age instead and says
-  // when it's time to download a fresh one.
+  // The list is edited often in FastField, so the portal looks for a fresh copy
+  // every morning (Vercel Cron → /api/cron/plant-register). Say when it last
+  // looked and what it found — and if FastField still won't hand the list over,
+  // say that too, with how old the imported copy now is.
   const importedDaysAgo = importedAt
     ? Math.floor((Date.now() - new Date(importedAt).getTime()) / 86400000)
     : null
   const stale = importedDaysAgo != null && importedDaysAgo >= 7
+
+  const checkedAgo = check?.at
+    ? Math.round((Date.now() - new Date(check.at).getTime()) / 3600000)
+    : null
+  const checkedWhen = checkedAgo == null
+    ? null
+    : checkedAgo < 1 ? 'just now' : checkedAgo < 24 ? `${checkedAgo}h ago` : `${Math.floor(checkedAgo / 24)}d ago`
+
+  const status = (() => {
+    if (!check) {
+      return { text: 'Checked for updates every morning — first check hasn\'t run yet.', warn: false }
+    }
+    if (check.ok) {
+      return {
+        text: `Checked FastField for updates ${checkedWhen} — list is current (${check.machineCount} machines).`,
+        warn: false,
+      }
+    }
+    const age = importedDaysAgo == null
+      ? 'nothing imported yet'
+      : importedDaysAgo === 0 ? 'imported today' : `imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago`
+    return {
+      text: `Checked FastField for updates ${checkedWhen} — it wouldn't hand the list over, so this is the copy ${age}${stale ? '. Download a fresh export and re-import it below' : ''}.`,
+      warn: stale,
+    }
+  })()
 
   return (
     <div style={{ minWidth: 0 }}>
@@ -120,12 +147,8 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays }) {
         </div>
       </div>
 
-      <div style={{ fontSize: 11, marginBottom: 10, color: stale ? '#c67a1e' : 'var(--text-muted)' }}>
-        {importedDaysAgo == null
-          ? 'Checked daily against the imported FastField plant list.'
-          : importedDaysAgo === 0
-            ? 'Plant list imported today.'
-            : `Plant list imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago${stale ? ' — download a fresh copy from FastField and re-import it below' : ''}.`}
+      <div style={{ fontSize: 11, marginBottom: 10, color: status.warn ? '#c67a1e' : 'var(--text-muted)' }}>
+        {status.text}
       </div>
 
       {rows.length === 0 ? (
@@ -291,6 +314,32 @@ function RegisterImport({ data, onDone }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
+  // The same job the daily cron runs, on demand — so a list edited in FastField
+  // a minute ago can be picked up now, and so whether FastField will hand the
+  // list over at all is answerable without waiting until tomorrow morning.
+  const checkNow = () => {
+    setBusy('check')
+    setError(null)
+    setResult(null)
+    api.checkPlantRegister()
+      .then(res => {
+        if (!res.ok) {
+          setError(res.error || 'FastField would not hand over the plant list')
+          setResult(`Tried ${res.attempts?.length || 0} FastField endpoints — none returned the list. Import the CSV export instead.`)
+        } else if (res.changed) {
+          const bits = []
+          if (res.added?.length) bits.push(`${res.added.length} added (${res.added.slice(0, 3).join(', ')}${res.added.length > 3 ? '…' : ''})`)
+          if (res.removed?.length) bits.push(`${res.removed.length} removed`)
+          setResult(`Plant list updated from FastField — ${res.machineCount} machines · ${bits.join(' · ')}`)
+        } else {
+          setResult(`Plant list checked — already up to date (${res.machineCount} machines)`)
+        }
+        onDone?.()
+      })
+      .catch(err => setError(err.message || 'Check failed'))
+      .finally(() => setBusy(false))
+  }
+
   const onFile = event => {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -318,15 +367,20 @@ function RegisterImport({ data, onDone }) {
 
   return (
     <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--pi-border, #ddd)', borderRadius: 6 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Plant list</div>
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Update plant list</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-        {status}. To update it: in FastField go to <strong>Lists → Lookup Lists → Plant List → Actions → Download List</strong>,
-        then drop that file in here.
+        {status}. The portal looks for a fresh copy every morning; if FastField won't hand it over, update it by
+        hand — <strong>Lists → Lookup Lists → Plant List → Actions → Download List</strong> — then drop that file in here.
       </div>
-      <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: busy ? 'default' : 'pointer' }}>
-        {busy ? 'Reading…' : 'Import plant list (.csv)'}
-        <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} style={{ display: 'none' }} />
-      </label>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className="btn btn-secondary btn-sm" disabled={!!busy} onClick={checkNow}>
+          {busy === 'check' ? 'Checking FastField…' : 'Check FastField for changes now'}
+        </button>
+        <label className="btn btn-secondary btn-sm" style={{ margin: 0, cursor: busy ? 'default' : 'pointer' }}>
+          {busy === true ? 'Reading…' : 'Import plant list (.csv)'}
+          <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={!!busy} style={{ display: 'none' }} />
+        </label>
+      </div>
       {result && <div style={{ marginTop: 10, fontSize: 12, color: '#2a7' }}>{result}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12, color: '#a33' }}>{error}</div>}
     </div>
@@ -599,13 +653,21 @@ export default function PlantModule() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 24, alignItems: 'start' }}>
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
-          <RegisterPanel
-            rows={registerRows}
-            source={data?.registerSource}
-            count={data?.registerCount}
-            importedAt={data?.registerImportedAt}
-            lookbackDays={data?.lookbackDays}
-          />
+          <div style={{ minWidth: 0 }}>
+            <RegisterPanel
+              rows={registerRows}
+              source={data?.registerSource}
+              count={data?.registerCount}
+              importedAt={data?.registerImportedAt}
+              lookbackDays={data?.lookbackDays}
+              check={data?.registerCheck}
+            />
+            {/* The daily check keeps the list current on its own; these are for
+                when FastField won't hand it over, or when a change can't wait
+                until the morning. Admin-only, and inside this column so the
+                page doesn't grow another section. */}
+            {user?.admin && <RegisterImport data={data} onDone={load} />}
+          </div>
         </div>
       )}
 

@@ -6,7 +6,8 @@ const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/pla
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
 const { nzDayRange, nzDateString, daysBetween } = require('../lib/nzDay')
 const { csvToRecords, recordsToChecks } = require('../lib/plantImport')
-const { machinesFromCsv, saveRegister, clearCache: clearRegisterStoreCache } = require('../lib/plantRegisterStore')
+const { machinesFromCsv, saveRegister, loadRegister, clearCache: clearRegisterStoreCache } = require('../lib/plantRegisterStore')
+const { checkPlantList } = require('../lib/plantRegisterSync')
 const db = require('../lib/supabase')
 
 const router = Router()
@@ -24,13 +25,14 @@ const normalise = name => String(name || '').trim().replace(/\s+/g, ' ').toLower
 router.get('/today', async (req, res) => {
   try {
     const deadline = Date.now() + 7000
-    const [today, yesterday, seenMachines, register, formIds, lastChecks] = await Promise.all([
+    const [today, yesterday, seenMachines, register, formIds, lastChecks, stored] = await Promise.all([
       getChecksForDay(0),
       getChecksForDay(-1),
       getKnownMachines(),
       getPlantRegister({ deadline }),
       getPlantFormIds().catch(() => []),
       getLastCheckDays(),
+      loadRegister().catch(() => null),
     ])
 
     // Pull the submitted checklists straight from FastField as well, so a
@@ -101,7 +103,9 @@ router.get('/today', async (req, res) => {
       knownMachineCount: knownMachines.length,
       registerSource: register.source || 'submissions',
       registerCount: register.machines.length,
-      registerImportedAt: register.importedAt || null,
+      registerImportedAt: register.importedAt || stored?.importedAt || null,
+      // What the daily check found last time it ran (routes/cron.js).
+      registerCheck: stored?.lastCheck || null,
       registerError: register.error || null,
       // How the checks were obtained, so the page can be honest about it.
       feed: (() => {
@@ -212,6 +216,19 @@ router.get('/register', async (req, res) => {
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+// Run the daily plant-list check on demand — the same job Vercel Cron runs each
+// morning (routes/cron.js). Here so the check can be proved rather than waited
+// for, and so a list edited in FastField this minute can be picked up now.
+router.post('/register/check', requireAdmin, async (req, res) => {
+  try {
+    const result = await checkPlantList({ deadline: Date.now() + 20000, trigger: req.user?.name || 'manual' })
+    res.json(result)
+  } catch (err) {
+    console.error('Plant list check failed:', err)
+    res.status(500).json({ error: err.message || 'check failed' })
   }
 })
 

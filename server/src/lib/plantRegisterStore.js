@@ -46,9 +46,13 @@ function machinesFromCsv(text) {
 }
 
 async function saveRegister(machines, meta = {}) {
+  const importedAt = new Date().toISOString()
   const body = JSON.stringify({
     machines,
-    importedAt: new Date().toISOString(),
+    importedAt,
+    // The daily check's own record survives a manual import, so the page can
+    // still say when the list was last looked at.
+    lastCheck: meta.lastCheck || (await loadRegister({ fresh: true }).catch(() => null))?.lastCheck || null,
     ...meta,
   })
   const opts = { contentType: 'application/json', upsert: true }
@@ -58,18 +62,24 @@ async function saveRegister(machines, meta = {}) {
     ;({ error } = await db.storage.from(BUCKET).upload(PATH, Buffer.from(body), opts))
   }
   if (error) throw new Error(error.message)
-  cache = { at: Date.now(), value: { machines, importedAt: new Date().toISOString() } }
+  clearCache()
   return { count: machines.length }
 }
 
-// { machines, importedAt } or null when nothing has been imported yet.
-async function loadRegister() {
-  if (cache.value && Date.now() - cache.at < CACHE_MS) return cache.value
+// { machines, importedAt, source, lastCheck } or null when nothing has been
+// imported yet.
+async function loadRegister({ fresh = false } = {}) {
+  if (!fresh && cache.value && Date.now() - cache.at < CACHE_MS) return cache.value
   const { data, error } = await db.storage.from(BUCKET).download(PATH)
   if (error || !data) return null
   try {
     const parsed = JSON.parse(Buffer.from(await data.arrayBuffer()).toString('utf8'))
-    const value = { machines: Array.isArray(parsed.machines) ? parsed.machines : [], importedAt: parsed.importedAt || null }
+    const value = {
+      machines: Array.isArray(parsed.machines) ? parsed.machines : [],
+      importedAt: parsed.importedAt || null,
+      source: parsed.source || null,
+      lastCheck: parsed.lastCheck || null,
+    }
     cache = { at: Date.now(), value }
     return value
   } catch {
@@ -77,8 +87,29 @@ async function loadRegister() {
   }
 }
 
+// Record what the daily check found, without disturbing the machine list.
+// Written into the same file as the register so the dashboard learns both from
+// one download: whether the list is current, and when it was last looked at.
+async function saveCheckResult(result) {
+  const existing = await loadRegister({ fresh: true }).catch(() => null)
+  const body = JSON.stringify({
+    machines: existing?.machines || [],
+    importedAt: existing?.importedAt || null,
+    source: existing?.source || null,
+    lastCheck: { at: new Date().toISOString(), ...result },
+  })
+  const opts = { contentType: 'application/json', upsert: true }
+  let { error } = await db.storage.from(BUCKET).upload(PATH, Buffer.from(body), opts)
+  if (error && /bucket not found|does not exist/i.test(error.message)) {
+    await ensureBucket()
+    ;({ error } = await db.storage.from(BUCKET).upload(PATH, Buffer.from(body), opts))
+  }
+  if (error) throw new Error(error.message)
+  clearCache()
+}
+
 function clearCache() {
   cache = { at: 0, value: null }
 }
 
-module.exports = { saveRegister, loadRegister, machinesFromCsv, clearCache, BUCKET, PATH }
+module.exports = { saveRegister, loadRegister, saveCheckResult, machinesFromCsv, clearCache, BUCKET, PATH }

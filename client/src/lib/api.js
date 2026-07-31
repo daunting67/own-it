@@ -65,6 +65,7 @@ export const api = {
   backloadPlantChecks: () => request('/api/plant/backload', { method: 'POST' }),
   importPlantChecks: (csv, day) => request('/api/plant/import', { method: 'POST', body: JSON.stringify({ csv, day }) }),
   importPlantRegister: (csv) => request('/api/plant/register/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  checkPlantRegister: () => request('/api/plant/register/check', { method: 'POST' }),
 
   // Operations — today's site DJR submissions (FastField)
   getDjrToday: () => request('/api/operations/djr/today'),
