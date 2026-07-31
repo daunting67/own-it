@@ -15,6 +15,11 @@ function fmtDay(day) {
   return new Date(y, m - 1, d).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
+// The header meta text (date, counts, list source) sits on the textured page
+// background rather than inside a white card, where the muted grey reads as
+// washed out — so it uses the primary ink at a heavier weight.
+const panelMeta = { fontSize: 12, color: 'var(--text)', fontWeight: 600 }
+
 function DayPanel({ title, data }) {
   const checks = data?.checks || []
 
@@ -22,8 +27,8 @@ function DayPanel({ title, data }) {
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>{title}</div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDay(data?.day)}</div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={panelMeta}>{fmtDay(data?.day)}</div>
+        <div style={{ ...panelMeta, marginLeft: 'auto' }}>
           {checks.length} check{checks.length === 1 ? '' : 's'} · {data?.checkedMachines?.length || 0} machine{(data?.checkedMachines?.length || 0) === 1 ? '' : 's'}
         </div>
       </div>
@@ -113,8 +118,8 @@ function RegisterPanel({ rows, source, count, lookbackDays }) {
           the list was obtained goes in the admin panel underneath. */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>Plant list</div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={panelMeta}>{label}</div>
+        <div style={{ ...panelMeta, marginLeft: 'auto' }}>
           {rows.length} machine{rows.length === 1 ? '' : 's'}
           {count > 0 && count !== rows.length ? ` (${count} on list)` : ''}
         </div>
