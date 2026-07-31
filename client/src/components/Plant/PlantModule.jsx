@@ -69,7 +69,7 @@ function DayPanel({ title, data }) {
 // Plant List → Download List), each with whether it checked in today and
 // yesterday. The two day panels answer "what came in"; this one answers "what
 // should have".
-function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check }) {
+function RegisterPanel({ rows, source, count, lookbackDays }) {
   const label = source === 'fastfield-lookup'
     ? 'live from FastField'
     : source === 'imported-list'
@@ -106,60 +106,18 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check })
     )
   }
 
-  // The list is edited often in FastField, so the portal looks for a fresh copy
-  // every morning (Vercel Cron → /api/cron/plant-register). Say when it last
-  // looked and what it found — and if FastField still won't hand the list over,
-  // say that too, with how old the imported copy now is.
-  const importedDaysAgo = importedAt
-    ? Math.floor((Date.now() - new Date(importedAt).getTime()) / 86400000)
-    : null
-  const stale = importedDaysAgo != null && importedDaysAgo >= 7
-
-  const checkedAgo = check?.at
-    ? Math.round((Date.now() - new Date(check.at).getTime()) / 3600000)
-    : null
-  const checkedWhen = checkedAgo == null
-    ? null
-    : checkedAgo < 1 ? 'just now' : checkedAgo < 24 ? `${checkedAgo}h ago` : `${Math.floor(checkedAgo / 24)}d ago`
-
-  const status = (() => {
-    if (!check) {
-      return { text: 'Checked for updates every morning — first check hasn\'t run yet.', warn: false }
-    }
-    if (check.ok) {
-      return {
-        text: `Checked FastField for updates ${checkedWhen} — list is current (${check.machineCount} machines).`,
-        warn: false,
-      }
-    }
-    if (importedDaysAgo == null) {
-      return {
-        text: `Checked FastField for updates ${checkedWhen} — it wouldn't hand the list over, and no list has been imported yet.`,
-        warn: true,
-      }
-    }
-    const age = importedDaysAgo === 0
-      ? 'imported today'
-      : `imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago`
-    return {
-      text: `Checked FastField for updates ${checkedWhen} — it wouldn't hand the list over, so this is the copy ${age}${stale ? '. Download a fresh export and re-import it below' : ''}.`,
-      warn: stale,
-    }
-  })()
-
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+      {/* One header line only — the same height as the two day panels, so the
+          three tables line up. Nothing else belongs here: anything about how
+          the list was obtained goes in the admin panel underneath. */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>Plant list</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
           {rows.length} machine{rows.length === 1 ? '' : 's'}
           {count > 0 && count !== rows.length ? ` (${count} on list)` : ''}
         </div>
-      </div>
-
-      <div style={{ fontSize: 11, marginBottom: 10, color: status.warn ? '#c67a1e' : 'var(--text-muted)' }}>
-        {status.text}
       </div>
 
       {rows.length === 0 ? (
@@ -388,11 +346,25 @@ function RegisterImport({ data, onDone }) {
       ? `Using the imported plant list — ${data.registerCount} machines${data.registerImportedAt ? `, imported ${new Date(data.registerImportedAt).toLocaleDateString('en-NZ')}` : ''}`
       : 'No plant list yet — "not inspected" can only count machines that have checked in before'
 
+  // How the automatic morning check went. This lives here rather than in the
+  // plant-list column, where any extra line would push that table out of line
+  // with the two day tables beside it.
+  const check = data?.registerCheck
+  const checkedAgo = check?.at ? Math.round((Date.now() - new Date(check.at).getTime()) / 3600000) : null
+  const checkedWhen = checkedAgo == null
+    ? null
+    : checkedAgo < 1 ? 'just now' : checkedAgo < 24 ? `${checkedAgo}h ago` : `${Math.floor(checkedAgo / 24)}d ago`
+  const lastCheck = !check
+    ? 'The portal looks for a fresh copy every morning.'
+    : check.ok
+      ? `Checked FastField ${checkedWhen} and the list was current.`
+      : `Checked FastField ${checkedWhen} — it wouldn't hand the list over.`
+
   return (
     <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--pi-border, #ddd)', borderRadius: 6 }}>
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Update plant list</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-        {status}. The portal looks for a fresh copy every morning; if FastField won't hand it over, update it by
+        {status}. {lastCheck} If FastField won't hand it over, update it by
         hand — <strong>Lists → Lookup Lists → Plant List → Actions → Download List</strong> — then drop that file in here.
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -690,9 +662,7 @@ export default function PlantModule() {
               rows={registerRows}
               source={data?.registerSource}
               count={data?.registerCount}
-              importedAt={data?.registerImportedAt}
               lookbackDays={data?.lookbackDays}
-              check={data?.registerCheck}
             />
             {/* The daily check keeps the list current on its own; these are for
                 when FastField won't hand it over, or when a change can't wait
