@@ -659,7 +659,10 @@ export default function PlantModule() {
       )}
 
       {!error && data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 24, alignItems: 'start' }}>
+        /* Three panels stacked, each the full width of the window: with seven
+           columns on the day tables and 40-odd machines on the list, side by
+           side meant dragging every table sideways to read it. */
+        <div className="table-compact" style={{ display: 'grid', gap: 24, alignItems: 'start' }}>
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
           <div style={{ minWidth: 0 }}>
