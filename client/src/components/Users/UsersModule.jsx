@@ -10,6 +10,7 @@ const DEPARTMENTS = [
   { id: 'projects', label: 'Project Management' },
   { id: 'cost',     label: 'Cost Control' },
   { id: 'hs',       label: 'Health & Safety' },
+  { id: 'prestart', label: 'Pre-Start' },
   { id: 'training', label: 'Training' },
   { id: 'plant',    label: 'Plant & Equipment' },
   { id: 'operations', label: 'Operations' },

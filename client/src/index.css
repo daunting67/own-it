@@ -535,3 +535,179 @@ tbody tr:hover td { background: rgba(232,91,26,.06); }
 .auto-desc { font-size: 13px; color: var(--pi-body-muted); margin: 0; line-height: 1.5; flex: 1; }
 .auto-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
 .btn-run { padding: 8px 16px; }
+
+/* ── Pre-Start (iPad) ────────────────────────────────────────
+   Run on an iPad at 6:30am, outdoors, standing up, often with gloves half
+   off. So: 17px minimum on anything you type into (below 16px iOS zooms the
+   page on focus), 52px minimum on anything you tap, and the facilitator's
+   words set large enough to read at arm's length. */
+.ps-page { padding-bottom: 40px; }
+.ps-card {
+  background: var(--pi-surface); border-radius: 6px; border-top: 4px solid var(--pi-blue);
+  box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 16px;
+}
+.ps-kicker {
+  font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--pi-orange);
+}
+.ps-doc-control { margin-top: 14px; font-size: 11px; color: var(--pi-muted); letter-spacing: .04em; }
+.ps-help { font-size: 12.5px; color: var(--pi-body-muted); margin-bottom: 4px; }
+.ps-empty { color: var(--pi-body-muted); font-size: 14px; padding: 10px 0; }
+.ps-error { color: var(--danger); font-size: 14px; font-weight: 600; margin-top: 10px; }
+.ps-banner { margin-bottom: 14px; }
+.ps-btn-lg { min-height: 52px; padding: 14px 22px; font-size: 14px; }
+.ps-btn-block { width: 100%; justify-content: center; }
+.ps-input { font-size: 17px; padding: 12px 12px; min-height: 52px; }
+textarea.ps-input { min-height: 84px; line-height: 1.45; }
+.ps-field { margin-bottom: 18px; }
+.ps-static { font-size: 17px; padding: 12px 0; font-weight: 600; }
+
+/* Runner header: which section, and how the 23 minutes are tracking. */
+.ps-runner-top {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  margin-bottom: 14px; flex-wrap: wrap;
+}
+.ps-runner-title {
+  font-size: 28px; font-weight: 900; text-transform: uppercase; letter-spacing: .02em;
+  color: var(--pi-ink); line-height: 1.15;
+}
+.ps-timing { text-align: right; }
+.ps-elapsed { font-size: 26px; font-weight: 900; color: var(--pi-ink); }
+.ps-target { font-size: 12px; font-weight: 700; color: var(--pi-body-muted); }
+
+.ps-steps { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.ps-step {
+  width: 52px; height: 52px; border-radius: 50%; font-size: 17px; font-weight: 900;
+  background: rgba(255,255,255,.7); color: var(--pi-muted); border: 1px solid rgba(0,0,0,.15);
+}
+.ps-step.done { background: var(--pi-blue-tint); color: var(--pi-blue); border-color: transparent; }
+.ps-step.on { background: var(--pi-orange); color: #fff; border-color: transparent; }
+
+.ps-why {
+  background: var(--pi-blue-tint); border-left: 4px solid var(--pi-blue);
+  padding: 14px 16px; border-radius: 4px; margin-bottom: 14px;
+  font-size: 15px; line-height: 1.5; color: var(--pi-ink);
+}
+.ps-why-tag {
+  display: inline-block; font-size: 11px; font-weight: 900; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--pi-blue); margin-right: 10px;
+}
+.ps-say {
+  margin-bottom: 16px; background: var(--pi-surface); border-radius: 6px;
+  border-left: 4px solid var(--pi-orange); padding: 6px 18px; box-shadow: var(--shadow);
+}
+.ps-say-line { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,.08); }
+.ps-say-line:last-child { border-bottom: none; }
+.ps-say-ref { font-size: 13px; font-weight: 900; color: var(--pi-orange); min-width: 34px; padding-top: 3px; }
+.ps-say-text { font-size: 19px; font-weight: 700; line-height: 1.4; color: var(--pi-ink); }
+.ps-say-note { font-size: 14px; color: var(--pi-body-muted); margin-top: 4px; line-height: 1.45; }
+
+.ps-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+
+.ps-rows { display: flex; flex-direction: column; gap: 8px; }
+.ps-row { display: flex; gap: 8px; align-items: center; }
+.ps-row-remove {
+  min-width: 44px; min-height: 44px; border-radius: 4px; color: var(--pi-muted); font-size: 16px;
+}
+.ps-row-remove:disabled { opacity: 0; cursor: default; }
+.ps-row-remove:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
+
+.ps-rules { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-rule {
+  padding: 12px 16px; border-radius: 26px; font-size: 14px; font-weight: 700;
+  background: rgba(255,255,255,.75); border: 1px solid rgba(0,0,0,.16); color: var(--pi-body-muted);
+  min-height: 52px; display: inline-flex; align-items: center; text-align: left;
+}
+.ps-rule.on { background: var(--pi-orange); border-color: transparent; color: #fff; }
+.ps-rules-static .ps-rule { min-height: 0; padding: 7px 13px; font-size: 12.5px; }
+.ps-rules-static .ps-rule.off { opacity: .45; }
+
+.ps-permits { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.ps-permit { border: 1px solid rgba(0,0,0,.14); border-radius: 4px; background: rgba(255,255,255,.7); }
+.ps-permit.on { border-color: var(--pi-orange); }
+.ps-permit-name {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 14px 14px; font-size: 15px; font-weight: 700; min-height: 52px; color: var(--pi-ink);
+}
+.ps-tick {
+  width: 26px; height: 26px; border-radius: 4px; border: 2px solid rgba(0,0,0,.25);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 15px; flex: none;
+}
+.ps-tick.on { background: var(--pi-orange); border-color: var(--pi-orange); color: #fff; }
+.ps-permit-detail { display: flex; gap: 8px; padding: 0 14px 12px; }
+
+.ps-declaration {
+  font-size: 14.5px; line-height: 1.5; color: var(--pi-ink); background: var(--pi-neutral-tint);
+  border-radius: 4px; padding: 14px 16px; margin-bottom: 14px; font-weight: 600;
+}
+.ps-signon-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.ps-signon-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.1); border-radius: 4px;
+}
+.ps-signon-no { font-size: 15px; font-weight: 900; color: var(--pi-muted); min-width: 24px; }
+.ps-signon-who { flex: 1; min-width: 0; }
+.ps-signon-name { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.ps-signon-meta { font-size: 12.5px; color: var(--pi-body-muted); }
+.ps-signon-sig { height: 46px; max-width: 190px; object-fit: contain; background: #fff; border-radius: 3px; }
+
+.ps-signon-modal { max-width: 720px; width: 100%; }
+.ps-signon-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.ps-toggle {
+  min-height: 52px; border-radius: 4px; border: 1px solid rgba(0,0,0,.18); background: #fff;
+  font-size: 15px; font-weight: 700; color: var(--pi-body-muted); padding: 0 16px;
+}
+.ps-toggle.on { background: var(--pi-orange); border-color: transparent; color: #fff; }
+.ps-sig-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.ps-sig-canvas {
+  width: 100%; height: 200px; background: #fff; border: 2px dashed rgba(0,0,0,.25);
+  border-radius: 6px; touch-action: none; display: block;
+}
+
+.ps-runner-actions { display: flex; gap: 12px; justify-content: space-between; margin-top: 8px; }
+.ps-runner-actions .btn { flex: 1; justify-content: center; }
+
+.ps-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.ps-day-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; gap: 12px; }
+.ps-day-title { font-size: 15px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.ps-day-meta { font-size: 12px; font-weight: 600; color: var(--text); }
+.ps-briefing-list { display: flex; flex-direction: column; gap: 8px; }
+.ps-briefing {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%;
+  text-align: left; padding: 14px; min-height: 64px; border-radius: 4px;
+  background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.1);
+}
+.ps-briefing:hover { border-color: var(--pi-orange); }
+.ps-briefing-site { font-size: 16px; font-weight: 800; }
+.ps-briefing-meta { font-size: 12.5px; color: var(--pi-body-muted); }
+
+.ps-view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.ps-view-title { font-size: 26px; font-weight: 900; text-transform: uppercase; letter-spacing: .02em; }
+.ps-view-sub { font-size: 13.5px; color: var(--pi-body-muted); font-weight: 600; }
+.ps-view-section {
+  font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--pi-blue); margin-bottom: 12px;
+}
+.ps-view-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.ps-view-block { margin-bottom: 12px; }
+.ps-view-label { font-size: 11px; font-weight: 800; color: var(--pi-muted); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 3px; }
+.ps-view-value { font-size: 15.5px; line-height: 1.5; }
+.ps-view-text { white-space: pre-wrap; }
+.ps-view-blank { color: var(--text-light); }
+
+/* iPad portrait and smaller: one column, and the step buttons stay reachable. */
+@media (max-width: 900px) {
+  .ps-runner-title { font-size: 22px; }
+  .ps-say-text { font-size: 18px; }
+  .ps-view-grid, .ps-details-grid, .ps-days { grid-template-columns: 1fr; }
+  /* Keep the section title and the clock on one line — wrapped, the elapsed
+     time landed in the middle of the page looking like a heading. */
+  .ps-runner-top { flex-wrap: nowrap; align-items: baseline; }
+  .ps-timing { flex: none; }
+  .ps-elapsed { font-size: 22px; }
+  /* Hazard/action rows: full-width fields stacked, not three squeezed boxes. */
+  .ps-row { flex-wrap: wrap; }
+  .ps-row .form-input { flex: 1 1 100% !important; }
+  .ps-row-remove { margin-left: auto; }
+  .ps-permits { grid-template-columns: 1fr; }
+}

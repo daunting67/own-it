@@ -10,6 +10,7 @@ const ITEMS = [
   { id: 'projects',    label: 'Project Management', live: true, dept: 'projects' },
   { id: 'cost',        label: 'Cost Control',       live: true, dept: 'cost' },
   { id: 'hs',          label: 'Health & Safety',   live: true,  dept: 'hs' },
+  { id: 'prestart',    label: 'Pre-Start',         live: true,  dept: 'prestart' },
   { id: 'operations',  label: 'Operations',        live: true, dept: 'operations' },
   { id: 'training',    label: 'Training',          live: true,  dept: 'training' },
   { id: 'plant',       label: 'Plant & Equipment', live: true, dept: 'plant' },

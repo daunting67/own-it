@@ -67,6 +67,14 @@ export const api = {
   importPlantRegister: (csv) => request('/api/plant/register/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   checkPlantRegister: () => request('/api/plant/register/check', { method: 'POST' }),
 
+  // Pre-Start briefings
+  getPrestartForm: () => request('/api/prestart/form'),
+  getPrestartToday: () => request('/api/prestart/today'),
+  getPrestartBriefings: (day) => request(`/api/prestart/briefings${day ? `?day=${day}` : ''}`),
+  getPrestartBriefing: (day, id) => request(`/api/prestart/briefings/${day}/${id}`),
+  savePrestartBriefing: (briefing) => request('/api/prestart/briefings', { method: 'POST', body: JSON.stringify(briefing) }),
+  addPrestartSignOn: (day, id, signOn) => request(`/api/prestart/briefings/${day}/${id}/signon`, { method: 'POST', body: JSON.stringify(signOn) }),
+
   // Operations — today's site DJR submissions (FastField)
   getDjrToday: () => request('/api/operations/djr/today'),
 

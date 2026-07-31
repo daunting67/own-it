@@ -1,0 +1,110 @@
+const { Router } = require('express')
+const { requireAuth } = require('../middleware/auth')
+const form = require('../lib/prestartForm')
+const { saveBriefing, getBriefing, listBriefingsForDay, addSignOn } = require('../lib/prestartStore')
+const { nzDateString } = require('../lib/nzDay')
+
+const router = Router()
+router.use(requireAuth)
+
+// A finger-drawn signature at the size the pad renders is ~10–30KB of PNG.
+// Anything far bigger is a mistake (a pasted photo, a runaway canvas) and would
+// bloat every read of the briefing, so it is rejected rather than stored.
+const MAX_SIGNATURE_CHARS = 400 * 1024
+
+function checkSignature(signature) {
+  if (!signature) return null
+  if (typeof signature !== 'string' || !signature.startsWith('data:image/')) return 'Signature must be an image'
+  if (signature.length > MAX_SIGNATURE_CHARS) return 'Signature image is too large'
+  return null
+}
+
+// The run sheet and the briefing form itself — served rather than duplicated in
+// the client so the words the crew hears are only ever written in one place.
+router.get('/form', (_req, res) => {
+  res.json({
+    docControl: form.DOC_CONTROL,
+    runSheetRef: form.RUN_SHEET_REF,
+    totalMinutes: form.TOTAL_MINUTES,
+    declaration: form.SIGN_ON_DECLARATION,
+    permitTypes: form.PERMIT_TYPES,
+    lifeSavingRules: form.LIFE_SAVING_RULES,
+    jobFields: form.JOB_FIELDS,
+    sections: form.SECTIONS,
+  })
+})
+
+// Today's and yesterday's briefings (NZ days), so the office can see at a
+// glance which crews have briefed this morning.
+router.get('/today', async (_req, res) => {
+  try {
+    const todayDay = nzDateString(0)
+    const yesterdayDay = nzDateString(-1)
+    const [today, yesterday] = await Promise.all([
+      listBriefingsForDay(todayDay),
+      listBriefingsForDay(yesterdayDay),
+    ])
+    res.json({
+      today: { day: todayDay, briefings: today },
+      yesterday: { day: yesterdayDay, briefings: yesterday },
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load pre-start briefings' })
+  }
+})
+
+router.get('/briefings', async (req, res) => {
+  try {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : nzDateString(0)
+    res.json({ day, briefings: await listBriefingsForDay(day) })
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load pre-start briefings' })
+  }
+})
+
+router.get('/briefings/:day/:id', async (req, res) => {
+  try {
+    const record = await getBriefing(req.params.day, req.params.id)
+    if (!record) return res.status(404).json({ error: 'Briefing not found' })
+    res.json(record)
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load the briefing' })
+  }
+})
+
+// Create or update a briefing. The iPad saves a draft as the foreman works
+// through the run sheet and again when it is completed, always with the same id.
+router.post('/briefings', async (req, res) => {
+  try {
+    const briefing = req.body || {}
+    if (!briefing.jobSite && briefing.status === 'complete') {
+      return res.status(400).json({ error: 'Job site is required to complete a briefing' })
+    }
+    for (const signOn of briefing.signOns || []) {
+      const problem = checkSignature(signOn.signature)
+      if (problem) return res.status(400).json({ error: `${signOn.name || 'Sign-on'}: ${problem}` })
+    }
+    const saved = await saveBriefing(briefing, req.user)
+    res.json(saved)
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save the briefing' })
+  }
+})
+
+// A latecomer signing on to a briefing that has already been run.
+router.post('/briefings/:day/:id/signon', async (req, res) => {
+  try {
+    const signOn = req.body || {}
+    if (!String(signOn.name || '').trim()) return res.status(400).json({ error: 'Name is required' })
+    const problem = checkSignature(signOn.signature)
+    if (problem) return res.status(400).json({ error: problem })
+    const record = await addSignOn(req.params.day, req.params.id, signOn)
+    if (!record) return res.status(404).json({ error: 'Briefing not found' })
+    res.json(record)
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not add the sign-on' })
+  }
+})
+
+module.exports = router
