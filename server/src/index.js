@@ -57,7 +57,7 @@ app.use('/api/operations', operationsRouter)
 app.use('/api/djr-webhook', djrWebhookRouter)
 app.use('/api/cron', cronRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-31-plant-list-daily-check-14' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-07-31-plant-list-directory-15' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))

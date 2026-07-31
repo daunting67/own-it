@@ -5,139 +5,216 @@
 // one-off CSV import as the truth. Once a day it goes looking for a fresh copy
 // and, if it finds one, replaces the stored register with it.
 //
-// FastField's v3 API has never answered a lookup-list request in this account,
-// so this sweeps every plausible shape rather than one known endpoint, and
-// records exactly what each one said. Two reasons: the moment FastField (or
-// their support) exposes a working path, the daily check starts working on its
-// own with no code change; and until then the stored result is the evidence for
-// what to ask FastField support for.
+// Two shapes of response matter, and telling them apart is the whole job:
 //
-// Whatever happens, the outcome is written to the register file so the
-// dashboard can say when the list was last checked and whether it is current.
+//   * a DIRECTORY of every lookup list in the account (Creditors, PO Codes,
+//     Plant List, …) — useful only for finding the plant list's real id;
+//   * the ITEMS of one list, which is what we're actually after.
+//
+// The first version of this file read a directory as if it were machine names
+// and filed 28 lookup-list names into the register. So nothing is accepted as
+// machines unless it came from a per-list call, or from a directory entry we
+// matched to the plant list first.
 
 const { apiCall, missingConfig } = require('./fastfield')
 const { extractMachines, LOOKUP_ID, clearCache: clearRegisterCache } = require('./plantRegister')
 const { saveRegister, saveCheckResult, loadRegister, clearCache: clearStoreCache } = require('./plantRegisterStore')
 
-// Ordered cheapest/most-likely first. Anything that answers with machine names
-// wins and the rest are skipped.
-function candidateCalls(id) {
+// Paths that return every lookup list in the account, not one list's items.
+const DIRECTORY_PATHS = ['/lookupLists', '/lookuplists', '/lookups', '/lookupList', '/lookuplist']
+
+// Per-list calls: these can be trusted to be about one list, so their contents
+// are machine names.
+function itemCalls(id) {
   const pinned = process.env.FASTFIELD_PLANT_LOOKUP_PATH
   if (pinned) return [{ method: process.env.FASTFIELD_PLANT_LOOKUP_METHOD || 'GET', path: pinned }]
 
   return [
     { method: 'GET', path: `/lookupList/${id}` },
-    { method: 'GET', path: `/lookupLists/${id}` },
     { method: 'GET', path: `/lookupList/${id}/items` },
-    { method: 'GET', path: `/lookupLists/${id}/items` },
     { method: 'GET', path: `/lookupList/${id}/rows` },
     { method: 'GET', path: `/lookupList/${id}/data` },
+    { method: 'GET', path: `/lookupList/${id}/values` },
+    { method: 'GET', path: `/lookupLists/${id}` },
+    { method: 'GET', path: `/lookupLists/${id}/items` },
     { method: 'GET', path: `/lookuplist/${id}` },
     { method: 'GET', path: `/lookuplist/${id}/values` },
-    // List-all shapes: an account-wide listing may exist even where the
-    // per-id one doesn't, and the list we want can be picked out of it.
-    { method: 'GET', path: '/lookupLists' },
-    { method: 'GET', path: '/lookuplists' },
-    { method: 'GET', path: '/lookups' },
-    // Query-parameter shapes.
     { method: 'GET', path: `/lookupListItems?lookupListId=${id}` },
     { method: 'GET', path: `/lookupListItems?id=${id}` },
     { method: 'GET', path: `/lookupList?id=${id}` },
-    // POST search shapes, which is how submissions are meant to be listed.
     { method: 'POST', path: '/lookupList/search', body: { lookupListId: id } },
     { method: 'POST', path: '/lookupLists/search', body: { lookupListId: id } },
   ]
 }
 
-// A list-all response contains every lookup list; find ours by id, else by a
-// name that looks like the plant list.
-function machinesFromListing(payload, id) {
-  const lists = Array.isArray(payload)
-    ? payload
-    : payload?.data?.lookupLists || payload?.data?.items || payload?.data
-      || payload?.lookupLists || payload?.items || payload?.rows || []
-  if (!Array.isArray(lists)) return []
-
-  const match = lists.find(list => {
-    if (!list || typeof list !== 'object') return false
-    const ids = [list.id, list._id, list.lookupListId, list.listId].map(String)
-    if (ids.includes(String(id))) return true
-    return /plant/i.test(String(list.name || list.title || list.label || ''))
-  })
-  if (!match) return []
-  return extractMachines(match.items || match.rows || match.values || match.data || match)
+function directoryCalls() {
+  return DIRECTORY_PATHS.map(path => ({ method: 'GET', path }))
 }
 
-// Runs the sweep. Never throws: a failed check must not take a page or a cron
+// The rows of whatever came back, wherever the payload hides them.
+function rowsOf(payload) {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload?.data?.lookupLists || payload?.data?.items || payload?.data?.rows || payload?.data
+      || payload?.lookupLists || payload?.items || payload?.rows || payload?.values
+      || payload?.lookupListItems || []
+  return Array.isArray(rows) ? rows : []
+}
+
+// A directory entry describes a list: it has an id AND a name, and no lookup
+// column values. A machine row is either a bare string or carries col_* values.
+function looksLikeDirectory(payload) {
+  const rows = rowsOf(payload)
+  if (rows.length === 0) return false
+  const described = rows.filter(row => {
+    if (!row || typeof row !== 'object') return false
+    const hasId = row.id != null || row._id != null || row.lookupListId != null || row.listId != null
+    const hasName = row.name != null || row.title != null || row.listName != null
+    const hasColumns = Object.keys(row).some(k => /^col_/i.test(k))
+    return hasId && hasName && !hasColumns
+  })
+  return described.length >= Math.max(2, Math.ceil(rows.length * 0.6))
+}
+
+// Find the plant list in a directory: by the id we already have, else by name.
+function findPlantList(payload, id) {
+  const rows = rowsOf(payload)
+  const byId = rows.find(row => row && typeof row === 'object'
+    && [row.id, row._id, row.lookupListId, row.listId].map(String).includes(String(id)))
+  if (byId) return byId
+  const named = rows.filter(row => row && typeof row === 'object'
+    && /plant/i.test(String(row.name || row.title || row.listName || '')))
+  // "Plant List" beats "NX2 DJR PLANT" and the other plant-ish lists.
+  return named.find(row => /^\s*plant list\s*$/i.test(String(row.name || row.title || row.listName || '')))
+    || named[0]
+    || null
+}
+
+// Items embedded in a directory entry, if the directory carries them.
+function itemsOf(entry) {
+  const inline = entry?.items || entry?.rows || entry?.values || entry?.listItems || entry?.data
+  if (!inline) return []
+  return extractMachines(inline)
+}
+
+function idOf(entry) {
+  return entry?.id ?? entry?._id ?? entry?.lookupListId ?? entry?.listId ?? null
+}
+
+function nameOf(entry) {
+  return entry?.name || entry?.title || entry?.listName || null
+}
+
+// Runs the check. Never throws: a failed check must not take a page or a cron
 // run down, and the reason is more useful recorded than thrown.
 async function checkPlantList({ deadline = Date.now() + 20000, trigger = 'cron' } = {}) {
   const attempts = []
-  let machines = []
-  let winner = null
+  const existing = await loadRegister({ fresh: true }).catch(() => null)
+  const before = existing?.machines || []
 
-  // No point sweeping 16 endpoints with credentials that can't sign in — each
-  // attempt would pay for its own failed sign-in.
-  const missing = missingConfig()
-  if (missing.length > 0) {
-    const result = {
-      ok: false,
-      trigger,
-      source: null,
-      error: `FastField credentials not configured (${missing.join(', ')})`,
-      attempts: [],
-      machineCount: (await loadRegister({ fresh: true }).catch(() => null))?.machines?.length || 0,
-    }
+  const fail = async (error, extra = {}) => {
+    const result = { ok: false, trigger, source: null, error, attempts: attempts.slice(0, 24), machineCount: before.length, ...extra }
     await saveCheckResult(result).catch(() => {})
+    clearRegisterCache()
     return { ...result, changed: false, added: [], removed: [] }
   }
 
-  for (const call of candidateCalls(LOOKUP_ID)) {
-    if (Date.now() > deadline) {
-      attempts.push({ call: 'remaining paths', status: null, note: 'stopped early — out of time' })
-      break
-    }
+  // No point sweeping endpoints with credentials that can't sign in — each
+  // attempt would pay for its own failed sign-in.
+  const missing = missingConfig()
+  if (missing.length > 0) return fail(`FastField credentials not configured (${missing.join(', ')})`)
+
+  // One call, classified. Returns { machines, directory, status, note }.
+  const tryCall = async (call, { trustAsItems }) => {
     const label = `${call.method} ${call.path}`
     try {
       const { status, ok, text } = await apiCall(call.method, call.path, call.body)
       if (!ok) {
         attempts.push({ call: label, status, note: String(text).slice(0, 120) })
-        continue
+        return {}
       }
       const payload = JSON.parse(text)
-      const found = extractMachines(payload)
-      const fromListing = found.length > 0 ? found : machinesFromListing(payload, LOOKUP_ID)
-      if (fromListing.length > 0) {
-        machines = fromListing
-        winner = label
-        attempts.push({ call: label, status, note: `${fromListing.length} machines` })
-        break
+      if (looksLikeDirectory(payload)) {
+        const rows = rowsOf(payload)
+        attempts.push({ call: label, status, note: `directory of ${rows.length} lookup lists` })
+        return { directory: payload, label }
       }
-      attempts.push({ call: label, status, note: 'answered but no machine names in it' })
+      if (!trustAsItems) {
+        attempts.push({ call: label, status, note: 'answered, but not a directory and not trusted as items' })
+        return {}
+      }
+      const machines = extractMachines(payload)
+      attempts.push({ call: label, status, note: machines.length ? `${machines.length} machines` : 'answered but no machine names in it' })
+      return machines.length ? { machines, label } : {}
     } catch (err) {
       attempts.push({ call: label, status: null, note: String(err.message).slice(0, 120) })
-      // A rejected sign-in fails every path for the same reason; stop rather
-      // than sign in and fail another fifteen times.
-      if (/authentication failed|credentials not configured/i.test(err.message)) break
+      if (/authentication failed|credentials not configured/i.test(err.message)) throw err
+      return {}
     }
   }
 
-  // Nothing to compare against means nothing to write: keep the imported list
-  // exactly as it is and just record that the look happened.
-  const existing = await loadRegister({ fresh: true }).catch(() => null)
-  const before = existing?.machines || []
+  let machines = []
+  let winner = null
+  let plantListId = LOOKUP_ID
+  let listNames = null
+
+  try {
+    // 1. The directory first: it tells us the plant list's real id, and rules
+    //    out mistaking list names for machines.
+    for (const call of directoryCalls()) {
+      if (Date.now() > deadline) break
+      const { directory, label } = await tryCall(call, { trustAsItems: false })
+      if (!directory) continue
+
+      listNames = rowsOf(directory).map(nameOf).filter(Boolean).slice(0, 60)
+      const entry = findPlantList(directory, LOOKUP_ID)
+      if (!entry) {
+        attempts.push({ call: `${label} → find plant list`, status: null, note: 'no list in the directory looks like the plant list' })
+        break
+      }
+      if (idOf(entry)) plantListId = String(idOf(entry))
+      const inline = itemsOf(entry)
+      if (inline.length > 0) {
+        machines = inline
+        winner = `${label} → "${nameOf(entry)}" (inline items)`
+      }
+      break
+    }
+
+    // 2. The list's own items, using whichever id we now believe in.
+    if (machines.length === 0) {
+      for (const call of itemCalls(plantListId)) {
+        if (Date.now() > deadline) {
+          attempts.push({ call: 'remaining paths', status: null, note: 'stopped early — out of time' })
+          break
+        }
+        const found = await tryCall(call, { trustAsItems: true })
+        if (found.machines?.length) {
+          machines = found.machines
+          winner = found.label
+          break
+        }
+      }
+    }
+  } catch (err) {
+    return fail(String(err.message).slice(0, 200), { listNames })
+  }
 
   if (machines.length === 0) {
-    const result = {
-      ok: false,
-      trigger,
-      source: null,
-      error: 'FastField would not hand over the plant list (no endpoint answered with it)',
-      attempts: attempts.slice(0, 20),
-      machineCount: before.length,
+    // The previous version filed lookup-list NAMES into the register. If that's
+    // what's stored, it's known-wrong: clear it so the page falls back to
+    // machines seen in checks rather than showing nonsense.
+    const poisoned = existing?.source === 'fastfield-daily-check'
+    if (poisoned) {
+      await saveRegister([], { source: null, clearedBy: 'daily-check (previous auto-import was not the plant list)' }).catch(() => {})
     }
-    await saveCheckResult(result).catch(() => {})
-    clearRegisterCache()
-    return { ...result, changed: false, added: [], removed: [] }
+    clearStoreCache()
+    return fail(
+      plantListId !== LOOKUP_ID || listNames
+        ? "Found FastField's lookup lists but could not read the Plant List's items"
+        : "FastField would not hand over the plant list (no endpoint answered with it)",
+      { listNames, plantListId, clearedBadRegister: poisoned },
+    )
   }
 
   const added = machines.filter(m => !before.includes(m))
@@ -155,7 +232,9 @@ async function checkPlantList({ deadline = Date.now() + 20000, trigger = 'cron' 
 
   clearStoreCache()
   clearRegisterCache()
-  return { ok: true, trigger, source: winner, machineCount: machines.length, changed, added, removed, attempts }
+  return { ok: true, trigger, source: winner, machineCount: machines.length, changed, added, removed, attempts, plantListId }
 }
 
-module.exports = { checkPlantList, candidateCalls, machinesFromListing }
+module.exports = {
+  checkPlantList, itemCalls, directoryCalls, looksLikeDirectory, findPlantList, rowsOf, itemsOf,
+}

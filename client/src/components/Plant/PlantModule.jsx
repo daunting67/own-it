@@ -324,6 +324,7 @@ function RegisterImport({ data, onDone }) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [detail, setDetail] = useState(null)
 
   // The same job the daily cron runs, on demand — so a list edited in FastField
   // a minute ago can be picked up now, and so whether FastField will hand the
@@ -332,18 +333,29 @@ function RegisterImport({ data, onDone }) {
     setBusy('check')
     setError(null)
     setResult(null)
+    setDetail(null)
     api.checkPlantRegister()
       .then(res => {
         if (!res.ok) {
           setError(res.error || 'FastField would not hand over the plant list')
           setResult(`Tried ${res.attempts?.length || 0} FastField endpoints — none returned the list. Import the CSV export instead.`)
+          // What each endpoint said, so a screenshot of this panel is enough to
+          // work out which one to use next.
+          setDetail([
+            res.plantListId ? `plant list id: ${res.plantListId}` : null,
+            res.listNames?.length ? `lookup lists seen (${res.listNames.length}): ${res.listNames.slice(0, 8).join(', ')}${res.listNames.length > 8 ? '…' : ''}` : null,
+            res.clearedBadRegister ? 'cleared the incorrect auto-imported list' : null,
+            ...(res.attempts || []).slice(0, 10).map(a => `${a.status ?? 'ERR'}  ${a.call} — ${a.note || ''}`),
+          ].filter(Boolean).join('\n'))
         } else if (res.changed) {
           const bits = []
           if (res.added?.length) bits.push(`${res.added.length} added (${res.added.slice(0, 3).join(', ')}${res.added.length > 3 ? '…' : ''})`)
           if (res.removed?.length) bits.push(`${res.removed.length} removed`)
           setResult(`Plant list updated from FastField — ${res.machineCount} machines · ${bits.join(' · ')}`)
+          setDetail(res.source ? `via ${res.source}` : null)
         } else {
           setResult(`Plant list checked — already up to date (${res.machineCount} machines)`)
+          setDetail(res.source ? `via ${res.source}` : null)
         }
         onDone?.()
       })
@@ -394,6 +406,15 @@ function RegisterImport({ data, onDone }) {
       </div>
       {result && <div style={{ marginTop: 10, fontSize: 12, color: '#2a7' }}>{result}</div>}
       {error && <div style={{ marginTop: 10, fontSize: 12, color: '#a33' }}>{error}</div>}
+      {detail && (
+        <div style={{
+          marginTop: 8, fontSize: 10.5, lineHeight: 1.5, color: 'var(--text-muted)',
+          fontFamily: 'ui-monospace, Menlo, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          maxHeight: 220, overflow: 'auto',
+        }}>
+          {detail}
+        </div>
+      )}
     </div>
   )
 }
