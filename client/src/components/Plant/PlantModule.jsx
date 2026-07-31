@@ -17,28 +17,13 @@ function fmtDay(day) {
 
 function DayPanel({ title, data }) {
   const checks = data?.checks || []
-  const missing = data?.missing || []
 
   return (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>{title}</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDay(data?.day)}</div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
-          {checks.length} check{checks.length === 1 ? '' : 's'} · {data?.checkedMachines?.length || 0} machine{(data?.checkedMachines?.length || 0) === 1 ? '' : 's'}
-        </div>
       </div>
-
-      {missing.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-            Not inspected ({missing.length})
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {missing.map(m => <span key={m} className="badge badge-danger">{m}</span>)}
-          </div>
-        </div>
-      )}
 
       {checks.length === 0 ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No Mobile Plant Checks submitted.</div>
@@ -478,8 +463,6 @@ export default function PlantModule() {
   const yesterday = data?.yesterday
   const todayMachines = today?.checkedMachines || []
   const yesterdayMachines = yesterday?.checkedMachines || []
-  const droppedOff = yesterdayMachines.filter(m => !todayMachines.includes(m))
-  const newToday = todayMachines.filter(m => !yesterdayMachines.includes(m))
 
   return (
     <div className="page">
@@ -554,31 +537,6 @@ export default function PlantModule() {
       {!error && data?.knownMachineCount === 0 && (
         <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
           No machines seen yet — the machine list builds itself from checks as they're submitted in FastField.
-        </div>
-      )}
-
-      {!error && data && (droppedOff.length > 0 || newToday.length > 0) && (
-        <div style={{ marginBottom: 20, display: 'grid', gap: 12 }}>
-          {droppedOff.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-                Checked yesterday but not yet today
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {droppedOff.map(m => <span key={m} className="badge badge-danger">{m}</span>)}
-              </div>
-            </div>
-          )}
-          {newToday.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
-                Checked today but not yesterday
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {newToday.map(m => <span key={m} className="badge badge-success">{m}</span>)}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
