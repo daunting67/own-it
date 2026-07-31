@@ -76,6 +76,67 @@ function DayPanel({ title, data }) {
   )
 }
 
+// The third column: every machine on the FastField Plant List
+// (lookup_eb389c0932544272981996bc1042d82a, imported via Lists → Lookup Lists →
+// Plant List → Download List), each with whether it checked in today and
+// yesterday. The two day panels answer "what came in"; this one answers "what
+// should have".
+function RegisterPanel({ machines, todayMachines, yesterdayMachines, source, count }) {
+  const norm = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const checkedToday = new Set(todayMachines.map(norm))
+  const checkedYesterday = new Set(yesterdayMachines.map(norm))
+
+  const label = source === 'fastfield-lookup'
+    ? 'live from FastField'
+    : source === 'imported-list'
+      ? 'imported plant list'
+      : 'machines seen in past checks'
+
+  const tick = on => on
+    ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✓</span>
+    : <span style={{ color: 'var(--danger)' }}>—</span>
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>Plant list</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
+        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+          {machines.length} machine{machines.length === 1 ? '' : 's'}
+          {count != null && count !== machines.length ? ` (${count} on list)` : ''}
+        </div>
+      </div>
+
+      {machines.length === 0 ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+          No plant list yet — import it from FastField below.
+        </div>
+      ) : (
+        <div className="table-wrap table-dense" style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Machine</th>
+                <th style={{ textAlign: 'center' }}>Today</th>
+                <th style={{ textAlign: 'center' }}>Yest.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {machines.map(m => (
+                <tr key={m}>
+                  <td>{m}</td>
+                  <td style={{ textAlign: 'center' }}>{tick(checkedToday.has(norm(m)))}</td>
+                  <td style={{ textAlign: 'center' }}>{tick(checkedYesterday.has(norm(m)))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Admin-only. Delivery actions only fire on NEW submissions, so checks already
 // sitting in FastField never arrive by webhook — they have to be back-loaded.
 // Two routes because the API may not support listing submissions at all: one
@@ -522,9 +583,16 @@ export default function PlantModule() {
       )}
 
       {!error && data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(520px, 1fr))', gap: 24, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 24, alignItems: 'start' }}>
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
+          <RegisterPanel
+            machines={data?.knownMachines || []}
+            todayMachines={todayMachines}
+            yesterdayMachines={yesterdayMachines}
+            source={data?.registerSource}
+            count={data?.registerCount}
+          />
         </div>
       )}
 
