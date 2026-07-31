@@ -652,7 +652,7 @@ export default function PlantModule() {
       )}
 
       {!error && data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 24, alignItems: 'start' }}>
+        <div className="table-compact" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 20, alignItems: 'start' }}>
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
           <div style={{ minWidth: 0 }}>
