@@ -23,6 +23,9 @@ function DayPanel({ title, data }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>{title}</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDay(data?.day)}</div>
+        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+          {checks.length} check{checks.length === 1 ? '' : 's'} · {data?.checkedMachines?.length || 0} machine{(data?.checkedMachines?.length || 0) === 1 ? '' : 's'}
+        </div>
       </div>
 
       {checks.length === 0 ? (
