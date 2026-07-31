@@ -50,6 +50,25 @@ function nzDateString(offsetDays = 0) {
   return shifted.toISOString().slice(0, 10)
 }
 
+// The NZ calendar date (YYYY-MM-DD) an instant falls on. A check received at
+// 06:42 NZ belongs to that NZ day, not to the UTC day it happens to land in.
+function nzDateOf(instant) {
+  const date = instant instanceof Date ? instant : new Date(instant)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: NZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date)
+}
+
+// Whole days between two YYYY-MM-DD day strings (later minus earlier).
+function daysBetween(fromDay, toDay) {
+  if (!fromDay || !toDay) return null
+  const a = Date.parse(`${fromDay}T00:00:00Z`)
+  const b = Date.parse(`${toDay}T00:00:00Z`)
+  if (Number.isNaN(a) || Number.isNaN(b)) return null
+  return Math.round((b - a) / 86400000)
+}
+
 // Half-open [start, end) UTC range covering one NZ calendar day.
 // offsetDays: 0 = today in NZ, -1 = yesterday, etc.
 function nzDayRange(offsetDays = 0) {
@@ -62,4 +81,4 @@ function nzDayRange(offsetDays = 0) {
   }
 }
 
-module.exports = { NZ, nzDayRange, nzDateString, nzMidnightUtc, tzOffsetMinutes }
+module.exports = { NZ, nzDayRange, nzDateString, nzDateOf, daysBetween, nzMidnightUtc, tzOffsetMinutes }

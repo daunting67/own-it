@@ -1,10 +1,10 @@
 const { Router } = require('express')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { probeSubmissionEndpoints, rawGet, missingConfig, getSessionToken } = require('../lib/fastfield')
-const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks, getRecentWebhookFailures } = require('../lib/plantChecks')
+const { getChecksForDay, getKnownMachines, mergeChecks, insertChecks, getRecentWebhookFailures, getLastCheckDays } = require('../lib/plantChecks')
 const { getPlantRegister, clearCache: clearRegisterCache } = require('../lib/plantRegister')
 const { probeSubmissionListing, findPlantForms, fetchSubmissions, getPlantFormIds, envFormId } = require('../lib/fastfieldSubmissions')
-const { nzDayRange } = require('../lib/nzDay')
+const { nzDayRange, nzDateString, daysBetween } = require('../lib/nzDay')
 const { csvToRecords, recordsToChecks } = require('../lib/plantImport')
 const { machinesFromCsv, saveRegister, clearCache: clearRegisterStoreCache } = require('../lib/plantRegisterStore')
 const db = require('../lib/supabase')
@@ -24,12 +24,13 @@ const normalise = name => String(name || '').trim().replace(/\s+/g, ' ').toLower
 router.get('/today', async (req, res) => {
   try {
     const deadline = Date.now() + 7000
-    const [today, yesterday, seenMachines, register, formIds] = await Promise.all([
+    const [today, yesterday, seenMachines, register, formIds, lastChecks] = await Promise.all([
       getChecksForDay(0),
       getChecksForDay(-1),
       getKnownMachines(),
       getPlantRegister({ deadline }),
       getPlantFormIds().catch(() => []),
+      getLastCheckDays(),
     ])
 
     // Pull the submitted checklists straight from FastField as well, so a
@@ -68,9 +69,34 @@ router.get('/today', async (req, res) => {
     const todaySummary = summarise(today)
     const yesterdaySummary = summarise(yesterday)
 
+    // One row per machine on the list: checked today, checked yesterday, and
+    // how many days it has now gone without a check. The counter is what turns
+    // "not inspected today" into something chaseable — a machine two days
+    // overdue reads differently from one that hasn't been touched in a month.
+    const checkedToday = new Set(todaySummary.checkedMachines.map(normalise))
+    const checkedYesterday = new Set(yesterdaySummary.checkedMachines.map(normalise))
+    const todayNz = nzDateString(0)
+    const machineStatus = knownMachines.map(machine => {
+      const key = normalise(machine)
+      const lastCheckedDay = lastChecks.lastDayByMachine.get(key) || null
+      const daysSinceCheck = lastCheckedDay ? daysBetween(lastCheckedDay, todayNz) : null
+      return {
+        machine,
+        today: checkedToday.has(key),
+        yesterday: checkedYesterday.has(key),
+        lastCheckedDay,
+        // 0 = checked today. null = no check at all in the lookback window,
+        // which the page shows as "never" rather than a misleading number.
+        daysSinceCheck,
+        onList: registered.has(key),
+      }
+    })
+
     res.json({
       today: todaySummary,
       yesterday: yesterdaySummary,
+      machineStatus,
+      lookbackDays: lastChecks.lookbackDays,
       knownMachines,
       knownMachineCount: knownMachines.length,
       registerSource: register.source || 'submissions',

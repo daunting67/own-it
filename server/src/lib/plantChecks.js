@@ -1,5 +1,5 @@
 const db = require('./supabase')
-const { nzDayRange } = require('./nzDay')
+const { nzDayRange, nzDateOf } = require('./nzDay')
 const { extractCheckFields } = require('./plantFields')
 const { isoDate, numericish } = require('./plantImport')
 
@@ -133,6 +133,33 @@ async function getKnownMachines() {
   return [...new Set((data || []).map(r => r.machine))].sort()
 }
 
+// The last NZ day each machine was checked, looking back a bounded number of
+// days, so the dashboard can say how long a machine has gone uninspected
+// rather than only "not today". Keyed by loosely-normalised machine name, the
+// same way the register is matched, so a stray double space doesn't read as a
+// machine that has never been checked.
+const LOOKBACK_DAYS = 120
+
+async function getLastCheckDays(lookbackDays = LOOKBACK_DAYS) {
+  const { startUtc } = nzDayRange(-Math.abs(lookbackDays))
+  const { data, error } = await db
+    .from('PlantCheck')
+    .select('machine, receivedAt')
+    .gte('receivedAt', startUtc)
+    .not('machine', 'is', null)
+  if (error) throw new Error(error.message)
+
+  const last = new Map()
+  for (const row of data || []) {
+    const key = String(row.machine || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    if (!key) continue
+    const day = nzDateOf(row.receivedAt)
+    if (!day) continue
+    if (!last.has(key) || day > last.get(key)) last.set(key, day)
+  }
+  return { lastDayByMachine: last, lookbackDays: Math.abs(lookbackDays) }
+}
+
 // Insert back-loaded checks, skipping any that are already stored. Used by
 // both back-load routes (API pull and CSV import) — re-running either is
 // harmless, which matters when someone clicks the button twice.
@@ -175,4 +202,5 @@ async function insertChecks(checks) {
 module.exports = {
   parseSubmission, storeSubmission, getChecksForDay, getTodaysChecks, getKnownMachines,
   mergeChecks, dedupeKey, insertChecks, getRecentWebhookFailures, recordWebhookFailure,
+  getLastCheckDays,
 }

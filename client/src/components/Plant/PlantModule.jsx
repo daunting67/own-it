@@ -69,11 +69,7 @@ function DayPanel({ title, data }) {
 // Plant List → Download List), each with whether it checked in today and
 // yesterday. The two day panels answer "what came in"; this one answers "what
 // should have".
-function RegisterPanel({ machines, todayMachines, yesterdayMachines, source, count }) {
-  const norm = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
-  const checkedToday = new Set(todayMachines.map(norm))
-  const checkedYesterday = new Set(yesterdayMachines.map(norm))
-
+function RegisterPanel({ rows, source, count, importedAt, lookbackDays }) {
   const label = source === 'fastfield-lookup'
     ? 'live from FastField'
     : source === 'imported-list'
@@ -84,18 +80,55 @@ function RegisterPanel({ machines, todayMachines, yesterdayMachines, source, cou
     ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✓</span>
     : <span style={{ color: 'var(--danger)' }}>—</span>
 
+  // The counter: how long this machine has gone without a check. Nothing for a
+  // machine checked today, amber while it's a day or two, red once it's been
+  // sitting — and "never" for plant on the list that has never checked in at
+  // all, which is the case a "not today" figure can never show.
+  const daysCell = row => {
+    // undefined = this backend doesn't send the counter yet; null = no check
+    // on record at all.
+    if (row.today || row.daysSinceCheck === 0 || row.daysSinceCheck === undefined) {
+      return <span style={{ color: 'var(--text-muted)' }}>—</span>
+    }
+    if (row.daysSinceCheck === null) {
+      return <span style={{ color: 'var(--danger)', fontWeight: 700 }} title={`No check in the last ${lookbackDays || 120} days`}>never</span>
+    }
+    const colour = row.daysSinceCheck >= 3 ? 'var(--danger)' : '#c67a1e'
+    return (
+      <span style={{ color: colour, fontWeight: 700 }} title={`Last checked ${row.lastCheckedDay}`}>
+        {row.daysSinceCheck}
+      </span>
+    )
+  }
+
+  // How stale the list itself is. FastField's API won't serve a lookup list, so
+  // the portal can't refresh it on its own — it checks the age instead and says
+  // when it's time to download a fresh one.
+  const importedDaysAgo = importedAt
+    ? Math.floor((Date.now() - new Date(importedAt).getTime()) / 86400000)
+    : null
+  const stale = importedDaysAgo != null && importedDaysAgo >= 7
+
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
         <div style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase' }}>Plant list</div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
-          {machines.length} machine{machines.length === 1 ? '' : 's'}
-          {count > 0 && count !== machines.length ? ` (${count} on list)` : ''}
+          {rows.length} machine{rows.length === 1 ? '' : 's'}
+          {count > 0 && count !== rows.length ? ` (${count} on list)` : ''}
         </div>
       </div>
 
-      {machines.length === 0 ? (
+      <div style={{ fontSize: 11, marginBottom: 10, color: stale ? '#c67a1e' : 'var(--text-muted)' }}>
+        {importedDaysAgo == null
+          ? 'Checked daily against the imported FastField plant list.'
+          : importedDaysAgo === 0
+            ? 'Plant list imported today.'
+            : `Plant list imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago${stale ? ' — download a fresh copy from FastField and re-import it below' : ''}.`}
+      </div>
+
+      {rows.length === 0 ? (
         <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
           No plant list yet — import it from FastField below.
         </div>
@@ -107,18 +140,25 @@ function RegisterPanel({ machines, todayMachines, yesterdayMachines, source, cou
                 <th>Machine</th>
                 <th style={{ textAlign: 'center' }}>Today</th>
                 <th style={{ textAlign: 'center' }}>Yest.</th>
+                <th style={{ textAlign: 'center' }}>Days not<br />inspected</th>
               </tr>
             </thead>
             <tbody>
-              {machines.map(m => (
-                <tr key={m}>
-                  <td>{m}</td>
-                  <td style={{ textAlign: 'center' }}>{tick(checkedToday.has(norm(m)))}</td>
-                  <td style={{ textAlign: 'center' }}>{tick(checkedYesterday.has(norm(m)))}</td>
+              {rows.map(row => (
+                <tr key={row.machine}>
+                  <td>{row.machine}{row.onList === false ? ' *' : ''}</td>
+                  <td style={{ textAlign: 'center' }}>{tick(row.today)}</td>
+                  <td style={{ textAlign: 'center' }}>{tick(row.yesterday)}</td>
+                  <td style={{ textAlign: 'center' }}>{daysCell(row)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {rows.some(r => r.onList === false) && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+              * checked in but not on the FastField plant list (hired-in plant, or the name doesn't match)
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -467,6 +507,18 @@ export default function PlantModule() {
   const todayMachines = today?.checkedMachines || []
   const yesterdayMachines = yesterday?.checkedMachines || []
 
+  // The server works out the day counter (it can see every check, not just
+  // today's and yesterday's). Fall back to ticks alone if the browser reaches a
+  // backend build that predates it.
+  const norm = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const registerRows = data?.machineStatus || (data?.knownMachines || []).map(machine => ({
+    machine,
+    today: todayMachines.map(norm).includes(norm(machine)),
+    yesterday: yesterdayMachines.map(norm).includes(norm(machine)),
+    lastCheckedDay: null,
+    daysSinceCheck: undefined,
+  }))
+
   return (
     <div className="page">
       <div className="page-header">
@@ -548,11 +600,11 @@ export default function PlantModule() {
           <DayPanel title="Today" data={today} />
           <DayPanel title="Yesterday" data={yesterday} />
           <RegisterPanel
-            machines={data?.knownMachines || []}
-            todayMachines={todayMachines}
-            yesterdayMachines={yesterdayMachines}
+            rows={registerRows}
             source={data?.registerSource}
             count={data?.registerCount}
+            importedAt={data?.registerImportedAt}
+            lookbackDays={data?.lookbackDays}
           />
         </div>
       )}
