@@ -91,7 +91,7 @@ function RegisterPanel({ machines, todayMachines, yesterdayMachines, source, cou
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
           {machines.length} machine{machines.length === 1 ? '' : 's'}
-          {count != null && count !== machines.length ? ` (${count} on list)` : ''}
+          {count > 0 && count !== machines.length ? ` (${count} on list)` : ''}
         </div>
       </div>
 
