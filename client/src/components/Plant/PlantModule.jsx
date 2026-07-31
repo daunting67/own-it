@@ -76,6 +76,11 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check })
       ? 'imported plant list'
       : 'machines seen in past checks'
 
+  // Marking rows as "not on the list" only means something once there IS a
+  // list. With none imported, every machine would carry the asterisk.
+  const haveList = count > 0
+  const offList = row => haveList && row.onList === false
+
   const tick = on => on
     ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✓</span>
     : <span style={{ color: 'var(--danger)' }}>—</span>
@@ -127,9 +132,15 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check })
         warn: false,
       }
     }
-    const age = importedDaysAgo == null
-      ? 'nothing imported yet'
-      : importedDaysAgo === 0 ? 'imported today' : `imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago`
+    if (importedDaysAgo == null) {
+      return {
+        text: `Checked FastField for updates ${checkedWhen} — it wouldn't hand the list over, and no list has been imported yet.`,
+        warn: true,
+      }
+    }
+    const age = importedDaysAgo === 0
+      ? 'imported today'
+      : `imported ${importedDaysAgo} day${importedDaysAgo === 1 ? '' : 's'} ago`
     return {
       text: `Checked FastField for updates ${checkedWhen} — it wouldn't hand the list over, so this is the copy ${age}${stale ? '. Download a fresh export and re-import it below' : ''}.`,
       warn: stale,
@@ -169,7 +180,7 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check })
             <tbody>
               {rows.map(row => (
                 <tr key={row.machine}>
-                  <td>{row.machine}{row.onList === false ? ' *' : ''}</td>
+                  <td>{row.machine}{offList(row) ? ' *' : ''}</td>
                   <td style={{ textAlign: 'center' }}>{tick(row.today)}</td>
                   <td style={{ textAlign: 'center' }}>{tick(row.yesterday)}</td>
                   <td style={{ textAlign: 'center' }}>{daysCell(row)}</td>
@@ -177,7 +188,7 @@ function RegisterPanel({ rows, source, count, importedAt, lookbackDays, check })
               ))}
             </tbody>
           </table>
-          {rows.some(r => r.onList === false) && (
+          {rows.some(offList) && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
               * checked in but not on the FastField plant list (hired-in plant, or the name doesn't match)
             </div>
