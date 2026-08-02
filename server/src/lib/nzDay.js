@@ -69,6 +69,19 @@ function daysBetween(fromDay, toDay) {
   return Math.round((b - a) / 86400000)
 }
 
+// The UTC instant of an NZ wall-clock date + time (YYYY-MM-DD, HH:MM). Used
+// when a time comes from something that happened here — a transcript's
+// recording date, an operator's typed time — rather than from a UTC clock.
+// Two passes so a daylight-saving transition resolves correctly.
+function nzLocalToUtc(dayStr, timeStr = '00:00') {
+  const [h = '0', m = '0'] = String(timeStr).split(':')
+  const naive = Date.parse(`${dayStr}T00:00:00Z`) + (Number(h) || 0) * 3600000 + (Number(m) || 0) * 60000
+  if (Number.isNaN(naive)) return null
+  let offset = tzOffsetMinutes(new Date(naive))
+  offset = tzOffsetMinutes(new Date(naive - offset * 60000))
+  return new Date(naive - offset * 60000)
+}
+
 // Half-open [start, end) UTC range covering one NZ calendar day.
 // offsetDays: 0 = today in NZ, -1 = yesterday, etc.
 function nzDayRange(offsetDays = 0) {
@@ -81,4 +94,4 @@ function nzDayRange(offsetDays = 0) {
   }
 }
 
-module.exports = { NZ, nzDayRange, nzDateString, nzDateOf, daysBetween, nzMidnightUtc, tzOffsetMinutes }
+module.exports = { NZ, nzDayRange, nzDateString, nzDateOf, daysBetween, nzMidnightUtc, nzLocalToUtc, tzOffsetMinutes }

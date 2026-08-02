@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
 import StaffCard from './StaffCard'
 import StaffModal from './StaffModal'
 import AddStaffModal from './AddStaffModal'
@@ -8,7 +9,20 @@ import ProcessesModule from '../Processes/ProcessesModule'
 
 const HIRE_TYPES = ['All', 'Direct hire', 'Labour hire', 'Contractor', 'Casual']
 
+function downloadCsv(csv, filename) {
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 export default function PeopleModule({ onSaveStateChange }) {
+  const { user } = useAuth()
   const [staff, setStaff] = useState([])
   const [sites, setSites] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -18,6 +32,9 @@ export default function PeopleModule({ onSaveStateChange }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState(null)
+  const fileRef = useRef(null)
 
   useEffect(() => {
     Promise.all([api.getStaff(), api.getSites(), api.getSuppliers()])
@@ -63,6 +80,34 @@ export default function PeopleModule({ onSaveStateChange }) {
     onSaveStateChange('saved')
   }
 
+  async function onImportFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImporting(true)
+    setImportMsg(null)
+    try {
+      const text = await file.text()
+      const result = await api.importStaff(text)
+      setImportMsg({ text: `Added ${result.added}${result.skipped ? ` · ${result.skipped} already on the list` : ''}.`, ok: true })
+      const fresh = await api.getStaff()
+      setStaff(fresh)
+    } catch (err) {
+      setImportMsg({ text: err.message || 'Could not import that file', ok: false })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function downloadStaffCsv() {
+    try {
+      const { csv, filename } = await api.getStaffCsv()
+      downloadCsv(csv, filename)
+    } catch (err) {
+      setImportMsg({ text: err.message || 'Could not download the staff list', ok: false })
+    }
+  }
+
   const visible = staff.filter(m => {
     if (filter !== 'All' && m.hireType !== filter) return false
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
@@ -88,8 +133,25 @@ export default function PeopleModule({ onSaveStateChange }) {
           <div className="page-title">People & HR</div>
           <div className="page-subtitle">Onboarding tracker, staff register, and site management</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add staff member</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {user?.admin && (
+            <>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
+              <button className="btn btn-secondary" onClick={() => fileRef.current?.click()} disabled={importing}>
+                {importing ? 'Importing…' : 'Import staff (.csv)'}
+              </button>
+            </>
+          )}
+          <button className="btn btn-secondary" onClick={downloadStaffCsv}>Download staff list (.csv)</button>
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add staff member</button>
+        </div>
       </div>
+
+      {importMsg && (
+        <div className={`banner ${importMsg.ok ? 'banner-success' : 'banner-danger'}`} style={{ marginBottom: 16 }}>
+          {importMsg.text}
+        </div>
+      )}
 
       {/* Metric cards */}
       <div className="metric-grid" style={{ marginBottom: 20 }}>

@@ -711,3 +711,35 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
   .ps-row-remove { margin-left: auto; }
   .ps-permits { grid-template-columns: 1fr; }
 }
+
+/* Names Claude heard in a recorded pre-start, waiting for a signature. */
+.ps-heard { margin-bottom: 14px; }
+.ps-heard-names { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.ps-heard-name {
+  padding: 10px 16px; min-height: 48px; border-radius: 24px; font-size: 14.5px; font-weight: 700;
+  background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.16); color: var(--pi-ink);
+}
+.ps-heard-name:hover:not(:disabled) { border-color: var(--pi-orange); color: var(--pi-orange); }
+.ps-heard-name.signed { background: var(--pi-blue-tint); border-color: transparent; color: var(--pi-blue); cursor: default; }
+
+/* Someone signing on who isn't on the crew list yet — the crew list is the
+   People & HR staff register; anyone else just types their name and signs. */
+.ps-heard-name.off-list { border-style: dashed; }
+
+/* Pre-Start: the "start recording, then begin" screen. */
+.ps-otter-callout {
+  background: var(--pi-orange); color: #fff; border-radius: 6px; padding: 16px 18px;
+}
+.ps-otter-callout-title { font-size: 16px; font-weight: 900; margin-bottom: 6px; }
+.ps-otter-callout div:not(.ps-otter-callout-title) { font-size: 14px; line-height: 1.5; opacity: .95; }
+.ps-outline { display: flex; flex-direction: column; }
+.ps-outline-row {
+  display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,.08);
+}
+.ps-outline-row:last-child { border-bottom: none; }
+.ps-outline-num {
+  width: 30px; height: 30px; border-radius: 50%; background: var(--pi-blue-tint); color: var(--pi-blue);
+  font-size: 14px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.ps-outline-title { flex: 1; font-size: 15px; font-weight: 700; color: var(--pi-ink); }
+.ps-outline-min { font-size: 12.5px; font-weight: 700; color: var(--pi-body-muted); }

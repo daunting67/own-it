@@ -1,11 +1,24 @@
 const { Router } = require('express')
 const { requireAuth } = require('../middleware/auth')
+const db = require('../lib/supabase')
 const form = require('../lib/prestartForm')
 const { saveBriefing, getBriefing, listBriefingsForDay, addSignOn } = require('../lib/prestartStore')
 const { nzDateString } = require('../lib/nzDay')
 
 const router = Router()
 router.use(requireAuth)
+
+// Whether a sign-on's name matches someone in the People & HR staff register —
+// the crew list lives there (drawn live, with a CSV import/export), so a
+// pre-start "who was on site who isn't on the books" answer is only ever as
+// stale as the staff register itself. Loose match: a stray double space or a
+// lowercase surname shouldn't make a real match look like a stranger.
+async function isOnStaffList(name) {
+  const target = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  if (!target) return false
+  const { data } = await db.from('Staff').select('name')
+  return (data || []).some(s => String(s.name || '').trim().replace(/\s+/g, ' ').toLowerCase() === target)
+}
 
 // A finger-drawn signature at the size the pad renders is ~10–30KB of PNG.
 // Anything far bigger is a mistake (a pasted photo, a runaway canvas) and would
@@ -84,6 +97,9 @@ router.post('/briefings', async (req, res) => {
     for (const signOn of briefing.signOns || []) {
       const problem = checkSignature(signOn.signature)
       if (problem) return res.status(400).json({ error: `${signOn.name || 'Sign-on'}: ${problem}` })
+      // Stamped server-side, not trusted from the client, so the record is an
+      // honest answer to "who was on site who isn't on the books".
+      signOn.onList = await isOnStaffList(signOn.name)
     }
     const saved = await saveBriefing(briefing, req.user)
     res.json(saved)
@@ -99,6 +115,7 @@ router.post('/briefings/:day/:id/signon', async (req, res) => {
     if (!String(signOn.name || '').trim()) return res.status(400).json({ error: 'Name is required' })
     const problem = checkSignature(signOn.signature)
     if (problem) return res.status(400).json({ error: problem })
+    signOn.onList = await isOnStaffList(signOn.name)
     const record = await addSignOn(req.params.day, req.params.id, signOn)
     if (!record) return res.status(404).json({ error: 'Briefing not found' })
     res.json(record)

@@ -70,6 +70,67 @@ Never leave a section blank — if a topic was not discussed, write "Not discuss
 Write in plain English. Be factual and neutral. Do not assign blame.`
   },
   {
+    id: 'pre-start',
+    name: 'Pre-Start',
+    icon: '\u26a0\ufe0f',
+    description: 'Pre-start recording \u2192 a filled Pre-Start briefing, ready for the crew to sign on.',
+    inputLabel: 'Pre-start transcript',
+    inputPlaceholder: 'Pull the morning pre-start from Otter, or paste the transcript...',
+    inputRequired: true,
+    structured: true,
+    maxTokens: 8192,
+    dept: 'prestart',
+    systemPrompt: `You are a site administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive a raw Otter.ai transcript of a morning PRE-START briefing run by a foreman from the company's run sheet (warm-up, debrief of yesterday, today's mission, today's hazards, readback). You extract it into the company's Pre-Start Work Briefing and Hazard Identification record (P&I-HSE-SB-001).
+
+Respond with ONLY a JSON object \u2014 no markdown fences, no commentary \u2014 in exactly this shape:
+
+{
+  "job_site": "the site the crew is working on today, e.g. 101 Bruce Road",
+  "area": "area or location within the site, or null",
+  "foreman": "who ran the briefing",
+  "date": "YYYY-MM-DD (use the [Recording date: ...] line if present, else null)",
+  "time": "HH:MM 24h start time if stated, else null",
+  "crew_heard": ["every person who spoke or was named as present"],
+  "new_team_members": "new starters, subcontractors or visitors welcomed, or 'None' if nobody was welcomed",
+  "went_well": "what went well yesterday and who deserves credit \u2014 name names",
+  "did_not_go_well": "what didn't go well and where the crew took ownership. No blame.",
+  "improvements": "how the crew said they would improve",
+  "actions": [
+    { "what": "the agreed action", "owner": "who owns it", "by_end_of_day": "what it looks like by end of day, or null" }
+  ],
+  "mission": "today's mission in the crew's words, and why it matters",
+  "works_description": "description of the works to be carried out today",
+  "success_looks_like": "what success looks like by end of day",
+  "team_needs": "what the team said they need to make it happen",
+  "in_the_way": "anything raised that could get in the way of the mission",
+  "other_works": "other works happening in the area, or 'None mentioned'",
+  "plant_materials": "plant, machinery and materials needed today",
+  "ppe": "specific PPE called out",
+  "hazards": [
+    { "hazard": "the hazard as the crew named it", "control": "how it is controlled" }
+  ],
+  "life_saving_rules": ["ids of the rules that apply today, from: height, traffic, excavation, exclusion, drugs, phone, suspended, isolate, utilities"],
+  "permits": [
+    { "type": "one of: Permit to Work, Hot Works, Working at Height, Concrete Pump, Dig Permit, Lifting Permit, Confined Space, Complex Lift, Dewatering, LOTO (Services)", "number": "permit number if stated, else null", "expiry": "expiry if stated, else null" }
+  ],
+  "could_change": "what could change during the day / new hazards to be ready for",
+  "red_plan": "what could push the crew into the Red today, and the plan if it happens",
+  "readback_gaps": "gaps heard in the readback and what was re-briefed, or 'Readback was clear.'",
+  "requests": "what anyone needs from anyone else on the team"
+}
+
+Rules:
+- Capture what was ACTUALLY said. Never invent a hazard, a control, a permit or an action that nobody mentioned.
+- life_saving_rules: include a rule only if that risk was actually discussed (talking about the open trench = excavation; working next to live lanes = traffic; locating services = utilities).
+- permits: empty array [] if no permit was mentioned. Never guess a permit number.
+- hazards and actions: empty array [] if none were raised.
+- Every hazard the crew called out must appear, with the control they agreed \u2014 this is a safety record, so completeness matters more than tidiness.
+- Never leave a text field blank \u2014 if a topic was genuinely not discussed, write "Not discussed in this pre-start."
+- Plain English, short sentences, the crew's own words lightly tidied.`
+  },
+  {
     id: 'performance-review',
     name: 'Performance Review',
     icon: '📋',

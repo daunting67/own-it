@@ -99,6 +99,7 @@ async function addSignOn(day, id, signOn) {
     signature: signOn.signature || null,
     timeIn: signOn.timeIn || new Date().toISOString(),
     late: signOn.late !== undefined ? !!signOn.late : true,
+    onList: signOn.onList !== undefined ? !!signOn.onList : true,
   }
   record.signOns = [...(record.signOns || []), entry]
   record.updatedAt = new Date().toISOString()

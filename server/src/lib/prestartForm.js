@@ -61,6 +61,16 @@ const JOB_FIELDS = [
 
 const SECTIONS = [
   {
+    id: 'start',
+    number: null,
+    title: 'Start the Pre-Start',
+    minutes: null,
+    kind: 'start',
+    why: null,
+    lines: [],
+    fields: [],
+  },
+  {
     id: 'details',
     number: null,
     title: 'Job details',

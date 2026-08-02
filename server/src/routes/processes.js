@@ -8,10 +8,13 @@ const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
+const { saveBriefing } = require('../lib/prestartStore')
+const { prestartValues, renderPrestartText } = require('../lib/prestartTranscript')
+const { nzLocalToUtc } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
-const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review'])
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -322,6 +325,43 @@ router.post('/run/:id', async (req, res) => {
         }
       } catch (docErr) {
         output += `\n\n⚠️ Could not build the staff-facing Outcome Form document: ${docErr.message}\nThe Teammate record content above is still valid.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'pre-start') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      const values = prestartValues(parsed)
+      // The briefing belongs to the morning it was RECORDED, not to the moment
+      // the transcript was processed — a pre-start run through at lunchtime
+      // must still file under that day.
+      const startedAt = (parsed.date ? nzLocalToUtc(parsed.date, parsed.time || '06:30') : null) || new Date()
+      let briefing = null
+      try {
+        briefing = await saveBriefing({
+          startedAt: startedAt.toISOString(),
+          completedAt: null,
+          status: 'draft',
+          source: 'transcript',
+          jobSite: values.jobSite,
+          area: values.area,
+          foreman: values.foreman,
+          values,
+          signOns: [],
+        }, req.user)
+      } catch (saveErr) {
+        output = renderPrestartText(parsed, values, null)
+        output += `\n\n⚠️ Could not save this briefing to the Pre-Start page: ${saveErr.message}\nThe briefing above is still valid — it can be entered on the iPad.`
+      }
+      if (briefing) {
+        output = renderPrestartText(parsed, values, briefing)
+        output += [
+          '',
+          '',
+          `✅ Filed as a pre-start briefing for ${briefing.jobSite || 'this site'} — open Pre-Start to check it and have the crew sign on.`,
+          'NOBODY HAS SIGNED ON YET: a transcript cannot capture signatures. Open the briefing on the iPad, go to step 6, and pass it around —',
+          `the ${values.crewHeard.length} name${values.crewHeard.length === 1 ? '' : 's'} heard in the recording are listed there to sign against.`,
+        ].join('\n')
       }
     }
 

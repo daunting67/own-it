@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import BriefingRunner, { DRAFT_KEY } from './BriefingRunner'
 import BriefingView from './BriefingView'
+import ProcessesModule from '../Processes/ProcessesModule'
 
 function fmtTime(iso) {
   if (!iso) return '—'
@@ -47,7 +48,12 @@ export default function PreStartModule() {
   const [form, setForm] = useState(null)
   const [data, setData] = useState(null)
   const [staffNames, setStaffNames] = useState([])
+  // The tap-to-sign crew list, drawn live from People & HR's staff register —
+  // it changes the moment a name is added, edited, or removed there, so
+  // there's never a separate list to keep in sync.
+  const [roster, setRoster] = useState([])
   const [mode, setMode] = useState('list')       // list | run | view
+  const [tab, setTab] = useState('briefings')    // briefings | transcript
   const [current, setCurrent] = useState(null)
   const [draft, setDraft] = useState(null)
   const [error, setError] = useState('')
@@ -64,7 +70,14 @@ export default function PreStartModule() {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    api.getStaff().then(rows => setStaffNames(rows.map(r => r.name).filter(Boolean))).catch(() => {})
+    api.getStaff().then(rows => {
+      setStaffNames(rows.map(r => r.name).filter(Boolean))
+      setRoster(rows.map(r => ({
+        name: r.name,
+        employer: r.supplier?.name || 'P&I (North) Ltd',
+        position: r.position || '',
+      })).filter(p => p.name))
+    }).catch(() => {})
     try {
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) setDraft(JSON.parse(raw))
@@ -104,6 +117,7 @@ export default function PreStartModule() {
         <BriefingRunner
           form={form}
           staffNames={staffNames}
+          roster={roster}
           existing={current}
           onCancel={() => { setMode('list'); setCurrent(null); load() }}
           onDone={saved => { setCurrent(saved); setDraft(null); setMode('view'); load() }}
@@ -118,6 +132,7 @@ export default function PreStartModule() {
         <BriefingView
           briefing={current}
           form={form}
+          roster={roster}
           onBack={() => { setMode('list'); setCurrent(null); load() }}
           onChanged={updated => { setCurrent(updated); load() }}
         />
@@ -134,10 +149,28 @@ export default function PreStartModule() {
             Work briefing and hazard identification · {form.docControl}
           </div>
         </div>
-        <button className="btn btn-primary ps-btn-lg" onClick={startNew}>Start a pre-start</button>
+        {tab === 'briefings' && (
+          <button className="btn btn-primary ps-btn-lg" onClick={startNew}>Start a pre-start</button>
+        )}
       </div>
 
-      {draft?.values?.jobSite && (
+      <div className="tabs">
+        {/* Reload on every tab change: coming back from a transcript run, the
+            briefing it just filed has to be in the list. */}
+        <button className={`tab-btn${tab === 'briefings' ? ' active' : ''}`} onClick={() => { setTab('briefings'); load() }}>
+          Briefings
+        </button>
+        <button className={`tab-btn${tab === 'transcript' ? ' active' : ''}`} onClick={() => { setTab('transcript'); load() }}>
+          From a transcript
+        </button>
+      </div>
+
+      {/* A pre-start that was recorded rather than tapped out: Claude reads the
+          Otter transcript and files the same briefing record, which then shows
+          up under Briefings waiting for the crew to sign on. */}
+      {tab === 'transcript' && <ProcessesModule only="pre-start" />}
+
+      {tab === 'briefings' && draft?.values?.jobSite && (
         <div className="banner banner-warning ps-banner">
           Unfinished briefing on this device — {draft.values.jobSite}.{' '}
           <button className="btn btn-ghost btn-sm" onClick={resumeDraft}>Resume</button>
@@ -145,12 +178,14 @@ export default function PreStartModule() {
         </div>
       )}
 
-      {error && <div className="banner banner-danger ps-banner">{error}</div>}
+      {tab === 'briefings' && error && <div className="banner banner-danger ps-banner">{error}</div>}
 
-      <div className="ps-days">
-        <DayPanel title="Today" day={data.today.day} briefings={data.today.briefings} onOpen={openBriefing} />
-        <DayPanel title="Yesterday" day={data.yesterday.day} briefings={data.yesterday.briefings} onOpen={openBriefing} />
-      </div>
+      {tab === 'briefings' && (
+        <div className="ps-days">
+          <DayPanel title="Today" day={data.today.day} briefings={data.today.briefings} onOpen={openBriefing} />
+          <DayPanel title="Yesterday" day={data.yesterday.day} briefings={data.yesterday.briefings} onOpen={openBriefing} />
+        </div>
+      )}
     </div>
   )
 }

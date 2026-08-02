@@ -30,6 +30,8 @@ export const api = {
   createStaff: (data) => request('/api/staff', { method: 'POST', body: JSON.stringify(data) }),
   updateStaff: (id, data) => request(`/api/staff/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteStaff: (id) => request(`/api/staff/${id}`, { method: 'DELETE' }),
+  importStaff: (csv) => request('/api/staff/import', { method: 'POST', body: JSON.stringify({ csv }) }),
+  getStaffCsv: () => request('/api/staff/export.csv'),
 
   // Sites
   getSites: () => request('/api/sites'),

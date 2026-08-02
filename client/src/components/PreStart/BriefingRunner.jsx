@@ -51,15 +51,20 @@ function RowEditor({ rows, columns, onChange }) {
   )
 }
 
-export default function BriefingRunner({ form, staffNames, existing, onDone, onCancel }) {
+export default function BriefingRunner({ form, staffNames, roster = [], existing, onDone, onCancel }) {
   const sections = form.sections
   const [step, setStep] = useState(0)
   const [values, setValues] = useState(() => existing?.values || {})
   const [signOns, setSignOns] = useState(() => existing?.signOns || [])
   const [briefingId, setBriefingId] = useState(existing?.id || null)
   const [day, setDay] = useState(existing?.day || null)
-  const [startedAt] = useState(() => existing?.startedAt || new Date().toISOString())
+  // Set at mount as a placeholder, but for a brand-new briefing it's pushed
+  // forward to the moment the facilitator actually presses Begin — otherwise
+  // however long they spend starting Otter and reading the run sheet eats
+  // into the 23-minute budget before section 1 has even started.
+  const [startedAt, setStartedAt] = useState(() => existing?.startedAt || new Date().toISOString())
   const [padOpen, setPadOpen] = useState(false)
+  const [padInitial, setPadInitial] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(Date.now())
@@ -121,6 +126,9 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
   }
 
   async function next() {
+    // Leaving the start screen on a briefing that hasn't been saved yet is the
+    // real start of the pre-start — not whenever the page happened to load.
+    if (section.kind === 'start' && !briefingId) setStartedAt(new Date().toISOString())
     // Save a draft at each section boundary — if the iPad dies mid-briefing the
     // office still sees the crew started one, and what was said.
     if (values.jobSite) await persist('draft')
@@ -256,6 +264,7 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
     }
   }
 
+  const isStart = section.kind === 'start'
   const isDetails = section.kind === 'details'
   const isSignOn = section.kind === 'signon'
 
@@ -285,7 +294,10 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
             className={`ps-step${i === step ? ' on' : ''}${i < step ? ' done' : ''}`}
             onClick={() => setStep(i)}
           >
-            {s.number || (i === 0 ? '·' : '✓')}
+            {/* Unnumbered sections (start, job details) show a dot until
+                passed — the numbered run-sheet sections always show their
+                own number, dimmed once done via the "done" class. */}
+            {s.number || (i < step ? '✓' : '·')}
           </button>
         ))}
       </div>
@@ -305,6 +317,33 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {isStart && (
+        <div className="ps-card">
+          <div className="ps-otter-callout">
+            <div className="ps-otter-callout-title">Start recording in Otter, then begin</div>
+            <div>
+              Open the Otter app and hit record before you start talking. If anything goes wrong with
+              the iPad partway through, the recording is still there to pull in afterwards from
+              Pre-Start → From a transcript.
+            </div>
+          </div>
+
+          <div className="ps-view-section" style={{ marginTop: 18 }}>
+            Today's run sheet — {form.runSheetRef}
+          </div>
+          <div className="ps-help">{form.totalMinutes} minutes, six sections. Read it through, then press Begin.</div>
+          <div className="ps-outline">
+            {sections.filter(s => s.number).map(s => (
+              <div className="ps-outline-row" key={s.id}>
+                <span className="ps-outline-num">{s.number}</span>
+                <span className="ps-outline-title">{s.title}</span>
+                <span className="ps-outline-min">{s.minutes ? `~${s.minutes} min` : ''}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -344,34 +383,84 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
         </div>
       )}
 
-      {isSignOn && (
-        <div className="ps-card">
-          <div className="ps-declaration">{form.declaration}</div>
-          <div className="ps-signon-list">
-            {signOns.map((s, i) => (
-              <div className="ps-signon-row" key={s.id || i}>
-                <div className="ps-signon-no">{i + 1}</div>
-                <div className="ps-signon-who">
-                  <div className="ps-signon-name">{s.name}{s.visitor && <span className="badge badge-warning">Visitor</span>}</div>
-                  <div className="ps-signon-meta">
-                    {s.employer || '—'} · {new Date(s.timeIn).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' })}
-                    {s.hazardId ? ` · hazard: ${s.hazardId}` : ''}
+      {isSignOn && (() => {
+        const signedNames = new Set(signOns.map(s => s.name.trim().toLowerCase()))
+        // Anyone Claude heard in a recorded pre-start who ISN'T on the crew
+        // list — a sub the CSV doesn't know about — still gets a name to tap,
+        // rather than being left to type it out from scratch.
+        const rosterNames = new Set(roster.map(p => p.name.trim().toLowerCase()))
+        const extraHeard = (values.crewHeard || []).filter(name => !rosterNames.has(name.trim().toLowerCase()))
+        return (
+          <div className="ps-card">
+            <div className="ps-declaration">{form.declaration}</div>
+
+            <div className="ps-view-label">Crew list — tap a name to sign on</div>
+            {roster.length === 0 && extraHeard.length === 0 && (
+              <div className="ps-empty">No staff in People & HR yet — use "Someone not on the list" below.</div>
+            )}
+            <div className="ps-heard-names">
+              {roster.map(person => {
+                const signed = signedNames.has(person.name.trim().toLowerCase())
+                return (
+                  <button
+                    key={person.name}
+                    className={`ps-heard-name${signed ? ' signed' : ''}`}
+                    onClick={() => { setPadInitial(person); setPadOpen(true) }}
+                    disabled={signed}
+                  >
+                    {signed ? '✓ ' : ''}{person.name}
+                  </button>
+                )
+              })}
+              {extraHeard.map(name => {
+                const signed = signedNames.has(name.trim().toLowerCase())
+                return (
+                  <button
+                    key={name}
+                    className={`ps-heard-name off-list${signed ? ' signed' : ''}`}
+                    title="Heard in the recording, not on the crew list"
+                    onClick={() => { setPadInitial({ name }); setPadOpen(true) }}
+                    disabled={signed}
+                  >
+                    {signed ? '✓ ' : ''}{name}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="ps-signon-list">
+              {signOns.map((s, i) => (
+                <div className="ps-signon-row" key={s.id || i}>
+                  <div className="ps-signon-no">{i + 1}</div>
+                  <div className="ps-signon-who">
+                    <div className="ps-signon-name">
+                      {s.name}
+                      {s.visitor && <span className="badge badge-warning">Visitor</span>}
+                      {!s.visitor && !rosterNames.has(s.name.trim().toLowerCase()) && <span className="badge badge-muted">Not on list</span>}
+                    </div>
+                    <div className="ps-signon-meta">
+                      {s.employer || '—'} · {new Date(s.timeIn).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' })}
+                      {s.hazardId ? ` · hazard: ${s.hazardId}` : ''}
+                    </div>
                   </div>
+                  {s.signature && <img className="ps-signon-sig" src={s.signature} alt={`${s.name} signature`} />}
+                  <button className="ps-row-remove" onClick={() => setSignOns(list => list.filter((_, j) => j !== i))}>✕</button>
                 </div>
-                {s.signature && <img className="ps-signon-sig" src={s.signature} alt={`${s.name} signature`} />}
-                <button className="ps-row-remove" onClick={() => setSignOns(list => list.filter((_, j) => j !== i))}>✕</button>
-              </div>
-            ))}
-            {signOns.length === 0 && <div className="ps-empty">Nobody has signed on yet.</div>}
+              ))}
+              {signOns.length === 0 && <div className="ps-empty">Nobody has signed on yet.</div>}
+            </div>
+            <button
+              className="btn btn-secondary ps-btn-lg ps-btn-block"
+              onClick={() => { setPadInitial(null); setPadOpen(true) }}
+            >
+              + Someone not on the list
+            </button>
+            <div className="ps-help" style={{ marginTop: 8 }}>
+              Pass the iPad around — each person signs for themselves.
+            </div>
           </div>
-          <button className="btn btn-primary ps-btn-lg ps-btn-block" onClick={() => setPadOpen(true)}>
-            + Sign on
-          </button>
-          <div className="ps-help" style={{ marginTop: 8 }}>
-            Pass the iPad around — each person signs for themselves.
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {error && <div className="banner banner-danger ps-banner">{error}</div>}
 
@@ -381,7 +470,7 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
         </button>
         {step < sections.length - 1 ? (
           <button className="btn btn-primary ps-btn-lg" onClick={next} disabled={saving}>
-            {saving ? 'Saving…' : 'Next'}
+            {saving ? 'Saving…' : (isStart ? 'Begin' : 'Next')}
           </button>
         ) : (
           <button className="btn btn-primary ps-btn-lg" onClick={finish} disabled={saving}>
@@ -394,6 +483,7 @@ export default function BriefingRunner({ form, staffNames, existing, onDone, onC
         open={padOpen}
         declaration={form.declaration}
         staffNames={staffNames}
+        initial={padInitial}
         onClose={() => setPadOpen(false)}
         onSave={entry => { setSignOns(list => [...list, entry]); setPadOpen(false) }}
       />

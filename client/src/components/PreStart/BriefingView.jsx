@@ -28,7 +28,7 @@ function Text({ value }) {
 
 // The filed briefing, read back the way the paper form reads — job details,
 // works, permits, rules, hazards, then the crew sign-on sheet.
-export default function BriefingView({ briefing, form, onBack, onChanged }) {
+export default function BriefingView({ briefing, form, roster = [], onBack, onChanged }) {
   const [padOpen, setPadOpen] = useState(false)
   const [error, setError] = useState('')
   const values = briefing.values || {}
@@ -167,7 +167,11 @@ export default function BriefingView({ briefing, form, onBack, onChanged }) {
               {(briefing.signOns || []).map((s, i) => (
                 <tr key={s.id || i}>
                   <td>{i + 1}</td>
-                  <td>{s.name}{s.late && <span className="badge badge-muted" style={{ marginLeft: 6 }}>late</span>}</td>
+                  <td>
+                    {s.name}
+                    {s.late && <span className="badge badge-muted" style={{ marginLeft: 6 }}>late</span>}
+                    {!s.visitor && s.onList === false && <span className="badge badge-warning" style={{ marginLeft: 6 }}>Not on list</span>}
+                  </td>
                   <td>{s.signature ? <img className="ps-signon-sig" src={s.signature} alt="" /> : '—'}</td>
                   <td>{s.employer || '—'}</td>
                   <td>{s.visitor ? 'Yes' : '—'}</td>
@@ -189,7 +193,7 @@ export default function BriefingView({ briefing, form, onBack, onChanged }) {
       <SignOnPad
         open={padOpen}
         declaration={form.declaration}
-        staffNames={[]}
+        staffNames={roster.map(p => p.name)}
         onClose={() => setPadOpen(false)}
         onSave={addLateSignOn}
       />
