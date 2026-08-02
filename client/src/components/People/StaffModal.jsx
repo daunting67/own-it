@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { calcProgress, getStatus, getProgressCls, hireBadgeClass, getTeammateItem, getPayrollItem } from '../../lib/checklists'
+import { useState, useEffect } from 'react'
+import { calcProgress, getStatus, getProgressCls, hireBadgeClass, getTeammateItem, getPayrollItem, markChecklistComplete } from '../../lib/checklists'
+
+const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -66,11 +68,47 @@ function TeammatePanel({ member }) {
   )
 }
 
-export default function StaffModal({ member, onClose, onUpdate, onDelete }) {
+export default function StaffModal({ member, sites = [], suppliers = [], onClose, onUpdate, onDelete }) {
   const [tab, setTab] = useState('checklist')
   const [checklist, setChecklist] = useState(member.checklist || [])
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // Details are editable — a hire type isn't fixed forever (a labour-hire
+  // worker can become a direct employee down the track), so this can't be a
+  // create-only field. Local draft state, saved explicitly rather than on
+  // every keystroke, and reset whenever a different person is opened.
+  const [details, setDetails] = useState(() => detailsFrom(member))
+  const [detailsSaving, setDetailsSaving] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
+  useEffect(() => { setDetails(detailsFrom(member)) }, [member.id])
+
+  function detailsFrom(m) {
+    return {
+      hireType: m.hireType || 'Direct hire',
+      position: m.position || '',
+      siteId: m.siteId || '',
+      mobile: m.mobile || '',
+      email: m.email || '',
+      startDate: m.startDate ? String(m.startDate).slice(0, 10) : '',
+      supplierId: m.supplierId || '',
+      role: m.role || '',
+    }
+  }
+
+  function setDetail(field, value) { setDetails(d => ({ ...d, [field]: value })) }
+
+  async function saveDetails() {
+    setDetailsSaving(true)
+    setDetailsError('')
+    try {
+      await onUpdate(member.id, details)
+    } catch (err) {
+      setDetailsError(err.message || 'Could not save')
+    } finally {
+      setDetailsSaving(false)
+    }
+  }
 
   const pct = calcProgress(checklist)
   const status = getStatus(pct)
@@ -87,6 +125,17 @@ export default function StaffModal({ member, onClose, onUpdate, onDelete }) {
         )
       }
     )
+    setChecklist(updated)
+    setSaving(true)
+    try { await onUpdate(member.id, { checklist: updated }) }
+    finally { setSaving(false) }
+  }
+
+  // For someone already working before they went into this tracker — a CSV
+  // import from before the importer did this automatically, or anyone else
+  // who doesn't need to be walked through onboarding steps that already happened.
+  async function markComplete() {
+    const updated = markChecklistComplete(checklist)
     setChecklist(updated)
     setSaving(true)
     try { await onUpdate(member.id, { checklist: updated }) }
@@ -192,21 +241,57 @@ export default function StaffModal({ member, onClose, onUpdate, onDelete }) {
           )}
 
           {tab === 'details' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              {[
-                ['Mobile', member.mobile],
-                ['Email', member.email],
-                ['Start date', fmtDate(member.startDate)],
-                ['Site', member.site?.name],
-                ['Position', member.position],
-                member.hireType === 'Labour hire' ? ['Supplier', member.supplier?.name] : null,
-                member.hireType === 'Labour hire' ? ['Rate card role', member.role] : null,
-              ].filter(Boolean).map(([label, val]) => (
-                <div key={label}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 2 }}>{label}</div>
-                  <div style={{ fontSize: 13 }}>{val || '—'}</div>
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Hire type</label>
+                  <select className="form-select" value={details.hireType} onChange={e => setDetail('hireType', e.target.value)}>
+                    {HIRE_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
                 </div>
-              ))}
+                <div className="form-group">
+                  <label className="form-label">Position</label>
+                  <input className="form-input" value={details.position} onChange={e => setDetail('position', e.target.value)} placeholder="e.g. Labourer" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Site</label>
+                  <select className="form-select" value={details.siteId} onChange={e => setDetail('siteId', e.target.value)}>
+                    <option value="">— No site assigned —</option>
+                    {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Mobile</label>
+                  <input className="form-input" value={details.mobile} onChange={e => setDetail('mobile', e.target.value)} placeholder="02X XXX XXXX" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" value={details.email} onChange={e => setDetail('email', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Start date</label>
+                  <input className="form-input" type="date" value={details.startDate} onChange={e => setDetail('startDate', e.target.value)} />
+                </div>
+                {details.hireType === 'Labour hire' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Supplier</label>
+                      <select className="form-select" value={details.supplierId} onChange={e => setDetail('supplierId', e.target.value)}>
+                        <option value="">— Select supplier —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Role on rate card</label>
+                      <input className="form-input" value={details.role} onChange={e => setDetail('role', e.target.value)} placeholder="e.g. Labourer" />
+                    </div>
+                  </>
+                )}
+              </div>
+              {detailsError && <div className="banner banner-danger" style={{ marginTop: 10 }}>{detailsError}</div>}
+              <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={saveDetails} disabled={detailsSaving}>
+                {detailsSaving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
           )}
 

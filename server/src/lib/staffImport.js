@@ -2,10 +2,15 @@
 //
 // This is the ONE staff list the whole portal draws from — Pre-Start's crew
 // sign-on list included, so importing here is what makes new names available
-// on the iPad the next morning. hireType defaults to 'Direct hire' when the
-// export doesn't carry one; buildChecklist(hireType) needs an exact match
-// against the four known types, so anything close ("Labour Hire", "labour")
-// is normalised rather than rejected.
+// on the iPad the next morning. buildChecklist(hireType) needs an exact match
+// against the four known types, so anything close ("Labour Hire", "labour",
+// "sub-contractor", "PAYE") is normalised rather than rejected — but a real
+// export's column names and wording can't be guessed perfectly, so a row
+// whose hire type couldn't be recognised is flagged `hireTypeGuessed: true`
+// rather than silently defaulting everyone to 'Direct hire' with no way to
+// tell which ones need a second look (the bug Tony hit: his hire-type column
+// name didn't match the old narrow regex, so EVERY row silently fell through
+// to the default).
 
 const { parseCsv } = require('./plantImport')
 
@@ -14,11 +19,23 @@ const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
 const header = (headers, ...patterns) =>
   headers.find(h => patterns.some(p => p.test(String(h || ''))))
 
+// Returns the matched hire type, or null if the value doesn't say anything
+// recognisable — the caller decides what a null means, rather than this
+// function quietly picking 'Direct hire' for everyone.
 function normaliseHireType(raw) {
   const value = String(raw || '').trim().toLowerCase()
-  if (!value) return 'Direct hire'
-  const match = HIRE_TYPES.find(t => t.toLowerCase() === value || t.toLowerCase().replace(' hire', '') === value)
-  return match || 'Direct hire'
+  if (!value) return null
+  const exact = HIRE_TYPES.find(t => t.toLowerCase() === value || t.toLowerCase().replace(' hire', '') === value)
+  if (exact) return exact
+  // Loose, keyword-based fallback for real-world wording a CSV export
+  // actually uses — checked in an order where the more specific word wins
+  // ("contract" alone could mean either contractor or a direct-hire employment
+  // contract, so it's checked after the unambiguous terms).
+  if (/labou?r/.test(value)) return 'Labour hire'
+  if (/casual|temp/.test(value)) return 'Casual'
+  if (/contract/.test(value)) return 'Contractor'
+  if (/direct|perm|paye|employee|staff/.test(value)) return 'Direct hire'
+  return null
 }
 
 function parseStaffCsv(text) {
@@ -26,7 +43,7 @@ function parseStaffCsv(text) {
   if (records.length === 0) {
     // A bare list of names, one per line, with no header row.
     return [...new Set(text.split(/\r?\n/).map(l => l.trim()).filter(Boolean))]
-      .map(name => ({ name, hireType: 'Direct hire', position: '', mobile: '', email: '', siteName: '', supplierName: '' }))
+      .map(name => ({ name, hireType: 'Direct hire', hireTypeGuessed: true, position: '', mobile: '', email: '', siteName: '', supplierName: '' }))
   }
 
   // Same ordering rule as any name column detector: first/last must be found
@@ -37,7 +54,7 @@ function parseStaffCsv(text) {
   const nameCol = (!firstCol && !lastCol)
     ? header(headers, /^(full ?name|name|employee|staff|worker|person)$/i, /name/i)
     : header(headers, /^(full ?name|name|employee|staff|worker|person)$/i)
-  const hireCol = header(headers, /(hire ?type|employment ?type|worker ?type)/i)
+  const hireCol = header(headers, /(hire ?type|employment ?type|worker ?type|contract ?type|staff ?type|classification|category)/i, /^(type|status|employment)$/i)
   const positionCol = header(headers, /(position|role|job ?title|occupation|title)/i)
   const mobileCol = header(headers, /(mobile|phone|cell)/i)
   const emailCol = header(headers, /^e-?mail/i)
@@ -50,9 +67,15 @@ function parseStaffCsv(text) {
     let name = value(record, nameCol)
     if (!name && (firstCol || lastCol)) name = [value(record, firstCol), value(record, lastCol)].filter(Boolean).join(' ')
     if (!name) name = headers.map(h => String(record[h] || '').trim()).find(Boolean) || ''
+    const recognisedHireType = normaliseHireType(value(record, hireCol))
     return {
       name,
-      hireType: normaliseHireType(value(record, hireCol)),
+      hireType: recognisedHireType || 'Direct hire',
+      // True whenever this row's hire type was a guess rather than something
+      // the CSV actually said — no hire-type column found, or a value that
+      // didn't match anything recognisable — so the import summary can point
+      // at exactly the rows worth double-checking instead of all of them.
+      hireTypeGuessed: !recognisedHireType,
       position: value(record, positionCol),
       mobile: value(record, mobileCol),
       email: value(record, emailCol),

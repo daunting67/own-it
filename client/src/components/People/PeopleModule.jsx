@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
+import { calcProgress, markChecklistComplete } from '../../lib/checklists'
 import StaffCard from './StaffCard'
 import StaffModal from './StaffModal'
 import AddStaffModal from './AddStaffModal'
@@ -34,6 +35,12 @@ export default function PeopleModule({ onSaveStateChange }) {
   const [showAdd, setShowAdd] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState(null)
+  // The batch just brought in by an import, so hire types can be fixed in one
+  // screen (a CSV's wording is a best guess at best — see staffImport.js).
+  const [reviewBatch, setReviewBatch] = useState(null) // [{ id, name, hireType, hireTypeGuessed }]
+  const [reviewSaving, setReviewSaving] = useState(false)
+  const [confirmMarkAll, setConfirmMarkAll] = useState(false)
+  const [markingAll, setMarkingAll] = useState(false)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -89,13 +96,59 @@ export default function PeopleModule({ onSaveStateChange }) {
     try {
       const text = await file.text()
       const result = await api.importStaff(text)
-      setImportMsg({ text: `Added ${result.added}${result.skipped ? ` · ${result.skipped} already on the list` : ''}.`, ok: true })
+      const guessedCount = (result.inserted || []).filter(p => p.hireTypeGuessed).length
+      setImportMsg({
+        text: `Added ${result.added}${result.skipped ? ` · ${result.skipped} already on the list` : ''}.`
+          + (guessedCount ? ` ${guessedCount} hire type${guessedCount === 1 ? '' : 's'} couldn't be read from the file — check the list below.` : ''),
+        ok: true,
+      })
+      setReviewBatch(result.inserted && result.inserted.length ? result.inserted : null)
       const fresh = await api.getStaff()
       setStaff(fresh)
     } catch (err) {
       setImportMsg({ text: err.message || 'Could not import that file', ok: false })
     } finally {
       setImporting(false)
+    }
+  }
+
+  function setReviewHireType(id, hireType) {
+    setReviewBatch(batch => batch.map(p => (p.id === id ? { ...p, hireType } : p)))
+  }
+
+  async function saveReviewBatch() {
+    setReviewSaving(true)
+    try {
+      const updates = await Promise.all(
+        reviewBatch.map(p => api.updateStaff(p.id, { hireType: p.hireType }))
+      )
+      setStaff(prev => prev.map(m => updates.find(u => u.id === m.id) || m))
+      setReviewBatch(null)
+    } catch (err) {
+      setImportMsg({ text: err.message || 'Could not save those hire types', ok: false })
+    } finally {
+      setReviewSaving(false)
+    }
+  }
+
+  // A one-time catch-up for staff who were already working before this
+  // tracker existed (or came in through the pre-fix importer) — everyone not
+  // already at 100% gets their checklist ticked off, in one action instead of
+  // opening each card.
+  async function markAllOnboardingComplete() {
+    setMarkingAll(true)
+    try {
+      const incomplete = staff.filter(m => calcProgress(m.checklist) < 100)
+      const updates = await Promise.all(
+        incomplete.map(m => api.updateStaff(m.id, { checklist: markChecklistComplete(m.checklist) }))
+      )
+      setStaff(prev => prev.map(m => updates.find(u => u.id === m.id) || m))
+      setImportMsg({ text: `Marked ${updates.length} staff member${updates.length === 1 ? '' : 's'} as already onboarded.`, ok: true })
+    } catch (err) {
+      setImportMsg({ text: err.message || 'Could not update everyone — try again', ok: false })
+    } finally {
+      setMarkingAll(false)
+      setConfirmMarkAll(false)
     }
   }
 
@@ -153,6 +206,41 @@ export default function PeopleModule({ onSaveStateChange }) {
         </div>
       )}
 
+      {reviewBatch && (
+        <div className="card" style={{ padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Check hire types for the {reviewBatch.length} people just imported</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+            A CSV can't always say for certain — rows marked <span style={{ color: 'var(--warning)', fontWeight: 700 }}>not read from the file</span> defaulted to Direct hire and are worth a look.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            {reviewBatch.map(p => (
+              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: 1, fontSize: 14 }}>
+                  {p.name}
+                  {p.hireTypeGuessed && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--warning)', textTransform: 'uppercase' }}>not read from the file</span>}
+                </div>
+                <select
+                  className="form-select"
+                  style={{ maxWidth: 180 }}
+                  value={p.hireType}
+                  onChange={e => setReviewHireType(p.id, e.target.value)}
+                >
+                  {HIRE_TYPES.slice(1).map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={saveReviewBatch} disabled={reviewSaving}>
+              {reviewSaving ? 'Saving…' : 'Save hire types'}
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setReviewBatch(null)} disabled={reviewSaving}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Metric cards */}
       <div className="metric-grid" style={{ marginBottom: 20 }}>
         <div className="metric-card">
@@ -168,6 +256,28 @@ export default function PeopleModule({ onSaveStateChange }) {
           <div className="metric-value" style={{ color: 'var(--warning)' }}>{totals.inProgress}</div>
         </div>
       </div>
+
+      {user?.admin && totals.total - totals.complete > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          {!confirmMarkAll ? (
+            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmMarkAll(true)}>
+              Mark all staff as already onboarded
+            </button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13 }}>
+                Tick every checklist item for the {totals.total - totals.complete} staff not already at 100% — for people who were working before this tracker, not genuinely mid-onboarding?
+              </span>
+              <button className="btn btn-primary btn-sm" onClick={markAllOnboardingComplete} disabled={markingAll}>
+                {markingAll ? 'Updating…' : 'Yes, mark them complete'}
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setConfirmMarkAll(false)} disabled={markingAll}>
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="tabs">
@@ -226,6 +336,8 @@ export default function PeopleModule({ onSaveStateChange }) {
       {selected && (
         <StaffModal
           member={selected}
+          sites={sites}
+          suppliers={suppliers}
           onClose={() => setSelected(null)}
           onUpdate={updateStaff}
           onDelete={deleteStaff}

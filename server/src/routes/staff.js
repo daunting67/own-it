@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const db = require('../lib/supabase')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { buildChecklist, applySiteInductions } = require('../lib/checklists')
+const { buildChecklist, applySiteInductions, markChecklistComplete } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
 
@@ -63,6 +63,7 @@ router.post('/import', requireAdmin, async (req, res) => {
 
   let added = 0, skipped = 0
   const seenThisImport = new Set()
+  const insertedForReview = []
   for (const person of people) {
     const key = person.name.trim().toLowerCase()
     if (existingNames.has(key) || seenThisImport.has(key)) { skipped++; continue }
@@ -71,16 +72,26 @@ router.post('/import', requireAdmin, async (req, res) => {
     const supplier = person.supplierName ? findByName(suppliers, person.supplierName) : null
     let checklist = buildChecklist(person.hireType)
     if (site) checklist = applySiteInductions(checklist, site)
+    // A CSV import brings in people who are already working, not new
+    // starters — their onboarding already happened outside this tracker, so
+    // it shouldn't show them sitting at 0% needing an offer letter signed.
+    checklist = markChecklistComplete(checklist)
+    const id = randomUUID()
     const { error } = await db.from('Staff').insert({
-      id: randomUUID(), name: person.name, hireType: person.hireType,
+      id, name: person.name, hireType: person.hireType,
       siteId: site?.id || null, position: person.position, mobile: person.mobile,
       email: person.email, supplierId: supplier?.id || null, checklist,
     })
     if (error) { skipped++; continue }
     added++
+    // hireType can only ever be a best guess from a CSV's wording — surfaced
+    // here so the admin can fix it in one screen right after import instead
+    // of hunting through cards, per Tony: "I need to be able to allocate them
+    // into Labour hire, Contractor, Casual."
+    insertedForReview.push({ id, name: person.name, hireType: person.hireType, hireTypeGuessed: !!person.hireTypeGuessed })
   }
   touchStaffCsv()
-  res.json({ added, skipped, total: people.length })
+  res.json({ added, skipped, total: people.length, inserted: insertedForReview })
 })
 
 router.get('/:id', async (req, res) => {
@@ -117,8 +128,15 @@ router.patch('/:id', async (req, res) => {
   if (supplierId !== undefined) updates.supplierId = supplierId || null
   if (role !== undefined) updates.role = role
   if (checklist !== undefined) updates.checklist = checklist
-  if (siteId !== undefined && checklist === undefined) {
-    const newChecklist = buildChecklist(existing.hireType)
+  // Rebuild the checklist only when the site is ACTUALLY changing (a real
+  // transfer, picking up that site's inductions) — not merely because siteId
+  // was present in the request body. Every save from the Details tab sends
+  // siteId whether or not it changed, and rebuilding on every save would wipe
+  // real progress (and, for CSV-imported staff, silently undo "already
+  // onboarded" back to a fresh incomplete checklist just from fixing a typo).
+  const siteActuallyChanged = siteId !== undefined && (siteId || null) !== (existing.siteId || null)
+  if (siteActuallyChanged && checklist === undefined) {
+    const newChecklist = buildChecklist(hireType !== undefined ? hireType : existing.hireType)
     if (siteId) {
       const { data: site } = await db.from('Site').select('*').eq('id', siteId).single()
       updates.checklist = site ? applySiteInductions(newChecklist, site) : newChecklist

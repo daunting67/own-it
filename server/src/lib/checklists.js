@@ -142,4 +142,16 @@ function applySiteInductions(checklist, site) {
   })
 }
 
-module.exports = { buildChecklist, applySiteInductions }
+// A bulk CSV import brings in people who are already working, not new
+// starters — their onboarding already happened, it just never went through
+// this tracker. Marking every item done (rather than the normal all-false
+// checklist) keeps the tracker's "in progress" list meaning what it says:
+// people who genuinely still have onboarding steps outstanding.
+function markChecklistComplete(checklist) {
+  return checklist.map(section => ({
+    ...section,
+    items: section.items.map(item => ({ ...item, done: true })),
+  }))
+}
+
+module.exports = { buildChecklist, applySiteInductions, markChecklistComplete }

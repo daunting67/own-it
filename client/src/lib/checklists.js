@@ -36,3 +36,14 @@ export function getPayrollItem(checklist) {
   const section = checklist?.find(s => s.section === 'Payroll & admin')
   return section?.items?.find(i => i.label === 'Payroll notified of new starter')
 }
+
+// For staff who were already working before they went into this tracker (an
+// import, or a person added here after the fact) — ticks every item rather
+// than making someone work through a checklist for onboarding that already
+// happened.
+export function markChecklistComplete(checklist) {
+  return (checklist || []).map(section => ({
+    ...section,
+    items: section.items.map(item => ({ ...item, done: true })),
+  }))
+}
