@@ -23,10 +23,20 @@ function csvEscape(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
+// Same "done" definition the Onboarding tracker uses to decide whether a
+// person still belongs there — a genuinely new starter (added via "+ Add
+// staff member") shouldn't reach FastField's staff lookup list until their
+// onboarding is actually finished, only CSV-imported already-working staff
+// (whose checklist is marked complete on import) skip straight past this.
+function isComplete(checklist) {
+  const items = (checklist || []).flatMap(s => s.items || [])
+  return items.length > 0 && items.every(i => i.done)
+}
+
 function buildStaffCsv(rows) {
   const headers = ['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Site', 'Employer / Supplier', 'Start Date']
   const lines = [headers.join(',')]
-  for (const row of rows) {
+  for (const row of rows.filter(r => isComplete(r.checklist))) {
     lines.push([
       row.name, row.hireType, row.position, row.mobile, row.email,
       row.site?.name || '', row.supplier?.name || '', row.startDate,

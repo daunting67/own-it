@@ -1,6 +1,6 @@
 import { calcProgress, getStatus, getProgressCls, hireBadgeClass } from '../../lib/checklists'
 
-export default function StaffCard({ member, onClick, onMoveToStaffList }) {
+export default function StaffCard({ member, onClick }) {
   const pct = calcProgress(member.checklist)
   const status = getStatus(pct)
   const fillCls = getProgressCls(pct)
@@ -27,15 +27,6 @@ export default function StaffCard({ member, onClick, onMoveToStaffList }) {
           <div className={`progress-bar-fill ${fillCls}`} style={{ width: `${pct}%` }} />
         </div>
       </div>
-      {pct === 100 && !member.movedToStaffList && onMoveToStaffList && (
-        <button
-          className="btn btn-secondary btn-sm"
-          style={{ marginTop: 10, width: '100%' }}
-          onClick={e => { e.stopPropagation(); onMoveToStaffList(member.id) }}
-        >
-          Move to staff list
-        </button>
-      )}
     </div>
   )
 }

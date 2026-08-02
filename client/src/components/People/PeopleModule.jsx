@@ -73,16 +73,6 @@ export default function PeopleModule({ onSaveStateChange }) {
     onSaveStateChange('saved')
   }
 
-  // Manual confirm step: onboarding hitting 100% doesn't move someone off the
-  // tracker by itself — Tony reviews each person, then archives them into the
-  // staff list with this.
-  async function moveToStaffList(id) {
-    onSaveStateChange('saving')
-    const { movedToStaffList } = await api.moveToStaffList(id, true)
-    setStaff(prev => prev.map(m => m.id === id ? { ...m, movedToStaffList } : m))
-    onSaveStateChange('saved')
-  }
-
   async function addSite(data) {
     onSaveStateChange('saving')
     const site = await api.createSite(data)
@@ -171,13 +161,15 @@ export default function PeopleModule({ onSaveStateChange }) {
     }
   }
 
-  const matchesFilters = m => {
+  // Once onboarding is at 100%, the person belongs to the staff list (already
+  // correct, already there) — the tracker only needs to show people still
+  // genuinely mid-onboarding.
+  const visible = staff.filter(m => {
+    if (calcProgress(m.checklist) === 100) return false
     if (filter !== 'All' && m.hireType !== filter) return false
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
-  }
-  const visible = staff.filter(m => !m.movedToStaffList && matchesFilters(m))
-  const staffListVisible = staff.filter(m => m.movedToStaffList && matchesFilters(m))
+  })
 
   const totals = { total: staff.length, complete: 0, inProgress: 0, notStarted: 0 }
   for (const m of staff) {
@@ -293,7 +285,7 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {[['tracker', 'Onboarding tracker'], ['stafflist', 'Staff list'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
+        {[['tracker', 'Onboarding tracker'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -330,42 +322,6 @@ export default function PeopleModule({ onSaveStateChange }) {
               </div>
             : <div className="staff-grid">
                 {visible.map(m => (
-                  <StaffCard key={m.id} member={m} onClick={() => setSelected(m)} onMoveToStaffList={moveToStaffList} />
-                ))}
-              </div>
-          }
-        </>
-      )}
-
-      {tab === 'stafflist' && (
-        <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              className="form-input"
-              style={{ maxWidth: 220 }}
-              placeholder="Search staff..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            <div style={{ display: 'flex', gap: 4 }}>
-              {HIRE_TYPES.map(t => (
-                <button
-                  key={t}
-                  className={`btn btn-sm ${filter === t ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setFilter(t)}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {staffListVisible.length === 0
-            ? <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
-                Nobody's been moved to the staff list yet — confirm a completed onboarding tracker card with "Move to staff list".
-              </div>
-            : <div className="staff-grid">
-                {staffListVisible.map(m => (
                   <StaffCard key={m.id} member={m} onClick={() => setSelected(m)} />
                 ))}
               </div>
