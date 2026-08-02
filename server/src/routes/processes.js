@@ -8,9 +8,9 @@ const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
-const { saveBriefing } = require('../lib/prestartStore')
-const { prestartValues, renderPrestartText } = require('../lib/prestartTranscript')
-const { nzLocalToUtc } = require('../lib/nzDay')
+const { saveBriefing, listBriefingsForDay } = require('../lib/prestartStore')
+const { prestartValues, renderPrestartText, mergeBriefingValues, findMatchingBriefing } = require('../lib/prestartTranscript')
+const { nzLocalToUtc, nzDateOf, nzDateString } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
@@ -336,32 +336,52 @@ router.post('/run/:id', async (req, res) => {
       // the transcript was processed — a pre-start run through at lunchtime
       // must still file under that day.
       const startedAt = (parsed.date ? nzLocalToUtc(parsed.date, parsed.time || '06:30') : null) || new Date()
+      const day = nzDateOf(startedAt) || nzDateString()
+
       let briefing = null
+      let merged = false
       try {
+        // If the foreman already started this site's briefing on the iPad
+        // today — the whole point of recording is that they typed almost
+        // nothing — merge into it rather than filing a second, separate
+        // record: sign-ons and anything already typed stay untouched, and
+        // the transcript fills in whatever was left blank.
+        const todaysBriefings = await listBriefingsForDay(day)
+        const existing = findMatchingBriefing(todaysBriefings, values.jobSite)
+        const finalValues = existing ? mergeBriefingValues(existing.values || {}, values) : values
+        merged = !!existing
         briefing = await saveBriefing({
-          startedAt: startedAt.toISOString(),
-          completedAt: null,
-          status: 'draft',
-          source: 'transcript',
-          jobSite: values.jobSite,
-          area: values.area,
-          foreman: values.foreman,
-          values,
-          signOns: [],
+          id: existing?.id,
+          day,
+          startedAt: existing?.startedAt || startedAt.toISOString(),
+          completedAt: existing?.completedAt || null,
+          status: existing?.status || 'draft',
+          source: existing ? existing.source : 'transcript',
+          jobSite: finalValues.jobSite,
+          area: finalValues.area,
+          foreman: finalValues.foreman,
+          values: finalValues,
         }, req.user)
       } catch (saveErr) {
         output = renderPrestartText(parsed, values, null)
         output += `\n\n⚠️ Could not save this briefing to the Pre-Start page: ${saveErr.message}\nThe briefing above is still valid — it can be entered on the iPad.`
       }
       if (briefing) {
-        output = renderPrestartText(parsed, values, briefing)
+        output = renderPrestartText(parsed, briefing.values, briefing)
+        const signedCount = (briefing.signOns || []).length
         output += [
           '',
           '',
-          `✅ Filed as a pre-start briefing for ${briefing.jobSite || 'this site'} — open Pre-Start to check it and have the crew sign on.`,
-          'NOBODY HAS SIGNED ON YET: a transcript cannot capture signatures. Open the briefing on the iPad, go to step 6, and pass it around —',
-          `the ${values.crewHeard.length} name${values.crewHeard.length === 1 ? '' : 's'} heard in the recording are listed there to sign against.`,
-        ].join('\n')
+          merged
+            ? `✅ Merged into the existing pre-start briefing for ${briefing.jobSite || 'this site'} today — anything already typed or signed on the iPad was left untouched.`
+            : `✅ Filed as a new pre-start briefing for ${briefing.jobSite || 'this site'} — open Pre-Start to check it and have the crew sign on.`,
+          signedCount > 0
+            ? `${signedCount} crew member${signedCount === 1 ? '' : 's'} already signed on — check Pre-Start for anyone the recording heard who still needs to.`
+            : 'NOBODY HAS SIGNED ON YET: a transcript cannot capture signatures. Open the briefing on the iPad, go to step 6, and pass it around —',
+          signedCount === 0
+            ? `the ${briefing.values.crewHeard.length} name${briefing.values.crewHeard.length === 1 ? '' : 's'} heard in the recording are listed there to sign against.`
+            : '',
+        ].filter(Boolean).join('\n')
       }
     }
 

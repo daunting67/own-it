@@ -54,6 +54,47 @@ function prestartValues(p) {
   }
 }
 
+// A stray double space or a different capitalisation shouldn't make the same
+// site look like two different ones.
+const normaliseSite = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+function isEmptyValue(value) {
+  if (Array.isArray(value)) return value.length === 0
+  if (value && typeof value === 'object') return Object.keys(value).length === 0
+  return !String(value ?? '').trim()
+}
+
+// Fold a transcript's values into an EXISTING briefing's values — the iPad
+// flow is meant to need almost no typing when a pre-start is being recorded:
+// tap through the script, tap life saving rules/permits, sign on. Everything
+// narrative (mission, hazards, debrief) arrives later from the transcript and
+// fills in whatever the foreman left blank. What a person deliberately typed
+// or tapped on the iPad always wins — the transcript can add, never overwrite.
+function mergeBriefingValues(existingValues, transcriptValues) {
+  const merged = { ...existingValues }
+  for (const [key, value] of Object.entries(transcriptValues)) {
+    if (key === 'crewHeard') continue // handled separately, below — it's a union, not a fill
+    if (isEmptyValue(existingValues[key])) merged[key] = value
+  }
+  // crewHeard is never something the iPad captures directly (there's no field
+  // for it) — it's purely informational, hinting who to sign on, so two
+  // transcript passes (or a transcript on top of an iPad-started briefing)
+  // should combine names rather than one replacing the other.
+  const seen = new Set((existingValues.crewHeard || []).map(n => n.trim().toLowerCase()))
+  const extra = (transcriptValues.crewHeard || []).filter(n => !seen.has(n.trim().toLowerCase()))
+  merged.crewHeard = [...(existingValues.crewHeard || []), ...extra]
+  return merged
+}
+
+// Find today's briefing for the same site, if the foreman already started one
+// on the iPad before the transcript was ready — matched by job site name
+// within the NZ day the recording belongs to (loose match: whitespace/case).
+function findMatchingBriefing(briefingsForDay, jobSite) {
+  const target = normaliseSite(jobSite)
+  if (!target) return null
+  return briefingsForDay.find(b => normaliseSite(b.jobSite) === target) || null
+}
+
 function renderPrestartText(p, values, briefing) {
   const day = briefing?.day || nzDateOf(new Date())
   const nz = day ? new Date(`${day}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -93,4 +134,4 @@ function renderPrestartText(p, values, briefing) {
   ].join('\n')
 }
 
-module.exports = { prestartValues, renderPrestartText }
+module.exports = { prestartValues, renderPrestartText, mergeBriefingValues, findMatchingBriefing, normaliseSite }

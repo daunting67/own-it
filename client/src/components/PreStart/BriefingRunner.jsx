@@ -51,7 +51,7 @@ function RowEditor({ rows, columns, onChange }) {
   )
 }
 
-export default function BriefingRunner({ form, staffNames, roster = [], existing, onDone, onCancel }) {
+export default function BriefingRunner({ form, staffNames, siteNames = [], roster = [], existing, onDone, onCancel }) {
   const sections = form.sections
   const [step, setStep] = useState(0)
   const [values, setValues] = useState(() => existing?.values || {})
@@ -350,16 +350,25 @@ export default function BriefingRunner({ form, staffNames, roster = [], existing
       {isDetails && (
         <div className="ps-card">
           <div className="ps-details-grid">
-            {form.jobFields.map(field => (
-              <div className="form-group" key={field.id}>
-                <label className="form-label">{field.label}{field.required && ' *'}</label>
-                <input
-                  className="form-input ps-input"
-                  value={values[field.id] || ''}
-                  onChange={e => setValue(field.id, e.target.value)}
-                />
-              </div>
-            ))}
+            {form.jobFields.map(field => {
+              // Job site and foreman are the two fields that can never come
+              // from a transcript (they identify WHICH briefing this is,
+              // before anything has been recorded) — a datalist offers the
+              // known list to tap, but still takes a new name if it's not on it.
+              const listId = field.id === 'jobSite' ? 'ps-site-names' : field.id === 'foreman' ? 'ps-staff-names-details' : null
+              return (
+                <div className="form-group" key={field.id}>
+                  <label className="form-label">{field.label}{field.required && ' *'}</label>
+                  <input
+                    className="form-input ps-input"
+                    value={values[field.id] || ''}
+                    onChange={e => setValue(field.id, e.target.value)}
+                    list={listId || undefined}
+                    autoComplete="off"
+                  />
+                </div>
+              )
+            })}
             <div className="form-group">
               <label className="form-label">Date and time</label>
               <div className="ps-static">
@@ -367,6 +376,12 @@ export default function BriefingRunner({ form, staffNames, roster = [], existing
               </div>
             </div>
           </div>
+          <datalist id="ps-site-names">
+            {siteNames.map(n => <option key={n} value={n} />)}
+          </datalist>
+          <datalist id="ps-staff-names-details">
+            {staffNames.map(n => <option key={n} value={n} />)}
+          </datalist>
           <div className="ps-doc-control">{form.docControl} · run sheet {form.runSheetRef}</div>
         </div>
       )}

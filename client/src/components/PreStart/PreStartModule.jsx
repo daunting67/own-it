@@ -48,6 +48,7 @@ export default function PreStartModule() {
   const [form, setForm] = useState(null)
   const [data, setData] = useState(null)
   const [staffNames, setStaffNames] = useState([])
+  const [siteNames, setSiteNames] = useState([])
   // The tap-to-sign crew list, drawn live from People & HR's staff register —
   // it changes the moment a name is added, edited, or removed there, so
   // there's never a separate list to keep in sync.
@@ -78,6 +79,11 @@ export default function PreStartModule() {
         position: r.position || '',
       })).filter(p => p.name))
     }).catch(() => {})
+    // Job site is otherwise typed from scratch every single briefing — the
+    // Sites list (already used for staff site assignment) is the one thing
+    // that names every site this crew has ever worked, so it's worth reusing
+    // here purely to save typing, not because Pre-Start needs Site records.
+    api.getSites().then(rows => setSiteNames(rows.map(s => s.name).filter(Boolean))).catch(() => {})
     try {
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) setDraft(JSON.parse(raw))
@@ -117,6 +123,7 @@ export default function PreStartModule() {
         <BriefingRunner
           form={form}
           staffNames={staffNames}
+          siteNames={siteNames}
           roster={roster}
           existing={current}
           onCancel={() => { setMode('list'); setCurrent(null); load() }}
