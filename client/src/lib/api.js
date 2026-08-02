@@ -32,6 +32,7 @@ export const api = {
   deleteStaff: (id) => request(`/api/staff/${id}`, { method: 'DELETE' }),
   importStaff: (csv) => request('/api/staff/import', { method: 'POST', body: JSON.stringify({ csv }) }),
   getStaffCsv: () => request('/api/staff/export.csv'),
+  moveToStaffList: (id, moved = true) => request(`/api/staff/${id}/move-to-staff-list`, { method: 'POST', body: JSON.stringify({ moved }) }),
 
   // Sites
   getSites: () => request('/api/sites'),

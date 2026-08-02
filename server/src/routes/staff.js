@@ -5,6 +5,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { buildChecklist, applySiteInductions, markChecklistComplete } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
+const { getMovedIds, setMoved } = require('../lib/movedStaff')
 
 const router = Router()
 router.use(requireAuth)
@@ -18,7 +19,8 @@ function touchStaffCsv() {
 
 router.get('/', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').order('createdAt', { ascending: false })
-  res.json(data || [])
+  const movedIds = await getMovedIds()
+  res.json((data || []).map(s => ({ ...s, movedToStaffList: movedIds.has(s.id) })))
 })
 
 // Always the current staff list, regenerated on every add/edit/delete —
@@ -97,7 +99,17 @@ router.post('/import', requireAdmin, async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').eq('id', req.params.id).single()
   if (!data) return res.status(404).json({ error: 'Not found' })
-  res.json(data)
+  const movedIds = await getMovedIds()
+  res.json({ ...data, movedToStaffList: movedIds.has(data.id) })
+})
+
+// Manual confirm step, separate from the checklist itself: a person can sit
+// at 100% for a while before someone actually reviews and archives them off
+// the onboarding tracker into the staff list.
+router.post('/:id/move-to-staff-list', async (req, res) => {
+  const moved = req.body?.moved !== false
+  await setMoved(req.params.id, moved)
+  res.json({ id: req.params.id, movedToStaffList: moved })
 })
 
 router.post('/', async (req, res) => {
@@ -110,7 +122,7 @@ router.post('/', async (req, res) => {
   }
   const { data } = await db.from('Staff').insert({ id: randomUUID(), name, hireType, siteId: siteId || null, position, mobile, email, startDate, supplierId: supplierId || null, role, checklist }).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
-  res.status(201).json(data)
+  res.status(201).json({ ...data, movedToStaffList: false })
 })
 
 router.patch('/:id', async (req, res) => {
@@ -146,11 +158,13 @@ router.patch('/:id', async (req, res) => {
   }
   const { data } = await db.from('Staff').update(updates).eq('id', req.params.id).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
-  res.json(data)
+  const movedIds = await getMovedIds()
+  res.json({ ...data, movedToStaffList: movedIds.has(data.id) })
 })
 
 router.delete('/:id', async (req, res) => {
   await db.from('Staff').delete().eq('id', req.params.id)
+  await setMoved(req.params.id, false)
   touchStaffCsv()
   res.status(204).end()
 })
