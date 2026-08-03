@@ -105,6 +105,14 @@ export const api = {
   getCostControlUploadUrl: (filename) => request('/api/cost-control/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
   runCostControl: (invoicePaths, receiptPaths) =>
     request('/api/cost-control/run', { method: 'POST', body: JSON.stringify({ invoicePaths, receiptPaths }) }),
+
+  // Tenders
+  getTenders: () => request('/api/tenders'),
+  getTender: (id) => request(`/api/tenders/${id}`),
+  getTenderUploadUrl: (filename) => request('/api/tenders/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  readTenderDocument: (path) => request('/api/tenders/read', { method: 'POST', body: JSON.stringify({ path }) }),
+  buildTenderDebrief: (payload) => request('/api/tenders/debrief', { method: 'POST', body: JSON.stringify(payload) }),
+  updateTender: (id, data) => request(`/api/tenders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 }
 
 // Upload a File straight to Supabase Storage via a signed upload URL (bypasses the

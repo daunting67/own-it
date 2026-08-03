@@ -19,6 +19,7 @@ const operationsRouter = require('./routes/operations')
 const djrWebhookRouter = require('./routes/djrWebhook')
 const cronRouter = require('./routes/cron')
 const prestartRouter = require('./routes/prestart')
+const tendersRouter = require('./routes/tenders')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -58,8 +59,9 @@ app.use('/api/operations', operationsRouter)
 app.use('/api/djr-webhook', djrWebhookRouter)
 app.use('/api/cron', cronRouter)
 app.use('/api/prestart', prestartRouter)
+app.use('/api/tenders', tendersRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-08-03-staff-hiretype-fix-19' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-08-03-tenders-phase1-20' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))

@@ -1,0 +1,209 @@
+const { Router } = require('express')
+const { randomUUID } = require('crypto')
+const { requireAuth } = require('../middleware/auth')
+const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/tenderUploads')
+const { saveTender, getTender, listTenders } = require('../lib/tenderStore')
+const {
+  isReadable,
+  unreadableReason,
+  digestDocument,
+  buildDebrief,
+  overallScore,
+  totalHours
+} = require('../lib/tenderPrompts')
+
+// PLACEHOLDER until Tony sets the real figure. This is what an hour of estimating
+// time costs P&I internally (salary + on-costs + overhead), NOT a charge-out rate.
+// Every cost-to-tender number in the module is hours x this, so it is stored on
+// each tender record and editable per tender — see PATCH below.
+const DEFAULT_ESTIMATING_RATE = 95
+
+const STATUSES = ['open', 'bidding', 'submitted', 'won', 'lost', 'declined']
+const DECISIONS = ['undecided', 'bid', 'no-bid']
+
+function safePathPart(name) {
+  return (name || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
+}
+
+// Cost-to-tender is derived, never stored twice: hours come from the debrief (or
+// Tony's override), the rate from the tender record. Recomputed on every read so
+// changing the rate updates historical tenders too.
+function withDerived(tender) {
+  if (!tender) return tender
+  const rate = Number(tender.estimatingRate) || DEFAULT_ESTIMATING_RATE
+  const aiHours = totalHours(tender.debrief?.costToTender)
+  // Number(null) is 0, not NaN — testing Number.isFinite alone would treat an
+  // absent override as an override of zero and silently zero the cost.
+  const hasOverride = tender.hoursOverride !== null
+    && tender.hoursOverride !== undefined
+    && tender.hoursOverride !== ''
+    && Number.isFinite(Number(tender.hoursOverride))
+  const hours = hasOverride ? Number(tender.hoursOverride) : aiHours
+  return {
+    ...tender,
+    estimatingRate: rate,
+    aiHours,
+    hours,
+    costToTender: Math.round(hours * rate),
+    score: overallScore(tender.debrief?.recommendation?.scores)
+  }
+}
+
+const router = Router()
+router.use(requireAuth)
+
+// Every tender, newest first, with derived cost/score — this is the priority list.
+router.get('/', async (req, res) => {
+  try {
+    const tenders = await listTenders()
+    res.json({
+      tenders: tenders.map(withDerived),
+      defaultRate: DEFAULT_ESTIMATING_RATE
+    })
+  } catch (err) {
+    console.error('Tender list failed:', err)
+    res.status(500).json({ error: err.message || 'Could not load tenders' })
+  }
+})
+
+router.get('/:id', async (req, res) => {
+  const tender = await getTender(req.params.id)
+  if (!tender) return res.status(404).json({ error: 'Tender not found' })
+  res.json(withDerived(tender))
+})
+
+// Step 1: browser asks for a signed URL per document and uploads straight to
+// Supabase Storage, bypassing Vercel's ~4.5MB serverless request-body limit.
+// Unreadable file types are rejected here with a reason rather than silently
+// accepted and dropped later.
+router.post('/upload-url', async (req, res) => {
+  const filename = safePathPart(req.body?.filename)
+  if (!isReadable(filename)) {
+    return res.status(400).json({ error: unreadableReason(filename), filename })
+  }
+  try {
+    const path = `${randomUUID()}/${filename}`
+    const { signedUrl } = await createUploadUrl(path)
+    res.json({ path, signedUrl })
+  } catch (err) {
+    console.error('Tender upload-url failed:', err)
+    res.status(500).json({ error: err.message || 'Could not start upload' })
+  }
+})
+
+// Step 2: one call per document. The browser loops over the pack so each request
+// stays short — a whole tender pack in one request would exceed the function
+// timeout. A document that cannot be read comes back marked, never dropped.
+router.post('/read', async (req, res) => {
+  const path = typeof req.body?.path === 'string' ? req.body.path : ''
+  if (!path) return res.status(400).json({ error: 'No document path supplied' })
+  const filename = path.split('/').pop()
+
+  try {
+    const buffer = await downloadUpload(path)
+    const digest = await digestDocument({ filename, buffer })
+    res.json({ ...digest, path })
+  } catch (err) {
+    console.error(`Tender read failed for ${filename}:`, err)
+    // A failure on one document must not sink the pack — report it as unread
+    // so it shows in the coverage list and the run continues.
+    res.json({ filename, path, read: false, reason: err.message || 'Could not be read' })
+  }
+})
+
+// Step 3: combine the digests into the debrief and file the tender.
+router.post('/debrief', async (req, res) => {
+  const name = (req.body?.name || '').trim()
+  const client = (req.body?.client || '').trim()
+  const deadline = (req.body?.deadline || '').trim()
+  const notes = (req.body?.notes || '').trim()
+  const digests = Array.isArray(req.body?.digests) ? req.body.digests : []
+
+  if (!name) return res.status(400).json({ error: 'Give the tender a name' })
+  if (!digests.length) return res.status(400).json({ error: 'Upload at least one document' })
+
+  try {
+    const debrief = await buildDebrief({ name, client, deadline, notes, digests })
+
+    const tender = {
+      id: randomUUID(),
+      name,
+      client,
+      deadline,
+      notes,
+      status: 'open',
+      decision: 'undecided',
+      decisionReason: '',
+      decisionBy: '',
+      decisionAt: null,
+      estimatingRate: DEFAULT_ESTIMATING_RATE,
+      hoursOverride: null,
+      documents: digests.map(d => ({
+        filename: d.filename,
+        read: !!d.read,
+        reason: d.reason || null,
+        documentType: d.documentType || null,
+        pages: d.pages || null
+      })),
+      debrief,
+      createdAt: new Date().toISOString(),
+      createdBy: req.user?.email || 'unknown'
+    }
+
+    await saveTender(tender)
+    // The uploads were temporary — the digests and debrief are what we keep.
+    removeUploads(digests.map(d => d.path).filter(Boolean)).catch(() => {})
+
+    res.json(withDerived(tender))
+  } catch (err) {
+    console.error('Tender debrief failed:', err)
+    res.status(500).json({ error: err.message || 'Could not build the debrief' })
+  }
+})
+
+// Decision, status, rate and hours override. Decisions are recorded with a name
+// against them but nothing is locked — a no-bid can be reversed if the week changes.
+router.patch('/:id', async (req, res) => {
+  const tender = await getTender(req.params.id)
+  if (!tender) return res.status(404).json({ error: 'Tender not found' })
+
+  const { decision, decisionReason, status, estimatingRate, hoursOverride } = req.body || {}
+
+  if (decision !== undefined) {
+    if (!DECISIONS.includes(decision)) return res.status(400).json({ error: 'Unknown decision' })
+    tender.decision = decision
+    tender.decisionBy = req.user?.email || 'unknown'
+    tender.decisionAt = new Date().toISOString()
+    if (decisionReason !== undefined) tender.decisionReason = String(decisionReason).slice(0, 2000)
+    // Saying "bid" moves it into the bidding column unless it's already further on.
+    if (decision === 'bid' && tender.status === 'open') tender.status = 'bidding'
+    if (decision === 'no-bid') tender.status = 'declined'
+  }
+
+  if (status !== undefined) {
+    if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' })
+    tender.status = status
+  }
+
+  if (estimatingRate !== undefined) {
+    const rate = Number(estimatingRate)
+    if (!Number.isFinite(rate) || rate <= 0) return res.status(400).json({ error: 'Rate must be a positive number' })
+    tender.estimatingRate = Math.round(rate * 100) / 100
+  }
+
+  if (hoursOverride !== undefined) {
+    if (hoursOverride === null || hoursOverride === '') {
+      tender.hoursOverride = null
+    } else {
+      const hours = Number(hoursOverride)
+      if (!Number.isFinite(hours) || hours < 0) return res.status(400).json({ error: 'Hours must be a positive number' })
+      tender.hoursOverride = Math.round(hours * 10) / 10
+    }
+  }
+
+  tender.updatedAt = new Date().toISOString()
+  await saveTender(tender)
+  res.json(withDerived(tender))
+})
+
+module.exports = router

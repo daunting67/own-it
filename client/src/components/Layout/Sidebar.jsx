@@ -14,6 +14,7 @@ const ITEMS = [
   { id: 'operations',  label: 'Operations',        live: true, dept: 'operations' },
   { id: 'training',    label: 'Training',          live: true,  dept: 'training' },
   { id: 'plant',       label: 'Plant & Equipment', live: true, dept: 'plant' },
+  { id: 'tenders',     label: 'Tenders',           live: true, dept: 'tenders' },
 ]
 
 export default function Sidebar({ active, onSelect }) {

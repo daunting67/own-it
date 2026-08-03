@@ -17,6 +17,7 @@ const DEPARTMENTS = [
   { id: 'plant',    label: 'Plant & Equipment' },
   { id: 'operations', label: 'Operations' },
   { id: 'prestart', label: 'Pre-Start' },
+  { id: 'tenders',  label: 'Tenders' },
 ]
 
 const DEPT_IDS = DEPARTMENTS.map(d => d.id)

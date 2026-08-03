@@ -15,6 +15,7 @@ import PreStartModule from './components/PreStart/PreStartModule'
 import PlantModule from './components/Plant/PlantModule'
 import OperationsModule from './components/Operations/OperationsModule'
 import TrainingModule from './components/Training/TrainingModule'
+import TendersModule from './components/Tenders/TendersModule'
 import UsersModule from './components/Users/UsersModule'
 import ComingSoon from './components/ComingSoon'
 
@@ -31,12 +32,13 @@ const VIEW_TITLES = {
   operations: 'Operations',
   training: 'Training',
   plant: 'Plant & Equipment',
+  tenders: 'Tenders',
 }
 
 // Views that show two tables side by side and need more than the standard
 // reading width — at 1020px the Plant day panels clipped their last two
 // columns (Service due at / Hrs to service) behind a hidden scrollbar.
-const WIDE_VIEWS = new Set(['plant'])
+const WIDE_VIEWS = new Set(['plant', 'tenders'])
 // Views whose tables need every pixel of the window, not a reading column.
 const FULL_VIEWS = new Set(['plant'])
 
@@ -95,6 +97,7 @@ export default function App() {
               if (dept === 'training') return can('training') ? <TrainingModule /> : <ComingSoon dept={dept} />
               if (dept === 'plant') return can('plant') ? <PlantModule /> : <ComingSoon dept={dept} />
               if (dept === 'operations') return can('operations') ? <OperationsModule /> : <ComingSoon dept={dept} />
+              if (dept === 'tenders') return can('tenders') ? <TendersModule /> : <ComingSoon dept={dept} />
               if (dept === 'users') return user?.admin ? <UsersModule /> : <ComingSoon dept={dept} />
               return <ComingSoon dept={dept} />
             })()}
