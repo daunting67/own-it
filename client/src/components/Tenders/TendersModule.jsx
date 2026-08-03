@@ -15,7 +15,8 @@ const SCORE_LABELS = {
   value: 'Value vs cost to tender',
   winChance: 'Chance of winning',
   capacity: 'Capacity to deliver',
-  risk: 'Client & contract risk'
+  risk: 'Client & contract risk',
+  clientRelationship: 'Client — history & payment'
 }
 
 const DECISION_STYLE = {
@@ -296,9 +297,9 @@ function NewTender({ onFiled, onCancel }) {
         </div>
 
         <div>
-          <label style={labelStyle}>Notes (optional) — anything the AI should know</label>
+          <label style={labelStyle}>Notes — client history, payment reliability, anything the AI should know</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-            placeholder="e.g. we've worked for this client before; the retaining is likely subbed out"
+            placeholder="e.g. repeat client, always paid on time, likely more work if this goes well — the tender pack itself rarely says this, so mention it here"
             disabled={running} style={{ ...inputStyle, resize: 'vertical' }} />
         </div>
       </div>
@@ -339,7 +340,7 @@ function NewTender({ onFiled, onCancel }) {
 
 /* ------------------------------------------------------------------- debrief */
 
-function Debrief({ tender, onBack, onUpdate }) {
+function Debrief({ tender, onBack, onUpdate, bidScoreThreshold }) {
   const [saving, setSaving] = useState(false)
   const [reason, setReason] = useState(tender.decisionReason || '')
   const [hours, setHours] = useState(tender.hoursOverride ?? '')
@@ -399,6 +400,39 @@ function Debrief({ tender, onBack, onUpdate }) {
             )}
           </div>
         </div>
+
+        {/* Two independent signals, deliberately not merged into the score
+            itself: the rule (score vs threshold) and a named key account.
+            A strategic client should never quietly inflate the number — it
+            should make "proceed anyway" a visible, deliberate call. */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+          {tender.score !== null && (
+            <Pill
+              bg={tender.meetsBidThreshold ? '#e6f4ea' : '#fdf6e3'}
+              fg={tender.meetsBidThreshold ? '#1e6b34' : '#a06a12'}
+            >
+              {tender.meetsBidThreshold
+                ? `Meets bid threshold (≥${bidScoreThreshold ?? 60})`
+                : `Below bid threshold (≥${bidScoreThreshold ?? 60}) — needs agreement to proceed`}
+            </Pill>
+          )}
+          {tender.keyClient && (
+            <Pill bg="#e8eefc" fg="#2a4d9b">
+              🔑 {tender.keyClient} — key strategic account
+            </Pill>
+          )}
+        </div>
+
+        {tender.keyClient && (
+          <div style={{
+            marginTop: 12, padding: '10px 14px', borderRadius: 8, background: '#e8eefc',
+            fontSize: 12.5, lineHeight: 1.6, color: '#2a4d9b'
+          }}>
+            {tender.keyClient} is one of P&I's key strategic accounts. That may justify proceeding
+            even on a marginal score, within reason — the numbers above are scored honestly on the
+            tender itself and are not adjusted for this. Record the reason on the decision below.
+          </div>
+        )}
 
         {/* headline numbers */}
         <div style={{
@@ -488,8 +522,25 @@ function Debrief({ tender, onBack, onUpdate }) {
           )}
         </Section>
 
-        {/* 2. client expectations */}
-        <Section title="2. What the client expects of us">
+        {/* 2. client — who they are, will they pay, is there more work in it */}
+        <Section title="2. Client">
+          <div style={{ display: 'grid', gap: 10 }}>
+            {[
+              ['Relationship', d.client?.relationship],
+              ['History with them', d.client?.history],
+              ['Payment reliability', d.client?.paymentReliability],
+              ['Ongoing work potential', d.client?.ongoingWorkPotential]
+            ].map(([label, value]) => (
+              <div key={label} style={{ display: 'flex', gap: 10, fontSize: 13 }}>
+                <span style={{ minWidth: 170, color: 'var(--text-muted)', flexShrink: 0 }}>{label}</span>
+                <span>{value || 'Not stated'}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        {/* 3. client expectations */}
+        <Section title="3. What the client expects of us">
           {[
             ['Must hold / must be', d.clientExpectations?.mandatory, 'Nothing mandatory identified.'],
             ['Onerous conditions', d.clientExpectations?.onerousConditions, 'No unusual conditions identified.'],
@@ -503,8 +554,8 @@ function Debrief({ tender, onBack, onUpdate }) {
           ))}
         </Section>
 
-        {/* 3. cost to tender */}
-        <Section title="3. Cost to tender">
+        {/* 4. cost to tender */}
+        <Section title="4. Cost to tender">
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -562,14 +613,14 @@ function Debrief({ tender, onBack, onUpdate }) {
               {saving ? 'Saving…' : 'Save'}
             </button>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 220 }}>
-              Cost to tender is hours × rate. The rate is a placeholder until we set P&I's real
-              internal cost of an estimating hour — change it here and every tender updates.
+              Cost to tender is hours × rate. Default rate is $165/hr — $135 base + $5 office
+              equipment/software + $25 review (Rory/Dan). Change it here and every tender updates.
             </div>
           </div>
         </Section>
 
-        {/* 4. estimated value */}
-        <Section title="4. Estimated tender value">
+        {/* 5. estimated value */}
+        <Section title="5. Estimated tender value">
           <div style={{ fontSize: 20, fontWeight: 700 }}>
             {d.estimatedValue ? `${money(d.estimatedValue.low)} – ${money(d.estimatedValue.high)}` : 'Not estimated'}
           </div>
@@ -583,8 +634,8 @@ function Debrief({ tender, onBack, onUpdate }) {
           </div>
         </Section>
 
-        {/* 5. recommendation */}
-        <Section title="5. Bid / no-bid">
+        {/* 6. recommendation */}
+        <Section title="6. Bid / no-bid">
           {rec.scores && (
             <div style={{ display: 'grid', gap: 6, marginBottom: 16, maxWidth: 460 }}>
               {Object.entries(SCORE_LABELS).map(([key, label]) => {
@@ -685,12 +736,14 @@ function TenderList() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('list') // list | new | tender id
   const [error, setError] = useState(null)
+  const [meta, setMeta] = useState({ bidScoreThreshold: 60, capacity: null })
 
   async function load() {
     setLoading(true)
     try {
       const data = await api.getTenders()
       setTenders(data.tenders || [])
+      setMeta({ bidScoreThreshold: data.bidScoreThreshold ?? 60, capacity: data.capacity || null })
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -720,6 +773,7 @@ function TenderList() {
           tender={open}
           onBack={() => setView('list')}
           onUpdate={(updated) => setTenders(ts => ts.map(t => (t.id === updated.id ? updated : t)))}
+          bidScoreThreshold={meta.bidScoreThreshold}
         />
       </div>
     )
@@ -731,6 +785,16 @@ function TenderList() {
     .filter(t => t.decision === 'bid')
     .reduce((sum, t) => sum + (t.hours || 0), 0)
 
+  // A running gauge against the team's weekly estimating capacity, not a
+  // scheduler — deadlines are free text on a tender, not real dates, so there
+  // is no way to know which week a tender's hours actually land in. This is
+  // approximate on purpose: it tells you whether you've over-committed in
+  // aggregate, not when.
+  const weeklyCapacity = meta.capacity?.weeklyHours
+  const overCapacity = weeklyCapacity && committed > weeklyCapacity
+  const capacityBreakdown = (meta.capacity?.breakdown || [])
+    .map(p => `${p.name} ${p.hoursPerWeek}`).join(' · ')
+
   return (
     <div style={{ margin: '32px auto 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 16 }}>
@@ -738,8 +802,21 @@ function TenderList() {
           <h2 style={{ margin: 0, fontSize: 20 }}>Tenders</h2>
           <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600, marginTop: 4 }}>
             {tenders.length} tender{tenders.length === 1 ? '' : 's'}
-            {committed > 0 && ` · ${Math.round(committed)} estimating hours committed to bids`}
+            {weeklyCapacity
+              ? <>
+                  {' · '}
+                  <span style={{ color: overCapacity ? '#a33' : 'var(--text)' }}>
+                    {Math.round(committed)} of {weeklyCapacity} hrs/week committed to bids
+                  </span>
+                  {overCapacity && ' — over capacity'}
+                </>
+              : committed > 0 && ` · ${Math.round(committed)} estimating hours committed to bids`}
           </div>
+          {weeklyCapacity > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              Weekly estimating capacity: {capacityBreakdown}
+            </div>
+          )}
         </div>
         <button className="btn btn-primary" onClick={() => setView('new')}>+ New tender</button>
       </div>
@@ -781,7 +858,10 @@ function TenderList() {
                   <tr key={t.id} onClick={() => setView(t.id)}
                     style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}>
                     <td style={{ padding: '12px 14px', fontWeight: 600 }}>{t.name}</td>
-                    <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{t.client || '—'}</td>
+                    <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>
+                      {t.keyClient && <span title={`${t.keyClient} — key strategic account`}>🔑 </span>}
+                      {t.client || '—'}
+                    </td>
                     <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{t.deadline || '—'}</td>
                     <td style={{ padding: '12px 14px' }}>
                       {t.debrief?.estimatedValue

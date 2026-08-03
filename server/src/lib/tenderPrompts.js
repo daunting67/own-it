@@ -206,6 +206,14 @@ Score each criterion 1-5, where 1 is poor and 5 is excellent for P&I:
 - winChance: our realistic chance of winning it
 - capacity: how comfortably we could resource and deliver it in the programmed window
 - risk: the client and contract risk (5 = low risk, 1 = high risk)
+- clientRelationship: our relationship with THIS CLIENT, not the job itself. A known repeat client
+  who has paid reliably and whose past jobs went well scores high (5). A new client with no red
+  flags scores in the middle (3) — do not assume a new client is risky just for being new. A client
+  we know pays late, disputes claims, or where a past job went badly scores low (1-2). Score this
+  ONLY from the notes the bid team gave you and anything the tender pack itself states about the
+  relationship (e.g. a returning-client statement, a referenced prior contract). If nothing is said
+  about relationship, payment history, or repeat potential, score it 3 (neutral) and say so in the
+  "client" section below rather than guessing either way.
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
@@ -217,6 +225,12 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
     "summary": [ "<a paragraph of plain-English description of the works>" ],
     "majorElements": [ { "element": "<work element>", "detail": "<quantities or extent where known>" } ],
     "programme": [ { "what": "<milestone>", "when": "<as stated, or 'Not stated'>" } ]
+  },
+  "client": {
+    "relationship": "<'Repeat client' | 'New client' | 'Not stated'>",
+    "history": "<what we know about past jobs with this client — how they went, or 'Not stated in the pack or notes'>",
+    "paymentReliability": "<what we know about how reliably they pay, or 'Not stated — worth checking before bidding'>",
+    "ongoingWorkPotential": "<whether this could lead to further work with them, or 'Not stated'>"
   },
   "clientExpectations": {
     "mandatory": [ "<prequalification, accreditation, insurance level, or similar we must hold>" ],
@@ -237,7 +251,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
     "decision": "<bid | no-bid | marginal>",
     "headline": "<one sentence stating the recommendation and the main reason>",
     "reasons": [ "<a specific reason supporting the recommendation>" ],
-    "scores": { "fit": <1-5>, "value": <1-5>, "winChance": <1-5>, "capacity": <1-5>, "risk": <1-5> },
+    "scores": { "fit": <1-5>, "value": <1-5>, "winChance": <1-5>, "capacity": <1-5>, "risk": <1-5>, "clientRelationship": <1-5> },
     "redFlags": [ "<something that should make us think hard about walking away>" ],
     "opportunities": [ "<something that makes this one worth chasing>" ]
   },
@@ -245,7 +259,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
   "coverageNotes": "<what the notes did NOT cover, and what that means for how much to trust this debrief. Say 'The pack appears complete.' only if nothing important is missing.>"
 }`
 
-async function buildDebrief({ name, client, deadline, notes, digests }) {
+async function buildDebrief({ name, client, deadline, notes, digests, isKeyClient }) {
   const read = digests.filter(d => d.read)
   const unread = digests.filter(d => !d.read)
 
@@ -258,6 +272,15 @@ async function buildDebrief({ name, client, deadline, notes, digests }) {
     client ? `Client: ${client}` : null,
     deadline ? `Submission deadline: ${deadline}` : null,
     notes ? `Notes from the bid team: ${notes}` : null,
+    // The score must stay an honest read of the tender itself — a strategic
+    // account does not make the job a better fit or lower risk. This is
+    // context for the recommendation's reasons/opportunities text only; it
+    // is surfaced to Tony as a SEPARATE flag alongside the score, not folded
+    // into it, so "proceed anyway for the relationship" stays a visible,
+    // deliberate human call rather than a silently inflated number.
+    isKeyClient
+      ? `This client is one of P&I's named key strategic accounts. Note that in your reasons or opportunities — P&I may choose to proceed even on a marginal score to protect this relationship — but do NOT raise the fit/value/winChance/capacity/risk/clientRelationship scores on account of it. Score those honestly from the tender itself.`
+      : null,
     '',
     `Documents read (${read.length}):`,
     ...read.map(d => `- ${d.filename}${d.pages ? ` (${d.pages} pages)` : ''} — ${d.documentType || 'unclassified'}`),
@@ -282,15 +305,49 @@ async function buildDebrief({ name, client, deadline, notes, digests }) {
   return debrief
 }
 
-// Overall score out of 100, equal weight across the five criteria. Kept in code
-// rather than asked of the model so every tender is ranked the same way.
-const CRITERIA = ['fit', 'value', 'winChance', 'capacity', 'risk']
+// Overall score out of 100. Weighted, not equal — computed in code from the
+// model's 1-5 ratings rather than asked of the model, so every tender is
+// ranked by the same rule. WEIGHTS and BID_SCORE_THRESHOLD are Tony's
+// PROPOSED defaults (3 Aug 2026), not yet confirmed — he agreed weighted
+// scoring "works well" and added clientRelationship, but hasn't set the
+// actual weights or the bid/no-bid cutoff. Change these two constants when
+// he does; nothing else needs to change.
+const CRITERIA = ['fit', 'value', 'winChance', 'capacity', 'risk', 'clientRelationship']
+
+const WEIGHTS = {
+  value: 25,           // the size of the prize vs. what it costs us to chase it
+  winChance: 20,        // realistic chance of winning
+  clientRelationship: 20, // repeat client, payment history, ongoing-work potential
+  capacity: 15,          // can we resource and deliver it in the window
+  risk: 10,              // client and contract risk
+  fit: 10                // how well it matches what P&I does
+}
+// WEIGHTS must sum to 100 — a scoring rule that silently doesn't add up would
+// mis-rank every tender in a way nobody would notice by looking at one score.
+const WEIGHTS_TOTAL = Object.values(WEIGHTS).reduce((a, b) => a + b, 0)
+if (WEIGHTS_TOTAL !== 100) {
+  throw new Error(`Tender scoring WEIGHTS must sum to 100 — currently ${WEIGHTS_TOTAL}`)
+}
+
+// Score at or above this is recommended to bid by the rule. Below it, the
+// spec is that the estimating team can still agree to proceed (a strategic
+// account, a new-scope opportunity) — that's the existing Bid/No-bid buttons
+// with a reason, not a separate mechanism.
+const BID_SCORE_THRESHOLD = 60
 
 function overallScore(scores) {
   if (!scores) return null
-  const values = CRITERIA.map(k => Number(scores[k])).filter(n => Number.isFinite(n))
-  if (values.length !== CRITERIA.length) return null
-  return Math.round((values.reduce((a, b) => a + b, 0) / (CRITERIA.length * 5)) * 100)
+  const weighted = CRITERIA.reduce((sum, k) => {
+    const v = Number(scores[k])
+    return Number.isFinite(v) ? sum + v * WEIGHTS[k] : sum
+  }, 0)
+  const presentWeight = CRITERIA.reduce((sum, k) => Number.isFinite(Number(scores[k])) ? sum + WEIGHTS[k] : sum, 0)
+  if (presentWeight === 0) return null
+  // Missing criteria are excluded from both the numerator and the denominator
+  // rather than treated as zero, so one gap doesn't crater an otherwise-good
+  // score — same principle as the rest of the module: report what's missing,
+  // don't let it silently corrupt the rest.
+  return Math.round((weighted / (presentWeight * 5)) * 100)
 }
 
 function totalHours(costToTender) {
@@ -302,6 +359,8 @@ function totalHours(costToTender) {
 module.exports = {
   MODEL,
   CRITERIA,
+  WEIGHTS,
+  BID_SCORE_THRESHOLD,
   isReadable,
   unreadableReason,
   digestDocument,

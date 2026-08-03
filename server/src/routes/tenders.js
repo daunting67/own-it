@@ -9,14 +9,43 @@ const {
   digestDocument,
   buildDebrief,
   overallScore,
-  totalHours
+  totalHours,
+  BID_SCORE_THRESHOLD
 } = require('../lib/tenderPrompts')
 
-// PLACEHOLDER until Tony sets the real figure. This is what an hour of estimating
-// time costs P&I internally (salary + on-costs + overhead), NOT a charge-out rate.
-// Every cost-to-tender number in the module is hours x this, so it is stored on
-// each tender record and editable per tender — see PATCH below.
-const DEFAULT_ESTIMATING_RATE = 95
+// Tony's real figure, given 3 Aug 2026: base rate $135/hr + $5/hr office
+// equipment/software + $25/hr review cost (Rory/Dan review as a group,
+// averaging ~2hrs — roughly $1,200 on a 50hr tender, which is what the
+// $25/hr component works out to). Editable per tender — see PATCH below —
+// this is just the default a new tender starts at.
+const DEFAULT_ESTIMATING_RATE = 165
+
+// Weekly estimating capacity, given 3 Aug 2026: Tony 40hrs, Josh 20hrs,
+// Rory 20hrs — Josh and Rory help estimate but carry other responsibilities
+// that limit how much of their week goes to it. This is a simple aggregate
+// gauge (committed hours vs this total), not a scheduler — deadlines are
+// free text on a tender, not parsed dates, so there's no way to know which
+// week a tender's hours actually fall in. Treat the flag as approximate.
+const ESTIMATING_CAPACITY = {
+  weeklyHours: 80,
+  breakdown: [
+    { name: 'Tony', hoursPerWeek: 40 },
+    { name: 'Josh', hoursPerWeek: 20 },
+    { name: 'Rory', hoursPerWeek: 20 }
+  ]
+}
+
+// Named accounts P&I keeps regardless of what one tender's numbers say —
+// "may influence our decision to go ahead regardless of price, within
+// reason" (Tony, 3 Aug 2026). Matched case-insensitively against the client
+// name. PLACEHOLDER LIST — only these two are confirmed; add more here as
+// Tony names them, nothing else needs to change.
+const KEY_CLIENTS = ['Fletcher', 'Acciona']
+
+function matchedKeyClient(clientName) {
+  const name = (clientName || '').toLowerCase()
+  return KEY_CLIENTS.find(k => name.includes(k.toLowerCase())) || null
+}
 
 const STATUSES = ['open', 'bidding', 'submitted', 'won', 'lost', 'declined']
 const DECISIONS = ['undecided', 'bid', 'no-bid']
@@ -39,13 +68,22 @@ function withDerived(tender) {
     && tender.hoursOverride !== ''
     && Number.isFinite(Number(tender.hoursOverride))
   const hours = hasOverride ? Number(tender.hoursOverride) : aiHours
+  const score = overallScore(tender.debrief?.recommendation?.scores)
   return {
     ...tender,
     estimatingRate: rate,
     aiHours,
     hours,
     costToTender: Math.round(hours * rate),
-    score: overallScore(tender.debrief?.recommendation?.scores)
+    score,
+    // Two independent signals shown side by side, deliberately not merged:
+    // the rule (score vs threshold) and the named-account override. Folding
+    // "it's Fletcher" into the score would make the number stop meaning
+    // "how good is this tender" — the whole reason it's kept separate is so
+    // a marginal-score bid for a strategic account reads as a visible,
+    // deliberate exception rather than a quietly inflated score.
+    meetsBidThreshold: score !== null ? score >= BID_SCORE_THRESHOLD : null,
+    keyClient: matchedKeyClient(tender.client)
   }
 }
 
@@ -58,7 +96,9 @@ router.get('/', async (req, res) => {
     const tenders = await listTenders()
     res.json({
       tenders: tenders.map(withDerived),
-      defaultRate: DEFAULT_ESTIMATING_RATE
+      defaultRate: DEFAULT_ESTIMATING_RATE,
+      bidScoreThreshold: BID_SCORE_THRESHOLD,
+      capacity: ESTIMATING_CAPACITY
     })
   } catch (err) {
     console.error('Tender list failed:', err)
@@ -123,7 +163,7 @@ router.post('/debrief', async (req, res) => {
   if (!digests.length) return res.status(400).json({ error: 'Upload at least one document' })
 
   try {
-    const debrief = await buildDebrief({ name, client, deadline, notes, digests })
+    const debrief = await buildDebrief({ name, client, deadline, notes, digests, isKeyClient: !!matchedKeyClient(client) })
 
     const tender = {
       id: randomUUID(),
