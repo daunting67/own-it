@@ -743,3 +743,49 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
 }
 .ps-outline-title { flex: 1; font-size: 15px; font-weight: 700; color: var(--pi-ink); }
 .ps-outline-min { font-size: 12.5px; font-weight: 700; color: var(--pi-body-muted); }
+
+/* ── Print: tender debrief → PDF ──────────────────────────────
+   The debrief is the thing people circulate, so it has to survive
+   Cmd+P → Save as PDF as a clean document: no sidebar, no concrete
+   texture, no controls, and no section split across a page break.
+   `.no-print` marks anything that is a control rather than content. */
+@media print {
+  @page { margin: 14mm; }
+
+  html, body, .app, .main { height: auto !important; overflow: visible !important; background: #fff !important; }
+  .app { display: block !important; }
+  .main { background: #fff !important; }
+
+  .sidebar, .topbar, .bg-fill, .bg-logo, .no-print { display: none !important; }
+
+  .content { overflow: visible !important; padding: 0 !important; }
+  .content-inner, .content-inner-wide, .content-inner-full { max-width: none !important; }
+
+  /* Cards become plain paper — the drop shadow and top rule print as grey mush */
+  .card {
+    box-shadow: none !important; border: none !important;
+    background: #fff !important; padding: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  /* Keep the score bars, decision pill and coverage panel coloured — they
+     carry meaning, and browsers drop backgrounds when printing by default. */
+  .print-doc { margin: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-doc h2 { font-size: 20pt; }
+  .print-doc h3 { break-after: avoid; page-break-after: avoid; }
+  .print-section { break-inside: avoid; page-break-inside: avoid; }
+
+  table { break-inside: auto; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  /* The house header is orange-on-black; on paper that costs a lot of toner
+     and reads worse than plain rules. */
+  th { background: #fff !important; color: #000 !important; border-bottom: 1.5px solid #000; }
+  th:first-child { color: #000 !important; }
+
+  a[href]:after { content: none !important; }
+}
+
+/* Shown only on paper — identifies the document once the topbar is gone. */
+.print-only { display: none; }
+@media print { .print-only { display: block !important; } }

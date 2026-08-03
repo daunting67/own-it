@@ -44,7 +44,7 @@ function Pill({ children, bg, fg }) {
 
 function Section({ title, children }) {
   return (
-    <div style={{ marginTop: 26 }}>
+    <div className="print-section" style={{ marginTop: 26 }}>
       <h3 style={{
         margin: '0 0 10px', fontSize: 13, fontWeight: 700, letterSpacing: '.04em',
         textTransform: 'uppercase', color: 'var(--text)'
@@ -278,11 +278,20 @@ function Debrief({ tender, onBack, onUpdate }) {
 
   return (
     <div>
-      <button className="btn btn-secondary" onClick={onBack} style={{ marginBottom: 18 }}>
-        ← All tenders
-      </button>
+      <div className="no-print" style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+        <button className="btn btn-secondary" onClick={onBack}>← All tenders</button>
+        {/* Browser print → "Save as PDF". No server round-trip, no extra
+            dependency, and what you see on screen is what gets sent. */}
+        <button className="btn btn-secondary" onClick={() => window.print()}>
+          🖨 Save as PDF
+        </button>
+      </div>
 
-      <div className="card" style={{ padding: 28 }}>
+      <div className="card print-doc" style={{ padding: 28 }}>
+        <div className="print-only" style={{ fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 10, borderBottom: '1.5px solid #000', paddingBottom: 6 }}>
+          P&I (North) Ltd — Tender Debrief
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>{tender.name}</h2>
@@ -441,7 +450,7 @@ function Debrief({ tender, onBack, onUpdate }) {
             </div>
           )}
 
-          <div style={{
+          <div className="no-print" style={{
             marginTop: 14, padding: 14, background: 'var(--bg-secondary)', borderRadius: 8,
             display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap'
           }}>
@@ -530,14 +539,20 @@ function Debrief({ tender, onBack, onUpdate }) {
 
         {/* our decision */}
         <Section title="Our decision">
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+          {/* On paper the buttons are hidden, so state the decision in words. */}
+          <div className="print-only" style={{ fontSize: 13, marginBottom: 8 }}>
+            {tender.decision === 'undecided'
+              ? 'Not yet decided.'
+              : `${decisionStyle.label}${tender.decisionReason ? ` — ${tender.decisionReason}` : ''}`}
+          </div>
+          <textarea className="no-print" value={reason} onChange={e => setReason(e.target.value)} rows={2}
             placeholder="Why we're bidding / not bidding (optional)"
             style={{
               width: '100%', padding: '8px 10px', borderRadius: 6, marginBottom: 10,
               border: '1px solid var(--border-color)', background: 'var(--bg-primary)',
               color: 'var(--text-primary)', resize: 'vertical'
             }} />
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div className="no-print" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" disabled={saving}
               onClick={() => patch({ decision: 'bid', decisionReason: reason })}>
               Bid
@@ -717,7 +732,7 @@ export default function TendersModule() {
       {/* The tab strip sits on the concrete background, not a white card, so
           both labels are var(--text) at weight 600 — muted grey is illegible
           there (same rule the Plant page headers needed). */}
-      <div style={{
+      <div className="no-print" style={{
         display: 'flex', marginTop: 24, gap: 4,
         borderBottom: '1px solid rgba(0,0,0,.18)'
       }}>
