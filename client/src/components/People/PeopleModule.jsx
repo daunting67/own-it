@@ -171,14 +171,15 @@ export default function PeopleModule({ onSaveStateChange }) {
     return true
   })
 
-  const totals = { total: staff.length, complete: 0, inProgress: 0, notStarted: 0 }
+  // "Total staff" counts the same people as the exported staff-list.csv
+  // (checklist fully complete) — not every row in the Staff table — so the
+  // number on this page can never disagree with what's in the download.
+  // "In progress" is every new staff member NOT YET onboarded — partially
+  // through the checklist or not started at all, both count.
+  const totals = { total: 0, complete: 0, inProgress: 0 }
   for (const m of staff) {
-    const items = (m.checklist || []).flatMap(s => s.items)
-    const done = items.filter(i => i.done).length
-    const pct = items.length ? Math.round((done / items.length) * 100) : 0
-    if (pct === 100) totals.complete++
-    else if (pct > 0) totals.inProgress++
-    else totals.notStarted++
+    if (calcProgress(m.checklist) === 100) { totals.complete++; totals.total++ }
+    else totals.inProgress++
   }
 
   if (loading) return <div className="page" style={{ color: 'var(--text-muted)' }}>Loading...</div>
@@ -261,7 +262,7 @@ export default function PeopleModule({ onSaveStateChange }) {
         </div>
       </div>
 
-      {user?.admin && totals.total - totals.complete > 0 && (
+      {user?.admin && totals.inProgress > 0 && (
         <div style={{ marginBottom: 20 }}>
           {!confirmMarkAll ? (
             <button className="btn btn-secondary btn-sm" onClick={() => setConfirmMarkAll(true)}>
@@ -270,7 +271,7 @@ export default function PeopleModule({ onSaveStateChange }) {
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13 }}>
-                Tick every checklist item for the {totals.total - totals.complete} staff not already at 100% — for people who were working before this tracker, not genuinely mid-onboarding?
+                Tick every checklist item for the {totals.inProgress} staff not already at 100% — for people who were working before this tracker, not genuinely mid-onboarding?
               </span>
               <button className="btn btn-primary btn-sm" onClick={markAllOnboardingComplete} disabled={markingAll}>
                 {markingAll ? 'Updating…' : 'Yes, mark them complete'}
