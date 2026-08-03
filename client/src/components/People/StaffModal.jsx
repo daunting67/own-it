@@ -93,7 +93,6 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
       startDate: m.startDate ? String(m.startDate).slice(0, 10) : '',
       supplierId: m.supplierId || '',
       role: m.role || '',
-      company: m.company || '',
     }
   }
 
@@ -273,25 +272,20 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
                   <label className="form-label">Start date</label>
                   <input className="form-input" type="date" value={details.startDate} onChange={e => setDetail('startDate', e.target.value)} />
                 </div>
+                {/* Shown for EVERY hire type, not just Labour hire — both are
+                    columns in the staff-list.csv for everyone, and hiding them
+                    here would let the form and the CSV disagree. */}
                 <div className="form-group">
-                  <label className="form-label">Company</label>
-                  <input className="form-input" value={details.company} onChange={e => setDetail('company', e.target.value)} placeholder="e.g. Freestyla" />
+                  <label className="form-label">Employer / Supplier</label>
+                  <select className="form-select" value={details.supplierId} onChange={e => setDetail('supplierId', e.target.value)}>
+                    <option value="">— None —</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
-                {details.hireType === 'Labour hire' && (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">Supplier</label>
-                      <select className="form-select" value={details.supplierId} onChange={e => setDetail('supplierId', e.target.value)}>
-                        <option value="">— Select supplier —</option>
-                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Role on rate card</label>
-                      <input className="form-input" value={details.role} onChange={e => setDetail('role', e.target.value)} placeholder="e.g. Labourer" />
-                    </div>
-                  </>
-                )}
+                <div className="form-group">
+                  <label className="form-label">Role</label>
+                  <input className="form-input" value={details.role} onChange={e => setDetail('role', e.target.value)} placeholder="e.g. Labourer" />
+                </div>
               </div>
               {detailsError && <div className="banner banner-danger" style={{ marginTop: 10 }}>{detailsError}</div>}
               <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={saveDetails} disabled={detailsSaving}>

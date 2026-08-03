@@ -5,7 +5,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { buildChecklist, applySiteInductions, markChecklistComplete } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
-const { getCompanyMap, setCompany, importCompanies } = require('../lib/staffCompany')
+const { importStaffDetails } = require('../lib/staffDetailsImport')
 
 const router = Router()
 router.use(requireAuth)
@@ -19,8 +19,7 @@ function touchStaffCsv() {
 
 router.get('/', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').order('createdAt', { ascending: false })
-  const companies = await getCompanyMap()
-  res.json((data || []).map(s => ({ ...s, company: companies[s.id] || '' })))
+  res.json(data || [])
 })
 
 // Always regenerated live from the Staff table on every download — the
@@ -106,23 +105,26 @@ router.post('/import', requireAdmin, async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').eq('id', req.params.id).single()
   if (!data) return res.status(404).json({ error: 'Not found' })
-  const companies = await getCompanyMap()
-  res.json({ ...data, company: companies[data.id] || '' })
+  res.json(data)
 })
 
-// Re-import path for the Company column: Tony downloads staff-list.csv
-// (which now includes a blank Company column), fills it in himself outside
-// the portal, and uploads it back here. Matched by name against the live
-// Staff table — this never creates new staff, only fills in Company for
-// people who already exist.
+// Re-import path for an edited staff-list.csv: the CSV is the master list, so
+// a Hire Type corrected in the spreadsheet has to be able to get back in.
+// Matched by name; never creates staff.
 router.post('/import-details', requireAdmin, async (req, res) => {
   const csv = String(req.body?.csv || '')
   if (!csv.trim()) return res.status(400).json({ error: 'No CSV content received' })
   if (csv.length > 2 * 1024 * 1024) return res.status(400).json({ error: 'CSV is too large (2MB limit)' })
-  const { data: staffRows } = await db.from('Staff').select('id,name')
+  const { data: staffRows } = await db.from('Staff').select('id,name,hireType')
   let result
   try {
-    result = await importCompanies(csv, staffRows || [])
+    // Hire type is written straight to the table here rather than going
+    // through PATCH: nothing else about the person is changing, and the
+    // checklist must NOT be rebuilt just because someone's classification was
+    // corrected in the spreadsheet (that would wipe real onboarding progress).
+    result = await importStaffDetails(csv, staffRows || [], (id, hireType) =>
+      db.from('Staff').update({ hireType, updatedAt: new Date().toISOString() }).eq('id', id)
+    )
   } catch (err) {
     return res.status(400).json({ error: err.message })
   }
@@ -131,7 +133,7 @@ router.post('/import-details', requireAdmin, async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
-  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, company } = req.body
+  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role } = req.body
   if (!name || !hireType) return res.status(400).json({ error: 'Name and hire type required' })
   let checklist = buildChecklist(hireType)
   if (siteId) {
@@ -139,16 +141,14 @@ router.post('/', async (req, res) => {
     if (site) checklist = applySiteInductions(checklist, site)
   }
   const { data } = await db.from('Staff').insert({ id: randomUUID(), name, hireType, siteId: siteId || null, position, mobile, email, startDate, supplierId: supplierId || null, role, checklist }).select('*,site:Site(*),supplier:Supplier(*)').single()
-  if (company) await setCompany(data.id, company)
   touchStaffCsv()
-  res.status(201).json({ ...data, company: company || '' })
+  res.status(201).json(data)
 })
 
 router.patch('/:id', async (req, res) => {
-  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, checklist, company } = req.body
+  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, checklist } = req.body
   const { data: existing } = await db.from('Staff').select('*').eq('id', req.params.id).single()
   if (!existing) return res.status(404).json({ error: 'Not found' })
-  if (company !== undefined) await setCompany(req.params.id, company)
   const updates = { updatedAt: new Date().toISOString() }
   if (name !== undefined) updates.name = name
   if (hireType !== undefined) updates.hireType = hireType
@@ -178,8 +178,7 @@ router.patch('/:id', async (req, res) => {
   }
   const { data } = await db.from('Staff').update(updates).eq('id', req.params.id).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
-  const companies = await getCompanyMap()
-  res.json({ ...data, company: companies[data.id] || '' })
+  res.json(data)
 })
 
 router.delete('/:id', async (req, res) => {

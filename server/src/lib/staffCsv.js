@@ -9,7 +9,6 @@
 // construction, and Tony can download it any time as a plain export.
 
 const db = require('./supabase')
-const { getCompanyMap } = require('./staffCompany')
 
 const BUCKET = 'people-config'
 const PATH = 'staff-list.csv'
@@ -53,16 +52,18 @@ function sortStaffRows(rows) {
   })
 }
 
-// companies: id -> Company name (the Supabase-Storage side-store from
-// staffCompany.js — Company isn't a real Staff table column, see there for why).
-function buildStaffCsv(rows, companies = {}) {
-  const headers = ['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Site', 'Employer / Supplier', 'Start Date', 'Role', 'Company']
+// These nine columns, in this order, are the agreed shape of a staff record —
+// the same set and order appears in the Staff Details List table and on the
+// "+ Add staff member" form, so the three can never disagree about what a
+// person's details are.
+function buildStaffCsv(rows) {
+  const headers = ['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role']
   const lines = [headers.join(',')]
   for (const row of sortStaffRows(rows.filter(r => isComplete(r.checklist)))) {
     lines.push([
-      row.name, row.hireType, row.position, row.mobile, row.email,
-      row.site?.name || '', row.supplier?.name || '', row.startDate,
-      row.role || '', companies[row.id] || '',
+      row.name, row.hireType, row.position, row.site?.name || '',
+      row.mobile, row.email, row.startDate,
+      row.supplier?.name || '', row.role || '',
     ].map(csvEscape).join(','))
   }
   return lines.join('\n') + '\n'
@@ -74,8 +75,7 @@ function buildStaffCsv(rows, companies = {}) {
 async function refreshStaffCsv() {
   const { data, error } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').order('name')
   if (error) throw new Error(error.message)
-  const companies = await getCompanyMap()
-  const csv = buildStaffCsv(data || [], companies)
+  const csv = buildStaffCsv(data || [])
   const opts = { contentType: 'text/csv', upsert: true }
   let up = await db.storage.from(BUCKET).upload(PATH, Buffer.from(csv), opts)
   if (up.error && /bucket not found|does not exist/i.test(up.error.message)) {

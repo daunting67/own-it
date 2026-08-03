@@ -5,7 +5,7 @@ const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
 export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
   const [form, setForm] = useState({
     name: '', hireType: 'Direct hire', siteId: '', position: '',
-    mobile: '', email: '', startDate: '', supplierId: '', role: '', company: ''
+    mobile: '', email: '', startDate: '', supplierId: '', role: ''
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -63,33 +63,31 @@ export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
                 <input className="form-input" value={form.mobile} onChange={e => set('mobile', e.target.value)} placeholder="02X XXX XXXX" />
               </div>
               <div className="form-group">
+                <label className="form-label">Email</label>
+                <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} />
+              </div>
+            </div>
+            {/* Start date, Employer / Supplier and Role are shown for EVERY hire
+                type, not just Labour hire — they're columns in the staff-list.csv
+                for everyone, and hiding them here would let the form and the CSV
+                disagree about what a person's details are. */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
                 <label className="form-label">Start date</label>
                 <input className="form-input" type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} />
               </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Email</label>
-              <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Company</label>
-              <input className="form-input" value={form.company} onChange={e => set('company', e.target.value)} placeholder="e.g. Freestyla" />
-            </div>
-            {form.hireType === 'Labour hire' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Supplier</label>
-                  <select className="form-select" value={form.supplierId} onChange={e => set('supplierId', e.target.value)}>
-                    <option value="">— Select supplier —</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Role on rate card</label>
-                  <input className="form-input" value={form.role} onChange={e => set('role', e.target.value)} placeholder="e.g. Labourer" />
-                </div>
+              <div className="form-group">
+                <label className="form-label">Employer / Supplier</label>
+                <select className="form-select" value={form.supplierId} onChange={e => set('supplierId', e.target.value)}>
+                  <option value="">— None —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
-            )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Role</label>
+              <input className="form-input" value={form.role} onChange={e => set('role', e.target.value)} placeholder="e.g. Labourer" />
+            </div>
             {error && <div className="banner banner-danger">{error}</div>}
           </div>
           <div className="modal-footer">

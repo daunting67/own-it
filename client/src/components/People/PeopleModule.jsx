@@ -16,6 +16,26 @@ const HIRE_TYPES = ['All', 'Direct hire', 'Labour hire', 'Contractor', 'Casual']
 // counted as a person.
 const isNotAPerson = name => String(name || '').trim().toUpperCase() === 'OTHER NOT LISTED'
 
+// Same ordering the exported staff-list.csv uses (see server/src/lib/staffCsv.js):
+// ascending by FIRST name, skipping a leading bracketed nickname so
+// "(EJ) Kesomi Fa'avae" files under K rather than "(", with OTHER NOT LISTED
+// pinned last. The Staff Details List is a mirror of that CSV, so it has to
+// read in the same order — the raw /api/staff order is newest-created first.
+function firstNameKey(name) {
+  const tokens = String(name || '').trim().split(/\s+/)
+  const first = tokens[0]?.startsWith('(') ? (tokens[1] || tokens[0]) : tokens[0]
+  return (first || '').replace(/[^a-z']/gi, '').toLowerCase()
+}
+
+function sortByFirstName(rows) {
+  return [...rows].sort((a, b) => {
+    const aOther = isNotAPerson(a.name)
+    const bOther = isNotAPerson(b.name)
+    if (aOther !== bOther) return aOther ? 1 : -1
+    return firstNameKey(a.name).localeCompare(firstNameKey(b.name))
+  })
+}
+
 function downloadCsv(csv, filename) {
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -161,9 +181,10 @@ export default function PeopleModule({ onSaveStateChange }) {
     }
   }
 
-  // Re-import path for the Company column: Tony downloads staff-list.csv,
-  // fills in Company himself outside the portal, and uploads it back here.
-  // Matched by name against the live Staff table — never creates new staff.
+  // Re-import path for an edited staff-list.csv: the CSV is the master list,
+  // so a Hire Type corrected in the spreadsheet has to be able to get back in
+  // rather than the two silently disagreeing. Matched by name against the live
+  // Staff table — never creates new staff.
   async function onImportDetailsFile(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -173,9 +194,11 @@ export default function PeopleModule({ onSaveStateChange }) {
     try {
       const text = await file.text()
       const result = await api.importStaffDetails(text)
+      const n = result.hireTypesUpdated
       setDetailsImportMsg({
-        text: `Updated Company for ${result.updated} staff member${result.updated === 1 ? '' : 's'}.`
-          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? '' : 's'} didn't match anyone: ${result.unmatched.join(', ')}.` : ''),
+        text: (n ? `Updated hire type for ${n} staff member${n === 1 ? '' : 's'}.` : 'No hire types needed changing — the file already matches.')
+          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? '' : 's'} didn't match anyone: ${result.unmatched.join(', ')}.` : '')
+          + (result.unreadable?.length ? ` Couldn't read the hire type for: ${result.unreadable.join(', ')}.` : ''),
         ok: true,
       })
       const fresh = await api.getStaff()
@@ -209,11 +232,11 @@ export default function PeopleModule({ onSaveStateChange }) {
   // Every staff member regardless of onboarding status — the tracker above
   // deliberately hides completed people, so this is the only place to find,
   // edit, or remove someone once they're done (e.g. staff who've left).
-  const allVisible = staff.filter(m => {
+  const allVisible = sortByFirstName(staff.filter(m => {
     if (filter !== 'All' && m.hireType !== filter) return false
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
-  })
+  }))
 
   // "Total staff" counts the same people as the exported staff-list.csv
   // (checklist fully complete) — not every row in the Staff table — so the
@@ -443,14 +466,14 @@ export default function PeopleModule({ onSaveStateChange }) {
           )}
 
           <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
-            Every field from "+ Add staff member", matching the downloaded staff-list.csv exactly — download it, fill in Company yourself, then re-upload here to bring it back in.
+            The same nine fields as the staff-list.csv and the "+ Add staff member" form, in the same order — download the CSV, edit it, then re-upload here to bring your changes back in.
           </div>
 
           <div className="card" style={{ overflowX: 'auto', padding: 12 }}>
-            <table className="table-compact" style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse' }}>
+            <table className="table-compact" style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role', 'Company'].map(h => (
+                  {['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '2px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr>
@@ -467,7 +490,6 @@ export default function PeopleModule({ onSaveStateChange }) {
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.startDate || '—'}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.supplier?.name || '—'}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.role || '—'}</td>
-                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.company || '—'}</td>
                   </tr>
                 ))}
               </tbody>
