@@ -21,14 +21,21 @@ router.get('/', async (req, res) => {
   res.json(data || [])
 })
 
-// Always the current staff list, regenerated on every add/edit/delete —
-// registered before /:id so "export.csv" is never mistaken for an id.
+// Always regenerated live from the Staff table on every download — the
+// stored file is only a cache for touchStaffCsv's fire-and-forget writes, and
+// serving it as-is here would risk handing back a stale snapshot (e.g. after
+// a bulk update fires many concurrent background refreshes, whichever one's
+// SELECT happens to run before another request's write commits "wins" and
+// leaves the cache behind). A download is exactly the moment correctness
+// matters more than the extra DB round trip, so always regenerate first and
+// only fall back to the cache if that fails.
 router.get('/export.csv', async (req, res) => {
-  let csv = await getStaffCsv()
-  if (csv === null) {
-    // Nobody has changed staff since this feature shipped — build it now
-    // rather than telling the person asking for it that there's nothing there.
-    try { csv = await refreshStaffCsv() } catch (err) { return res.status(500).json({ error: err.message }) }
+  let csv
+  try {
+    csv = await refreshStaffCsv()
+  } catch (err) {
+    csv = await getStaffCsv()
+    if (csv === null) return res.status(500).json({ error: err.message })
   }
   // JSON, not a raw file response: every other route on this API is
   // Authorization-header-authenticated, and a plain <a href> download can't
