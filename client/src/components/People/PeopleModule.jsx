@@ -21,6 +21,11 @@ const isNotAPerson = name => String(name || '').trim().toUpperCase() === 'OTHER 
 // "(EJ) Kesomi Fa'avae" files under K rather than "(", with OTHER NOT LISTED
 // pinned last. The Staff Details List is a mirror of that CSV, so it has to
 // read in the same order — the raw /api/staff order is newest-created first.
+function sortKey(name) {
+  const n = String(name || '').trim().replace(/^\([^)]*\)\s*/, '')
+  return n.replace(/[^a-z' ]/gi, '').toLowerCase()
+}
+
 function firstNameKey(name) {
   const tokens = String(name || '').trim().split(/\s+/)
   const first = tokens[0]?.startsWith('(') ? (tokens[1] || tokens[0]) : tokens[0]
@@ -32,7 +37,10 @@ function sortByFirstName(rows) {
     const aOther = isNotAPerson(a.name)
     const bOther = isNotAPerson(b.name)
     if (aOther !== bOther) return aOther ? 1 : -1
+    // Tie-break on the whole name when first names match — two people called
+    // Jose must still read alphabetically, not in table order.
     return firstNameKey(a.name).localeCompare(firstNameKey(b.name))
+      || sortKey(a.name).localeCompare(sortKey(b.name))
   })
 }
 

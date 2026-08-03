@@ -42,6 +42,12 @@ function isComplete(checklist) {
 // sorts under K (its real first name), not under the leading "(" bracket.
 // "OTHER NOT LISTED" is forced to the very end regardless of where it would
 // otherwise alphabetise to, per Tony.
+// Whole name, minus a leading bracketed nickname, for tie-breaking.
+function sortKey(name) {
+  const n = String(name || '').trim().replace(/^\([^)]*\)\s*/, '')
+  return n.replace(/[^a-z' ]/gi, '').toLowerCase()
+}
+
 function firstNameKey(name) {
   const tokens = String(name || '').trim().split(/\s+/)
   const first = tokens[0]?.startsWith('(') ? (tokens[1] || tokens[0]) : tokens[0]
@@ -53,7 +59,11 @@ function sortStaffRows(rows) {
     const aOther = a.name.trim().toUpperCase() === 'OTHER NOT LISTED'
     const bOther = b.name.trim().toUpperCase() === 'OTHER NOT LISTED'
     if (aOther !== bOther) return aOther ? 1 : -1
+    // Tie-break on the whole name when first names match, otherwise two people
+    // called Jose fall back to whatever order the table happened to return
+    // (Jose Traje before Jose Alibar) instead of reading alphabetically.
     return firstNameKey(a.name).localeCompare(firstNameKey(b.name))
+      || sortKey(a.name).localeCompare(sortKey(b.name))
   })
 }
 
