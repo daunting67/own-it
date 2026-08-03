@@ -9,6 +9,7 @@
 // construction, and Tony can download it any time as a plain export.
 
 const db = require('./supabase')
+const { getCompanyMap } = require('./staffCompany')
 
 const BUCKET = 'people-config'
 const PATH = 'staff-list.csv'
@@ -33,13 +34,35 @@ function isComplete(checklist) {
   return items.length > 0 && items.every(i => i.done)
 }
 
-function buildStaffCsv(rows) {
-  const headers = ['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Site', 'Employer / Supplier', 'Start Date']
+// Sorts by FIRST name, not the raw full-name string — "(EJ) Kesomi Fa'avae"
+// sorts under K (its real first name), not under the leading "(" bracket.
+// "OTHER NOT LISTED" is forced to the very end regardless of where it would
+// otherwise alphabetise to, per Tony.
+function firstNameKey(name) {
+  const tokens = String(name || '').trim().split(/\s+/)
+  const first = tokens[0]?.startsWith('(') ? (tokens[1] || tokens[0]) : tokens[0]
+  return (first || '').replace(/[^a-z']/gi, '').toLowerCase()
+}
+
+function sortStaffRows(rows) {
+  return [...rows].sort((a, b) => {
+    const aOther = a.name.trim().toUpperCase() === 'OTHER NOT LISTED'
+    const bOther = b.name.trim().toUpperCase() === 'OTHER NOT LISTED'
+    if (aOther !== bOther) return aOther ? 1 : -1
+    return firstNameKey(a.name).localeCompare(firstNameKey(b.name))
+  })
+}
+
+// companies: id -> Company name (the Supabase-Storage side-store from
+// staffCompany.js — Company isn't a real Staff table column, see there for why).
+function buildStaffCsv(rows, companies = {}) {
+  const headers = ['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Site', 'Employer / Supplier', 'Start Date', 'Role', 'Company']
   const lines = [headers.join(',')]
-  for (const row of rows.filter(r => isComplete(r.checklist))) {
+  for (const row of sortStaffRows(rows.filter(r => isComplete(r.checklist)))) {
     lines.push([
       row.name, row.hireType, row.position, row.mobile, row.email,
       row.site?.name || '', row.supplier?.name || '', row.startDate,
+      row.role || '', companies[row.id] || '',
     ].map(csvEscape).join(','))
   }
   return lines.join('\n') + '\n'
@@ -51,7 +74,8 @@ function buildStaffCsv(rows) {
 async function refreshStaffCsv() {
   const { data, error } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').order('name')
   if (error) throw new Error(error.message)
-  const csv = buildStaffCsv(data || [])
+  const companies = await getCompanyMap()
+  const csv = buildStaffCsv(data || [], companies)
   const opts = { contentType: 'text/csv', upsert: true }
   let up = await db.storage.from(BUCKET).upload(PATH, Buffer.from(csv), opts)
   if (up.error && /bucket not found|does not exist/i.test(up.error.message)) {

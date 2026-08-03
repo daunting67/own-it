@@ -93,6 +93,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
       startDate: m.startDate ? String(m.startDate).slice(0, 10) : '',
       supplierId: m.supplierId || '',
       role: m.role || '',
+      company: m.company || '',
     }
   }
 
@@ -271,6 +272,10 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
                 <div className="form-group">
                   <label className="form-label">Start date</label>
                   <input className="form-input" type="date" value={details.startDate} onChange={e => setDetail('startDate', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Company</label>
+                  <input className="form-input" value={details.company} onChange={e => setDetail('company', e.target.value)} placeholder="e.g. Freestyla" />
                 </div>
                 {details.hireType === 'Labour hire' && (
                   <>

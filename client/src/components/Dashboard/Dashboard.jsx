@@ -3,6 +3,11 @@ import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 import { calcProgress } from '../../lib/checklists'
 
+// A row that exists for FastField's benefit, not a real employee — its staff
+// lookup list needs it so a form can offer a free-text field when the person
+// isn't on the list. Never counted as a person.
+const isNotAPerson = name => String(name || '').trim().toUpperCase() === 'OTHER NOT LISTED'
+
 export default function Dashboard({ onNavigate }) {
   const { user } = useAuth()
   const [staff, setStaff] = useState(null)
@@ -19,7 +24,8 @@ export default function Dashboard({ onNavigate }) {
   const part = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
   const firstName = (user?.name || '').split(' ')[0]
 
-  const onboarding = (staff || []).filter(s => calcProgress(s.checklist) < 100)
+  const people = (staff || []).filter(s => !isNotAPerson(s.name))
+  const onboarding = people.filter(s => calcProgress(s.checklist) < 100)
   const pending = (invoices || []).filter(i => i.status === 'pending')
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const runsThisWeek = (runs || []).filter(r => new Date(r.createdAt).getTime() > weekAgo)
@@ -51,9 +57,9 @@ export default function Dashboard({ onNavigate }) {
   const loading = staff === null || invoices === null || runs === null
 
   const metrics = [
-    { kicker: 'Staff Records', num: (staff || []).length, meta: `${onboarding.length} onboarding` },
+    { kicker: 'Staff Records', num: people.length, meta: `${onboarding.length} onboarding` },
     { kicker: 'Pending Invoices', num: pending.length, meta: pending.length > 0 ? 'needs review' : 'all clear', urgent: pending.length > 0 },
-    { kicker: 'Onboarding Open', num: onboarding.length, meta: `of ${(staff || []).length} staff` },
+    { kicker: 'Onboarding Open', num: onboarding.length, meta: `of ${people.length} staff` },
     { kicker: 'Runs This Week', num: runsThisWeek.length, meta: `${(runs || []).length} all time` },
   ]
 

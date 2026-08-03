@@ -5,7 +5,7 @@ const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
 export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
   const [form, setForm] = useState({
     name: '', hireType: 'Direct hire', siteId: '', position: '',
-    mobile: '', email: '', startDate: '', supplierId: '', role: ''
+    mobile: '', email: '', startDate: '', supplierId: '', role: '', company: ''
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -70,6 +70,10 @@ export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
             <div className="form-group">
               <label className="form-label">Email</label>
               <input className="form-input" type="email" value={form.email} onChange={e => set('email', e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Company</label>
+              <input className="form-input" value={form.company} onChange={e => set('company', e.target.value)} placeholder="e.g. Freestyla" />
             </div>
             {form.hireType === 'Labour hire' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

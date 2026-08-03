@@ -10,6 +10,12 @@ import ProcessesModule from '../Processes/ProcessesModule'
 
 const HIRE_TYPES = ['All', 'Direct hire', 'Labour hire', 'Contractor', 'Casual']
 
+// A row that exists for FastField's benefit, not a real employee — FastField's
+// staff lookup list needs it so a form can offer a free-text field when the
+// person isn't on the list. It stays in the exported CSV but must never be
+// counted as a person.
+const isNotAPerson = name => String(name || '').trim().toUpperCase() === 'OTHER NOT LISTED'
+
 function downloadCsv(csv, filename) {
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -42,6 +48,9 @@ export default function PeopleModule({ onSaveStateChange }) {
   const [confirmMarkAll, setConfirmMarkAll] = useState(false)
   const [markingAll, setMarkingAll] = useState(false)
   const fileRef = useRef(null)
+  const [detailsImporting, setDetailsImporting] = useState(false)
+  const [detailsImportMsg, setDetailsImportMsg] = useState(null)
+  const detailsFileRef = useRef(null)
 
   useEffect(() => {
     Promise.all([api.getStaff(), api.getSites(), api.getSuppliers()])
@@ -152,6 +161,32 @@ export default function PeopleModule({ onSaveStateChange }) {
     }
   }
 
+  // Re-import path for the Company column: Tony downloads staff-list.csv,
+  // fills in Company himself outside the portal, and uploads it back here.
+  // Matched by name against the live Staff table — never creates new staff.
+  async function onImportDetailsFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setDetailsImporting(true)
+    setDetailsImportMsg(null)
+    try {
+      const text = await file.text()
+      const result = await api.importStaffDetails(text)
+      setDetailsImportMsg({
+        text: `Updated Company for ${result.updated} staff member${result.updated === 1 ? '' : 's'}.`
+          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? '' : 's'} didn't match anyone: ${result.unmatched.join(', ')}.` : ''),
+        ok: true,
+      })
+      const fresh = await api.getStaff()
+      setStaff(fresh)
+    } catch (err) {
+      setDetailsImportMsg({ text: err.message || 'Could not import that file', ok: false })
+    } finally {
+      setDetailsImporting(false)
+    }
+  }
+
   async function downloadStaffCsv() {
     try {
       const { csv, filename } = await api.getStaffCsv()
@@ -185,8 +220,13 @@ export default function PeopleModule({ onSaveStateChange }) {
   // number on this page can never disagree with what's in the download.
   // "In progress" is every new staff member NOT YET onboarded — partially
   // through the checklist or not started at all, both count.
+  // "OTHER NOT LISTED" is excluded from every count: it's a deliberate row in
+  // the FastField lookup list that opens a free-text field when a name isn't
+  // on the list, not a real person — it still belongs in the CSV, just not in
+  // a headcount.
   const totals = { total: 0, complete: 0, inProgress: 0 }
   for (const m of staff) {
+    if (isNotAPerson(m.name)) continue
     if (calcProgress(m.checklist) === 100) { totals.complete++; totals.total++ }
     else totals.inProgress++
   }
@@ -295,7 +335,7 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {[['tracker', 'Onboarding tracker'], ['all', 'All staff'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
+        {[['tracker', 'Onboarding tracker'], ['all', 'All staff'], ['details', 'Staff Details List'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -373,6 +413,71 @@ export default function PeopleModule({ onSaveStateChange }) {
                 ))}
               </div>
           }
+        </>
+      )}
+
+      {tab === 'details' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              className="form-input"
+              style={{ maxWidth: 220 }}
+              placeholder="Search staff..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {user?.admin && (
+              <>
+                <input ref={detailsFileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportDetailsFile} />
+                <button className="btn btn-secondary btn-sm" onClick={() => detailsFileRef.current?.click()} disabled={detailsImporting}>
+                  {detailsImporting ? 'Importing…' : 'Import staff details (.csv)'}
+                </button>
+              </>
+            )}
+          </div>
+
+          {detailsImportMsg && (
+            <div className={`banner ${detailsImportMsg.ok ? 'banner-success' : 'banner-danger'}`} style={{ marginBottom: 16 }}>
+              {detailsImportMsg.text}
+            </div>
+          )}
+
+          <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
+            Every field from "+ Add staff member", matching the downloaded staff-list.csv exactly — download it, fill in Company yourself, then re-upload here to bring it back in.
+          </div>
+
+          <div className="card" style={{ overflowX: 'auto', padding: 12 }}>
+            <table className="table-compact" style={{ width: '100%', minWidth: 960, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role', 'Company'].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '2px solid var(--border)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allVisible.map(m => (
+                  <tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(m)}>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.name}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.hireType}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.position || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.site?.name || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.mobile || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.email || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.startDate || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.supplier?.name || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.role || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.company || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {allVisible.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
+                {staff.length === 0 ? 'No staff added yet.' : 'No staff match your filters.'}
+              </div>
+            )}
+          </div>
         </>
       )}
 
