@@ -122,7 +122,12 @@ function NewTender({ onFiled, onCancel }) {
       }
 
       if (!digests.some(d => d.read)) {
-        throw new Error('None of these documents could be read. Convert them to PDF and try again.')
+        // Report the actual per-file reasons. The old message assumed the cause
+        // was always file type, which is wrong and misleading for a PDF that
+        // failed on size, page count, or the read call itself.
+        throw new Error(
+          `Nothing could be read:\n${digests.map(d => `• ${d.filename} — ${d.reason || 'no reason given'}`).join('\n')}`
+        )
       }
 
       setProgress('Writing the debrief… (this one takes a couple of minutes)')
@@ -222,7 +227,9 @@ function NewTender({ onFiled, onCancel }) {
         <button className="btn btn-secondary" onClick={onCancel} disabled={running}>Cancel</button>
       </div>
 
-      {readSoFar.length > 0 && running && (
+      {/* Stays visible after the run ends — the per-file reasons are the whole
+          diagnosis, and hiding them on failure left only a generic message. */}
+      {readSoFar.length > 0 && (
         <div style={{ marginTop: 18, fontSize: 12, display: 'grid', gap: 4 }}>
           {readSoFar.map((d, i) => (
             <div key={i} style={{ color: d.read ? 'var(--text)' : '#a33' }}>
@@ -234,7 +241,7 @@ function NewTender({ onFiled, onCancel }) {
       )}
 
       {error && (
-        <div style={{ marginTop: 16, padding: 12, background: '#fdeaea', color: '#a33', borderRadius: 6, fontSize: 13 }}>
+        <div style={{ marginTop: 16, padding: 12, background: '#fdeaea', color: '#a33', borderRadius: 6, fontSize: 13, whiteSpace: 'pre-wrap' }}>
           ⚠️ {error}
         </div>
       )}
