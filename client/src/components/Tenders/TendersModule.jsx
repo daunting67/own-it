@@ -80,6 +80,32 @@ function NewTender({ onFiled, onCancel }) {
   const [progress, setProgress] = useState('')
   const [readSoFar, setReadSoFar] = useState([])
   const [error, setError] = useState(null)
+  const [dragging, setDragging] = useState(false)
+
+  // A tender pack arrives as a folder, often spread across sub-folders, so
+  // picking files has to ACCUMULATE. The bare input replaces its selection on
+  // every pick, which made a multi-folder pack impossible to assemble.
+  // Dedupe on name+size so picking the same file twice doesn't upload it twice.
+  function addFiles(incoming) {
+    setFiles(prev => {
+      const key = f => `${f.name}|${f.size}`
+      const seen = new Set(prev.map(key))
+      return [...prev, ...Array.from(incoming).filter(f => !seen.has(key(f)))]
+    })
+    // Clear the input so re-picking a file it already holds still fires change.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function removeFile(index) {
+    setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const emptyFiles = files.filter(f => f.size === 0)
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
+  const fileSize = (bytes) =>
+    bytes === 0 ? '0 bytes'
+      : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB`
+        : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
   async function run() {
     if (!name.trim() || !files.length) return
@@ -193,15 +219,77 @@ function NewTender({ onFiled, onCancel }) {
           <label style={labelStyle}>
             Tender pack — PDFs (drawings, specs, conditions of tendering, schedules)
           </label>
-          <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md" multiple
-            onChange={e => setFiles(Array.from(e.target.files || []))}
-            disabled={running} style={{ width: '100%', fontSize: 13 }} />
+
+          <div
+            onDragOver={e => { e.preventDefault(); if (!running) setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragging(false)
+              if (!running && e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files)
+            }}
+            style={{
+              border: `1.5px dashed ${dragging ? 'var(--pi-orange)' : 'var(--border-color)'}`,
+              background: dragging ? 'rgba(232,91,26,.06)' : 'transparent',
+              borderRadius: 8, padding: '14px 16px', textAlign: 'center'
+            }}
+          >
+            <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md" multiple
+              onChange={e => addFiles(e.target.files || [])}
+              disabled={running} style={{ display: 'none' }} id="tender-file-input" />
+            <label htmlFor="tender-file-input" className="btn btn-secondary"
+              style={{ cursor: running ? 'not-allowed' : 'pointer', display: 'inline-block' }}>
+              {files.length ? '+ Add more documents' : 'Choose documents'}
+            </label>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+              or drag them in — add as many as you like, in as many goes as you like
+            </div>
+          </div>
+
           {files.length > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-              {files.length} file{files.length === 1 ? '' : 's'} selected
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                {files.length} document{files.length === 1 ? '' : 's'} · {fileSize(totalBytes)}
+              </div>
+              <div style={{ display: 'grid', gap: 4 }}>
+                {files.map((f, i) => (
+                  <div key={`${f.name}-${f.size}-${i}`} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5,
+                    padding: '6px 10px', borderRadius: 6,
+                    background: f.size === 0 ? '#fdeaea' : 'var(--bg-secondary)'
+                  }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.name}
+                    </span>
+                    <span style={{ color: f.size === 0 ? '#a33' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {f.size === 0 ? '0 bytes — not downloaded' : fileSize(f.size)}
+                    </span>
+                    {!running && (
+                      <button onClick={() => removeFile(i)} title="Remove"
+                        style={{
+                          border: 'none', background: 'transparent', cursor: 'pointer',
+                          color: 'var(--text-muted)', fontSize: 15, lineHeight: 1, padding: '0 2px'
+                        }}>×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+
+          {/* Caught at selection, not after a failed run — this is the Dropbox
+              placeholder problem, and waiting until Generate wastes a minute. */}
+          {emptyFiles.length > 0 && (
+            <div style={{ marginTop: 10, padding: 12, background: '#fdf6e3', borderRadius: 6, fontSize: 12.5, lineHeight: 1.6 }}>
+              <strong>{emptyFiles.length} file{emptyFiles.length === 1 ? '' : 's'} {emptyFiles.length === 1 ? 'is' : 'are'} 0 bytes.</strong>{' '}
+              Dropbox and iCloud keep files online-only, so the name is on your Mac but the file
+              isn't. In Finder, right-click the tender folder → <strong>Make Available Offline</strong>,
+              wait for the green tick, then remove {emptyFiles.length === 1 ? 'it' : 'them'} above and
+              add {emptyFiles.length === 1 ? 'it' : 'them'} again.
+            </div>
+          )}
+
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
             Word and Excel files can't be read directly — print them to PDF first. Anything that
             can't be read is listed in the debrief rather than quietly skipped.
           </div>
