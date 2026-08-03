@@ -206,7 +206,7 @@ export default function PeopleModule({ onSaveStateChange }) {
       setDetailsImportMsg({
         text: (n ? `Updated ${n} staff member${n === 1 ? '' : 's'} from the file.` : 'Nothing needed changing — the portal already matches the file.')
           + (result.suppliersCreated?.length ? ` Added ${result.suppliersCreated.length} new employer${result.suppliersCreated.length === 1 ? '' : 's'}: ${result.suppliersCreated.join(', ')}.` : '')
-          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? " isn't" : "s aren't"} in the portal — use "Import staff (.csv)" to add ${result.unmatched.length === 1 ? 'them' : 'them'}: ${result.unmatched.join(', ')}.` : '')
+          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? " isn't" : "s aren't"} in the portal — use "Add new staff (.csv)" to add ${result.unmatched.length === 1 ? 'them' : 'them'}: ${result.unmatched.join(', ')}.` : '')
           + (result.hireTypeUnreadable?.length ? ` Couldn't read the hire type for: ${result.hireTypeUnreadable.join(', ')}.` : '')
           + (result.startDateIgnored?.length ? ` Skipped a start date that isn't a date: ${result.startDateIgnored.join(', ')}.` : ''),
         ok: true,
@@ -278,7 +278,7 @@ export default function PeopleModule({ onSaveStateChange }) {
             <>
               <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
               <button className="btn btn-secondary" onClick={() => fileRef.current?.click()} disabled={importing}>
-                {importing ? 'Importing…' : 'Import staff (.csv)'}
+                {importing ? 'Adding…' : 'Add new staff (.csv)'}
               </button>
             </>
           )}
@@ -463,7 +463,7 @@ export default function PeopleModule({ onSaveStateChange }) {
               <>
                 <input ref={detailsFileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportDetailsFile} />
                 <button className="btn btn-secondary btn-sm" onClick={() => detailsFileRef.current?.click()} disabled={detailsImporting}>
-                  {detailsImporting ? 'Importing…' : 'Import staff details (.csv)'}
+                  {detailsImporting ? 'Updating…' : 'Update details from (.csv)'}
                 </button>
               </>
             )}

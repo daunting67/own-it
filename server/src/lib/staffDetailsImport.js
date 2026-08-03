@@ -20,6 +20,20 @@ const { normaliseHireType } = require('./staffImport')
 // of empty Start Dates must not wipe start dates the portal already knows.
 const clean = v => String(v ?? '').replace(/\s+/g, ' ').trim()
 
+// Numbers (and Excel) treat an NZ mobile as a number and drop its leading zero,
+// so "0273693047" comes back as "273693047". Every NZ mobile is 02x, so a 9- or
+// 10-digit value starting with 2 is missing its zero — restore it rather than
+// importing an unusable number.
+function normaliseMobile(value) {
+  const v = clean(value)
+  if (/^2\d{8,9}$/.test(v.replace(/\s/g, ''))) return '0' + v
+  return v
+}
+
+// Compare on digits alone, so a pure formatting difference ("0211222817" vs
+// "021 122 2817") isn't mistaken for a real edit and rewritten every import.
+const digits = v => String(v ?? '').replace(/\D/g, '')
+
 function parseDetailsCsv(text) {
   const { headers, records } = parseCsv(text)
   const find = re => headers.find(h => re.test(clean(h)))
@@ -38,7 +52,7 @@ function parseDetailsCsv(text) {
       name: clean(r[cols.name]),
       hireTypeRaw: cols.hireType ? clean(r[cols.hireType]) : '',
       position: cols.position ? clean(r[cols.position]) : '',
-      mobile: cols.mobile ? clean(r[cols.mobile]) : '',
+      mobile: cols.mobile ? normaliseMobile(r[cols.mobile]) : '',
       email: cols.email ? clean(r[cols.email]) : '',
       supplierName: cols.supplier ? clean(r[cols.supplier]) : '',
       startDate: cols.startDate ? clean(r[cols.startDate]) : '',
@@ -87,7 +101,7 @@ async function importStaffDetails(csvText, deps) {
     }
 
     if (row.position && row.position !== existing.position) updates.position = row.position
-    if (row.mobile && row.mobile !== existing.mobile) updates.mobile = row.mobile
+    if (row.mobile && digits(row.mobile) !== digits(existing.mobile)) updates.mobile = row.mobile
     if (row.email && row.email !== existing.email) updates.email = row.email
 
     if (row.startDate) {
