@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
-import { calcProgress, markChecklistComplete } from '../../lib/checklists'
+import { calcProgress, markChecklistComplete, HIRE_TYPES, canonicalHireType } from '../../lib/checklists'
 import StaffCard from './StaffCard'
 import StaffModal from './StaffModal'
 import AddStaffModal from './AddStaffModal'
 import SiteManager from './SiteManager'
 import ProcessesModule from '../Processes/ProcessesModule'
 
-const HIRE_TYPES = ['All', 'Direct hire', 'Labour hire', 'Contractor', 'Casual']
+const HIRE_FILTERS = ['All', ...HIRE_TYPES]
 
 // A row that exists for FastField's benefit, not a real employee — FastField's
 // staff lookup list needs it so a form can offer a free-text field when the
@@ -194,11 +194,13 @@ export default function PeopleModule({ onSaveStateChange }) {
     try {
       const text = await file.text()
       const result = await api.importStaffDetails(text)
-      const n = result.hireTypesUpdated
+      const n = result.updated
       setDetailsImportMsg({
-        text: (n ? `Updated hire type for ${n} staff member${n === 1 ? '' : 's'}.` : 'No hire types needed changing — the file already matches.')
-          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? '' : 's'} didn't match anyone: ${result.unmatched.join(', ')}.` : '')
-          + (result.unreadable?.length ? ` Couldn't read the hire type for: ${result.unreadable.join(', ')}.` : ''),
+        text: (n ? `Updated ${n} staff member${n === 1 ? '' : 's'} from the file.` : 'Nothing needed changing — the portal already matches the file.')
+          + (result.suppliersCreated?.length ? ` Added ${result.suppliersCreated.length} new employer${result.suppliersCreated.length === 1 ? '' : 's'}: ${result.suppliersCreated.join(', ')}.` : '')
+          + (result.unmatched?.length ? ` ${result.unmatched.length} name${result.unmatched.length === 1 ? " isn't" : "s aren't"} in the portal — use "Import staff (.csv)" to add ${result.unmatched.length === 1 ? 'them' : 'them'}: ${result.unmatched.join(', ')}.` : '')
+          + (result.hireTypeUnreadable?.length ? ` Couldn't read the hire type for: ${result.hireTypeUnreadable.join(', ')}.` : '')
+          + (result.startDateIgnored?.length ? ` Skipped a start date that isn't a date: ${result.startDateIgnored.join(', ')}.` : ''),
         ok: true,
       })
       const fresh = await api.getStaff()
@@ -224,7 +226,7 @@ export default function PeopleModule({ onSaveStateChange }) {
   // genuinely mid-onboarding.
   const visible = staff.filter(m => {
     if (calcProgress(m.checklist) === 100) return false
-    if (filter !== 'All' && m.hireType !== filter) return false
+    if (filter !== 'All' && canonicalHireType(m.hireType) !== filter) return false
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -233,7 +235,7 @@ export default function PeopleModule({ onSaveStateChange }) {
   // deliberately hides completed people, so this is the only place to find,
   // edit, or remove someone once they're done (e.g. staff who've left).
   const allVisible = sortByFirstName(staff.filter(m => {
-    if (filter !== 'All' && m.hireType !== filter) return false
+    if (filter !== 'All' && canonicalHireType(m.hireType) !== filter) return false
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   }))
@@ -287,7 +289,7 @@ export default function PeopleModule({ onSaveStateChange }) {
         <div className="card" style={{ padding: 16, marginBottom: 20 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Check hire types for the {reviewBatch.length} people just imported</div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-            A CSV can't always say for certain — rows marked <span style={{ color: 'var(--warning)', fontWeight: 700 }}>not read from the file</span> defaulted to Direct hire and are worth a look.
+            A CSV can't always say for certain — rows marked <span style={{ color: 'var(--warning)', fontWeight: 700 }}>not read from the file</span> defaulted to Direct Hire and are worth a look.
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
             {reviewBatch.map(p => (
@@ -302,7 +304,7 @@ export default function PeopleModule({ onSaveStateChange }) {
                   value={p.hireType}
                   onChange={e => setReviewHireType(p.id, e.target.value)}
                 >
-                  {HIRE_TYPES.slice(1).map(t => <option key={t}>{t}</option>)}
+                  {HIRE_TYPES.map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
             ))}
@@ -377,7 +379,7 @@ export default function PeopleModule({ onSaveStateChange }) {
               onChange={e => setSearch(e.target.value)}
             />
             <div style={{ display: 'flex', gap: 4 }}>
-              {HIRE_TYPES.map(t => (
+              {HIRE_FILTERS.map(t => (
                 <button
                   key={t}
                   className={`btn btn-sm ${filter === t ? 'btn-primary' : 'btn-secondary'}`}
@@ -414,7 +416,7 @@ export default function PeopleModule({ onSaveStateChange }) {
               onChange={e => setSearch(e.target.value)}
             />
             <div style={{ display: 'flex', gap: 4 }}>
-              {HIRE_TYPES.map(t => (
+              {HIRE_FILTERS.map(t => (
                 <button
                   key={t}
                   className={`btn btn-sm ${filter === t ? 'btn-primary' : 'btn-secondary'}`}
@@ -466,14 +468,14 @@ export default function PeopleModule({ onSaveStateChange }) {
           )}
 
           <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 12 }}>
-            The same nine fields as the staff-list.csv and the "+ Add staff member" form, in the same order — download the CSV, edit it, then re-upload here to bring your changes back in.
+            The same seven columns as the staff-list.csv, in the same order — download it, edit it, then re-upload here to bring your changes back in. Site and Role aren't on this list; they live on each person's record.
           </div>
 
           <div className="card" style={{ overflowX: 'auto', padding: 12 }}>
-            <table className="table-compact" style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
+            <table className="table-compact" style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role'].map(h => (
+                  {['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Employer / Supplier', 'Start Date'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '6px 10px', borderBottom: '2px solid var(--border)' }}>{h}</th>
                   ))}
                 </tr>
@@ -482,14 +484,12 @@ export default function PeopleModule({ onSaveStateChange }) {
                 {allVisible.map(m => (
                   <tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(m)}>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.name}</td>
-                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.hireType}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{canonicalHireType(m.hireType)}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.position || '—'}</td>
-                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.site?.name || '—'}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.mobile || '—'}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.email || '—'}</td>
-                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.startDate || '—'}</td>
                     <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.supplier?.name || '—'}</td>
-                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.role || '—'}</td>
+                    <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{m.startDate || '—'}</td>
                   </tr>
                 ))}
               </tbody>

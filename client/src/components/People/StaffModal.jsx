@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
-import { calcProgress, getStatus, getProgressCls, hireBadgeClass, getTeammateItem, getPayrollItem, markChecklistComplete } from '../../lib/checklists'
+import { calcProgress, getStatus, getProgressCls, hireBadgeClass, getTeammateItem, getPayrollItem, markChecklistComplete, HIRE_TYPES, canonicalHireType, isLabourHire } from '../../lib/checklists'
 
-const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -26,7 +25,7 @@ function IDCard({ member }) {
         <div className="id-card-details">
           <div className="id-card-name">{member.name}</div>
           <div className="id-card-role">{member.position || '—'}</div>
-          <div className="id-card-hire">{member.hireType}</div>
+          <div className="id-card-hire">{canonicalHireType(member.hireType)}</div>
           <div className="id-card-mobile">{member.mobile || '—'}</div>
         </div>
       </div>
@@ -37,20 +36,20 @@ function IDCard({ member }) {
 function TeammatePanel({ member }) {
   const [copied, setCopied] = useState(false)
   const rateInfo = (() => {
-    if (member.hireType !== 'Labour hire' || !member.supplier || !member.role) return null
+    if (!isLabourHire(member.hireType) || !member.supplier || !member.role) return null
     const rates = member.supplier.rates || []
     return rates.find(r => r.role?.toLowerCase() === member.role?.toLowerCase()) || null
   })()
 
   const text = [
     `Name: ${member.name}`,
-    `Hire type: ${member.hireType}`,
+    `Hire type: ${canonicalHireType(member.hireType)}`,
     `Position: ${member.position || '—'}`,
     `Site: ${member.site?.name || '—'}`,
     `Mobile: ${member.mobile || '—'}`,
     `Email: ${member.email || '—'}`,
     `Start date: ${fmtDate(member.startDate)}`,
-    member.hireType === 'Labour hire' ? `Supplier: ${member.supplier?.name || '—'}` : '',
+    isLabourHire(member.hireType) ? `Supplier: ${member.supplier?.name || '—'}` : '',
     rateInfo ? `\nRate card (${rateInfo.role}):\n  Ordinary: $${rateInfo.ordinary}/hr` : '',
   ].filter(Boolean).join('\n')
 
@@ -85,7 +84,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
 
   function detailsFrom(m) {
     return {
-      hireType: m.hireType || 'Direct hire',
+      hireType: canonicalHireType(m.hireType) || 'Direct Hire',
       position: m.position || '',
       siteId: m.siteId || '',
       mobile: m.mobile || '',
@@ -148,7 +147,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
   }
 
   const rateCard = (() => {
-    if (member.hireType !== 'Labour hire' || !member.supplier || !member.role) return null
+    if (!isLabourHire(member.hireType) || !member.supplier || !member.role) return null
     const rates = member.supplier.rates || []
     return rates.find(r => r.role?.toLowerCase() === member.role?.toLowerCase()) || null
   })()
@@ -164,7 +163,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
                 {member.position || 'No position'} · {member.site?.name || 'No site'}
               </div>
             </div>
-            <span className={`badge ${hireBadgeClass(member.hireType)}`}>{member.hireType}</span>
+            <span className={`badge ${hireBadgeClass(member.hireType)}`}>{canonicalHireType(member.hireType)}</span>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {saving && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Saving...</span>}
@@ -193,12 +192,12 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
           {teammateItem?.done && (
             <div className="banner banner-success">✓ Teammate profile created.</div>
           )}
-          {member.hireType === 'Labour hire' && payrollItem && !payrollItem.done && (
+          {isLabourHire(member.hireType) && payrollItem && !payrollItem.done && (
             <div className="banner banner-warning">
               ⚠️ Payroll has not been notified of this new starter.
             </div>
           )}
-          {member.hireType === 'Labour hire' && !member.supplierId && (
+          {isLabourHire(member.hireType) && !member.supplierId && (
             <div className="banner banner-warning">
               ⚠️ No supplier assigned. Rate card and payroll notification unavailable until a supplier is set.
             </div>

@@ -1,4 +1,4 @@
-import { calcProgress, getStatus, getProgressCls, hireBadgeClass } from '../../lib/checklists'
+import { calcProgress, getStatus, getProgressCls, hireBadgeClass, canonicalHireType } from '../../lib/checklists'
 
 export default function StaffCard({ member, onClick }) {
   const pct = calcProgress(member.checklist)
@@ -16,7 +16,7 @@ export default function StaffCard({ member, onClick }) {
             {member.site && <span>{member.site.name}</span>}
           </div>
         </div>
-        <span className={`badge ${hireBadgeClass(member.hireType)}`}>{member.hireType}</span>
+        <span className={`badge ${hireBadgeClass(member.hireType)}`}>{canonicalHireType(member.hireType)}</span>
       </div>
       <div className="staff-progress">
         <div className="progress-label">

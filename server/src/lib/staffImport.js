@@ -14,7 +14,10 @@
 
 const { parseCsv } = require('./plantImport')
 
-const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
+// Spelled as Tony's master staff-list.csv and FastField's staff lookup list
+// both spell them (capital H). normaliseHireType is case-insensitive, so rows
+// stored under the older "Direct hire" spelling still resolve.
+const HIRE_TYPES = ['Direct Hire', 'Labour Hire', 'Contractor', 'Casual']
 
 const header = (headers, ...patterns) =>
   headers.find(h => patterns.some(p => p.test(String(h || ''))))
@@ -31,10 +34,10 @@ function normaliseHireType(raw) {
   // actually uses — checked in an order where the more specific word wins
   // ("contract" alone could mean either contractor or a direct-hire employment
   // contract, so it's checked after the unambiguous terms).
-  if (/labou?r/.test(value)) return 'Labour hire'
+  if (/labou?r/.test(value)) return 'Labour Hire'
   if (/casual|temp/.test(value)) return 'Casual'
   if (/contract/.test(value)) return 'Contractor'
-  if (/direct|perm|paye|employee|staff/.test(value)) return 'Direct hire'
+  if (/direct|perm|paye|employee|staff/.test(value)) return 'Direct Hire'
   return null
 }
 
@@ -43,7 +46,7 @@ function parseStaffCsv(text) {
   if (records.length === 0) {
     // A bare list of names, one per line, with no header row.
     return [...new Set(text.split(/\r?\n/).map(l => l.trim()).filter(Boolean))]
-      .map(name => ({ name, hireType: 'Direct hire', hireTypeGuessed: true, position: '', mobile: '', email: '', siteName: '', supplierName: '' }))
+      .map(name => ({ name, hireType: 'Direct Hire', hireTypeGuessed: true, position: '', mobile: '', email: '', siteName: '', supplierName: '' }))
   }
 
   // Same ordering rule as any name column detector: first/last must be found
@@ -70,7 +73,7 @@ function parseStaffCsv(text) {
     const recognisedHireType = normaliseHireType(value(record, hireCol))
     return {
       name,
-      hireType: recognisedHireType || 'Direct hire',
+      hireType: recognisedHireType || 'Direct Hire',
       // True whenever this row's hire type was a guess rather than something
       // the CSV actually said — no hire-type column found, or a value that
       // didn't match anything recognisable — so the import summary can point

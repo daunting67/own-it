@@ -9,6 +9,11 @@
 // construction, and Tony can download it any time as a plain export.
 
 const db = require('./supabase')
+const { normaliseHireType } = require('./staffImport')
+
+// Falls back to the raw value rather than blanking it, so an unrecognised hire
+// type shows up in the CSV to be noticed and fixed, not silently dropped.
+const canonicalHireType = v => normaliseHireType(v) || v || ''
 
 const BUCKET = 'people-config'
 const PATH = 'staff-list.csv'
@@ -52,18 +57,20 @@ function sortStaffRows(rows) {
   })
 }
 
-// These nine columns, in this order, are the agreed shape of a staff record —
-// the same set and order appears in the Staff Details List table and on the
-// "+ Add staff member" form, so the three can never disagree about what a
-// person's details are.
+// These seven columns, in this order, are Tony's master format (taken from the
+// spreadsheet he maintains) and the Staff Details List mirrors them exactly.
+// Site and Role are deliberately NOT here — they stay editable on a person's
+// record because Site drives that site's inductions on the onboarding checklist
+// and Role looks up a labour-hire rate card, but they are not part of the list.
+// Hire Type is written canonically ("Direct Hire") regardless of the casing a
+// row happens to be stored under, so the CSV can never disagree with the sheet.
 function buildStaffCsv(rows) {
-  const headers = ['Full Name', 'Hire Type', 'Position', 'Site', 'Mobile', 'Email', 'Start Date', 'Employer / Supplier', 'Role']
+  const headers = ['Full Name', 'Hire Type', 'Position', 'Mobile', 'Email', 'Employer / Supplier', 'Start Date']
   const lines = [headers.join(',')]
   for (const row of sortStaffRows(rows.filter(r => isComplete(r.checklist)))) {
     lines.push([
-      row.name, row.hireType, row.position, row.site?.name || '',
-      row.mobile, row.email, row.startDate,
-      row.supplier?.name || '', row.role || '',
+      row.name, canonicalHireType(row.hireType), row.position,
+      row.mobile, row.email, row.supplier?.name || '', row.startDate,
     ].map(csvEscape).join(','))
   }
   return lines.join('\n') + '\n'

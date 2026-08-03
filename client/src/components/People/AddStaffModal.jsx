@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
-const HIRE_TYPES = ['Direct hire', 'Labour hire', 'Contractor', 'Casual']
+import { HIRE_TYPES } from '../../lib/checklists'
 
 export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
   const [form, setForm] = useState({
-    name: '', hireType: 'Direct hire', siteId: '', position: '',
+    name: '', hireType: 'Direct Hire', siteId: '', position: '',
     mobile: '', email: '', startDate: '', supplierId: '', role: ''
   })
   const [saving, setSaving] = useState(false)

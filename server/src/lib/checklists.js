@@ -1,5 +1,5 @@
 const TEMPLATES = {
-  'Direct hire': [
+  'Direct Hire': [
     { section: 'Pre-start', items: [
       { label: 'Offer letter sent', done: false },
       { label: 'Offer letter signed & returned', done: false },
@@ -38,7 +38,7 @@ const TEMPLATES = {
       { label: 'ID card issued to worker', done: false },
     ]},
   ],
-  'Labour hire': [
+  'Labour Hire': [
     { section: 'Pre-start', items: [
       { label: 'Confirmation from agency received', done: false },
       { label: 'Right to work verified', done: false },
@@ -127,8 +127,12 @@ const TEMPLATES = {
   ],
 }
 
+// Case-insensitive lookup: rows imported before the "Direct Hire" spelling was
+// settled are stored as "Direct hire", and a miss here would silently hand back
+// an EMPTY checklist — which reads as 0% onboarding for a real employee.
 function buildChecklist(hireType) {
-  const template = TEMPLATES[hireType]
+  const key = Object.keys(TEMPLATES).find(t => t.toLowerCase() === String(hireType || '').trim().toLowerCase())
+  const template = key ? TEMPLATES[key] : null
   if (!template) return []
   return template.map(s => ({ section: s.section, items: s.items.map(i => ({ ...i })) }))
 }

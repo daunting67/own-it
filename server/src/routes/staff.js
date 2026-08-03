@@ -115,16 +115,29 @@ router.post('/import-details', requireAdmin, async (req, res) => {
   const csv = String(req.body?.csv || '')
   if (!csv.trim()) return res.status(400).json({ error: 'No CSV content received' })
   if (csv.length > 2 * 1024 * 1024) return res.status(400).json({ error: 'CSV is too large (2MB limit)' })
-  const { data: staffRows } = await db.from('Staff').select('id,name,hireType')
+  const [{ data: staffRows }, { data: suppliers }] = await Promise.all([
+    db.from('Staff').select('id,name,hireType,position,mobile,email,startDate,supplierId'),
+    db.from('Supplier').select('id,name'),
+  ])
   let result
   try {
-    // Hire type is written straight to the table here rather than going
-    // through PATCH: nothing else about the person is changing, and the
-    // checklist must NOT be rebuilt just because someone's classification was
-    // corrected in the spreadsheet (that would wipe real onboarding progress).
-    result = await importStaffDetails(csv, staffRows || [], (id, hireType) =>
-      db.from('Staff').update({ hireType, updatedAt: new Date().toISOString() }).eq('id', id)
-    )
+    result = await importStaffDetails(csv, {
+      staffRows: staffRows || [],
+      suppliers: suppliers || [],
+      // Written straight to the table rather than going through PATCH: the
+      // checklist must NOT be rebuilt just because details were corrected in a
+      // spreadsheet (that would wipe real onboarding progress).
+      applyStaff: (id, updates) =>
+        db.from('Staff').update({ ...updates, updatedAt: new Date().toISOString() }).eq('id', id),
+      // An employer named in the CSV that isn't a Supplier yet becomes one, so
+      // Employer / Supplier stays a single properly linked field — and shows up
+      // in Payroll, where a rate card can be added to it later.
+      createSupplier: async (name) => {
+        const { data } = await db.from('Supplier')
+          .insert({ id: randomUUID(), name, rates: [] }).select('id,name').single()
+        return data
+      },
+    })
   } catch (err) {
     return res.status(400).json({ error: err.message })
   }

@@ -22,9 +22,23 @@ export function getProgressCls(pct) {
   return ''
 }
 
+// The four hire types, spelled the way Tony's master staff-list.csv and
+// FastField's staff lookup list both spell them (capital H). Anything stored
+// with different casing — every row imported before this spelling was settled
+// says "Direct hire" — still resolves, so nothing breaks while the data
+// catches up. Always display/compare through canonicalHireType, never raw.
+export const HIRE_TYPES = ['Direct Hire', 'Labour Hire', 'Contractor', 'Casual']
+
+export function canonicalHireType(hireType) {
+  const v = String(hireType || '').trim().toLowerCase()
+  return HIRE_TYPES.find(t => t.toLowerCase() === v) || hireType || ''
+}
+
+export const isLabourHire = hireType => canonicalHireType(hireType) === 'Labour Hire'
+
 export function hireBadgeClass(hireType) {
-  const map = { 'Direct hire': 'badge-direct', 'Labour hire': 'badge-labour', Contractor: 'badge-contractor', Casual: 'badge-casual' }
-  return map[hireType] || 'badge-muted'
+  const map = { 'Direct Hire': 'badge-direct', 'Labour Hire': 'badge-labour', Contractor: 'badge-contractor', Casual: 'badge-casual' }
+  return map[canonicalHireType(hireType)] || 'badge-muted'
 }
 
 export function getTeammateItem(checklist) {
