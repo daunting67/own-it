@@ -171,6 +171,15 @@ export default function PeopleModule({ onSaveStateChange }) {
     return true
   })
 
+  // Every staff member regardless of onboarding status — the tracker above
+  // deliberately hides completed people, so this is the only place to find,
+  // edit, or remove someone once they're done (e.g. staff who've left).
+  const allVisible = staff.filter(m => {
+    if (filter !== 'All' && m.hireType !== filter) return false
+    if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
   // "Total staff" counts the same people as the exported staff-list.csv
   // (checklist fully complete) — not every row in the Staff table — so the
   // number on this page can never disagree with what's in the download.
@@ -286,7 +295,7 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {[['tracker', 'Onboarding tracker'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
+        {[['tracker', 'Onboarding tracker'], ['all', 'All staff'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -323,6 +332,43 @@ export default function PeopleModule({ onSaveStateChange }) {
               </div>
             : <div className="staff-grid">
                 {visible.map(m => (
+                  <StaffCard key={m.id} member={m} onClick={() => setSelected(m)} />
+                ))}
+              </div>
+          }
+        </>
+      )}
+
+      {tab === 'all' && (
+        <>
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              className="form-input"
+              style={{ maxWidth: 220 }}
+              placeholder="Search staff..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: 4 }}>
+              {HIRE_TYPES.map(t => (
+                <button
+                  key={t}
+                  className={`btn btn-sm ${filter === t ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setFilter(t)}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {allVisible.length === 0
+            ? <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>
+                {staff.length === 0 ? 'No staff added yet. Click "Add staff member" to get started.' : 'No staff match your filters.'}
+              </div>
+            : <div className="staff-grid">
+                {allVisible.map(m => (
                   <StaffCard key={m.id} member={m} onClick={() => setSelected(m)} />
                 ))}
               </div>
