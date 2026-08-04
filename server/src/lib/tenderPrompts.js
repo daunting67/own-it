@@ -13,35 +13,75 @@
 // rather than silently dropped.
 
 const { PDFDocument } = require('pdf-lib')
+const mammoth = require('mammoth')
+const ExcelJS = require('exceljs')
 
 const MODEL = 'claude-opus-5'
 
 // Per-request limits. The API accepts a 32MB request and 600 PDF pages on a
 // 1M-context model; these sit under both so a single oversized document is
-// reported rather than failing the whole run.
-const MAX_PDF_BYTES = 20 * 1024 * 1024
+// reported rather than failing the whole run. Applied to every binary format
+// we parse (PDF, docx, xlsx), not just PDF — a tender pack can't control
+// what format the client sends, so the same guard has to cover all of them.
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 const MAX_PDF_PAGES = 400
 const MAX_TEXT_CHARS = 400_000
 
-// File types we can actually read. Anything else is reported to the user with
-// a reason — a debrief that silently skipped the specification is worse than
-// no debrief at all.
+// File types we can actually read. Real tender packs arrive in whatever
+// format the client used — P&I has no control over that — so .docx and
+// .xlsx are read directly (extracted to text/CSV-style rows below), not
+// pushed back on the user as a "convert to PDF first" step. Anything else
+// is reported with a reason — a debrief that silently skipped the
+// specification is worse than no debrief at all.
 const PDF = /\.pdf$/i
 const TEXT = /\.(txt|md|csv|tsv|log)$/i
+const DOCX = /\.docx$/i
+const XLSX = /\.xlsx$/i
 
 function isReadable(filename) {
-  return PDF.test(filename) || TEXT.test(filename)
+  return PDF.test(filename) || TEXT.test(filename) || DOCX.test(filename) || XLSX.test(filename)
 }
 
-// Why we cannot read this one, in words Tony can act on.
+// Why we cannot read this one, in words Tony can act on. Only the OLD binary
+// Office formats (.doc, .xls) and other office-suite formats land here now —
+// .docx/.xlsx are read directly.
 function unreadableReason(filename) {
-  if (/\.(docx?|rtf|odt)$/i.test(filename)) return 'Word document — save or print it to PDF and re-upload'
-  if (/\.(xlsx?|ods)$/i.test(filename)) return 'Spreadsheet — export the sheet to PDF and re-upload'
+  if (/\.(doc|rtf|odt)$/i.test(filename)) return 'Older Word format — re-save as .docx or PDF and re-upload'
+  if (/\.(xls|ods)$/i.test(filename)) return 'Older Excel format — re-save as .xlsx or PDF and re-upload'
   if (/\.(pptx?|key)$/i.test(filename)) return 'Presentation — export to PDF and re-upload'
   if (/\.(zip|rar|7z)$/i.test(filename)) return 'Archive — unzip it and upload the documents inside'
   if (/\.(dwg|dxf|rvt)$/i.test(filename)) return 'CAD file — export the sheets to PDF and re-upload'
   if (/\.(jpe?g|png|tiff?|heic)$/i.test(filename)) return 'Image — combine the images into a PDF and re-upload'
   return 'Unsupported file type — convert it to PDF and re-upload'
+}
+
+// .xlsx -> plain text: one block per sheet, rows joined as comma-separated
+// values. Feeds into the same text pathway as .csv — no separate prompt
+// handling needed. Formula cells read their last-calculated result, not the
+// formula text; rich-text and hyperlink cells read their display text.
+async function extractXlsxText(buffer) {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+  const cellText = (v) => {
+    if (v === null || v === undefined) return ''
+    if (v instanceof Date) return v.toISOString().slice(0, 10)
+    if (typeof v === 'object') {
+      if (Array.isArray(v.richText)) return v.richText.map(r => r.text).join('')
+      if (v.result !== undefined) return String(v.result)
+      if (v.text !== undefined) return String(v.text)
+      return ''
+    }
+    return String(v)
+  }
+  const sheets = []
+  workbook.eachSheet(sheet => {
+    const rows = []
+    sheet.eachRow({ includeEmpty: false }, row => {
+      rows.push(row.values.slice(1).map(cellText).join(', '))
+    })
+    if (rows.length) sheets.push(`--- Sheet: ${sheet.name} ---\n${rows.join('\n')}`)
+  })
+  return sheets.join('\n\n')
 }
 
 async function pdfPageCount(buffer) {
@@ -144,15 +184,21 @@ async function digestDocument({ filename, buffer }) {
   const content = []
   let pages = null
   const isPdf = PDF.test(filename)
+  const isDocx = DOCX.test(filename)
+  const isXlsx = XLSX.test(filename)
+
+  // One size guard for every binary format we parse — a tender pack can't
+  // control what format the client sends, so this applies the same whether
+  // it's a PDF, a Word doc, or a spreadsheet.
+  if (buffer.length > MAX_DOCUMENT_BYTES) {
+    return {
+      filename,
+      read: false,
+      reason: `Too large to read in one pass (${Math.round(buffer.length / 1024 / 1024)}MB) — split it and re-upload`
+    }
+  }
 
   if (isPdf) {
-    if (buffer.length > MAX_PDF_BYTES) {
-      return {
-        filename,
-        read: false,
-        reason: `Too large to read in one pass (${Math.round(buffer.length / 1024 / 1024)}MB) — split it and re-upload`
-      }
-    }
     pages = await pdfPageCount(buffer)
     if (pages !== null && pages > MAX_PDF_PAGES) {
       return {
@@ -166,7 +212,25 @@ async function digestDocument({ filename, buffer }) {
       source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') }
     })
   } else {
-    const text = buffer.toString('utf8')
+    // .docx and .xlsx are extracted to plain text here and feed the exact
+    // same pathway as .txt/.csv below — one place handles the empty-content
+    // check and the length cap, whatever the source format was.
+    let text
+    if (isDocx) {
+      try {
+        text = (await mammoth.extractRawText({ buffer })).value
+      } catch (err) {
+        return { filename, read: false, reason: `Could not read this Word document (${err.message}) — try re-saving it as a fresh .docx or PDF and re-upload` }
+      }
+    } else if (isXlsx) {
+      try {
+        text = await extractXlsxText(buffer)
+      } catch (err) {
+        return { filename, read: false, reason: `Could not read this spreadsheet (${err.message}) — try re-saving it as a fresh .xlsx or PDF and re-upload` }
+      }
+    } else {
+      text = buffer.toString('utf8')
+    }
     if (!text.trim()) return { filename, read: false, reason: 'File contains no readable text' }
     content.push({
       type: 'text',

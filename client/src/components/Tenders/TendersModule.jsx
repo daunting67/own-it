@@ -342,7 +342,7 @@ function NewTender({ onFiled, onCancel }) {
 
         <div>
           <label style={labelStyle}>
-            Tender pack — PDFs (drawings, specs, conditions of tendering, schedules)
+            Tender pack — drawings, specs, conditions of tendering, schedules (PDF, Word or Excel)
           </label>
 
           <div
@@ -367,7 +367,7 @@ function NewTender({ onFiled, onCancel }) {
                 zero files landed. The genuinely-present-but-invisible
                 pattern below avoids that failure mode; visually identical
                 either way since the <label> is the only thing shown. */}
-            <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md" multiple
+            <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md,.docx,.xlsx" multiple
               onChange={e => addFiles(e.target.files || [])}
               disabled={running}
               style={{
@@ -428,8 +428,9 @@ function NewTender({ onFiled, onCancel }) {
           )}
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-            Word and Excel files can't be read directly — print them to PDF first. Anything that
-            can't be read is listed in the debrief rather than quietly skipped.
+            PDF, Word (.docx) and Excel (.xlsx) are all read directly — upload documents exactly
+            as the client sent them. Older .doc/.xls files need re-saving as .docx/.xlsx or PDF
+            first. Anything that can't be read is listed in the debrief rather than quietly skipped.
           </div>
         </div>
 
