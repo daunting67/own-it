@@ -359,42 +359,46 @@ function NewTender({ onFiled, onCancel }) {
               borderRadius: 8, padding: '14px 16px', textAlign: 'center'
             }}
           >
-            {/* NOT display:none — Safari has a known history of failing to
-                deliver a file selection back to a fully display:none file
-                input when it's triggered indirectly via a <label> click (no
-                error, the pick just silently doesn't register). Seen live:
-                a real PDF selected, Upload clicked, zero console errors,
-                zero files landed. The genuinely-present-but-invisible
-                pattern below avoids that failure mode; visually identical
-                either way since the <label> is the only thing shown.
-
-                NO accept ATTRIBUTE — deliberately. Two separate live
-                failures from it in one session: an extension-only list
-                greyed out every non-PDF file (including genuinely readable
-                ones), and after adding .docx/.xlsx to that list, Safari
-                still didn't recognise them as selectable. macOS's file
-                dialog maps `accept` extensions to its own UTI system before
-                Safari ever sees the pick, and that mapping has proven
-                unreliable here twice. `accept` is only ever a pre-filter
-                hint, never a security boundary, so removing it changes
-                nothing about what the server will actually process — every
-                file still goes through isReadable() server-side with a
-                clear per-file reason and a Remove & retry action if it's
-                not supported. Letting the OS show everything and validating
-                after selection is more reliable than trusting the OS to
-                pre-filter correctly. */}
+            {/* Two earlier attempts changed HOW this input was hidden
+                (display:none, then a clip-based visually-hidden pattern) on
+                the theory that Safari mishandles a fully display:none file
+                input reached via a <label>. Neither fixed it — the same
+                symptom (native picker completes, zero files land, ZERO
+                console output — not even an error) survived both. That
+                means the CSS hiding technique was never the actual
+                variable; the shared thing across every failed attempt was
+                triggering the input indirectly via <label htmlFor>. Safari
+                has known issues with label-activated hidden file inputs
+                specifically, independent of how the input is hidden.
+                Switched to the standard, most widely-compatible pattern
+                instead: a real <button> that calls .click() on the input
+                via a ref, inside a genuine user-gesture click handler. This
+                removes the label-activation mechanism entirely rather than
+                adjusting it a third time, so display:none is safe again —
+                it was never the problem when the input is opened this way.
+                Diagnostic logging added below (not the app's normal style)
+                because this bug has cost two blind guesses already; if it's
+                still wrong, next time there's real data instead of a third
+                theory. */}
             <input ref={fileInputRef} type="file" multiple
-              onChange={e => addFiles(e.target.files || [])}
-              disabled={running}
-              style={{
-                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
-                overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0
+              onChange={e => {
+                const picked = e.target.files
+                console.log('[tender-upload] input change fired, files:', picked?.length,
+                  picked ? Array.from(picked).map(f => `${f.name} (${f.size}b)`) : null)
+                addFiles(picked || [])
               }}
+              disabled={running}
+              style={{ display: 'none' }}
               id="tender-file-input" />
-            <label htmlFor="tender-file-input" className="btn btn-secondary"
-              style={{ cursor: running ? 'not-allowed' : 'pointer', display: 'inline-block' }}>
+            <button type="button" className="btn btn-secondary"
+              disabled={running}
+              onClick={() => {
+                console.log('[tender-upload] Choose documents clicked, calling input.click()')
+                fileInputRef.current?.click()
+              }}
+              style={{ cursor: running ? 'not-allowed' : 'pointer' }}>
               {files.length ? '+ Add more documents' : 'Choose documents'}
-            </label>
+            </button>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
               or drag them in — add as many as you like, in as many goes as you like
             </div>
