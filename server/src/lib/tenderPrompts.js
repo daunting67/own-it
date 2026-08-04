@@ -81,7 +81,11 @@ async function callClaude({ system, content, maxTokens, effort }) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Claude API error ${response.status}`)
+    // Keep the error type alongside the message — "Could not process PDF" alone
+    // gave no way to tell a content-processing rejection from an auth or rate
+    // limit problem when this showed up in a real run (Olsen Ave, 4 Aug 2026).
+    const detail = err.error?.type ? ` (${err.error.type})` : ''
+    throw new Error((err.error?.message || `Claude API error ${response.status}`) + detail)
   }
 
   const data = await response.json()
@@ -131,8 +135,9 @@ async function digestDocument({ filename, buffer }) {
 
   const content = []
   let pages = null
+  const isPdf = PDF.test(filename)
 
-  if (PDF.test(filename)) {
+  if (isPdf) {
     if (buffer.length > MAX_PDF_BYTES) {
       return {
         filename,
@@ -168,12 +173,32 @@ async function digestDocument({ filename, buffer }) {
     text: `The document above is the file "${filename}" from the tender pack. Produce the digest JSON as specified.`
   })
 
-  const digest = await callClaude({
-    system: DIGEST_SYSTEM,
-    content,
-    maxTokens: 8000,
-    effort: 'medium'
-  })
+  let digest
+  try {
+    digest = await callClaude({
+      system: DIGEST_SYSTEM,
+      content,
+      maxTokens: 8000,
+      effort: 'medium'
+    })
+  } catch (err) {
+    // A PDF that is structurally fine (opens cleanly, normal size, normal
+    // page count — checked all three above) can still be rejected by
+    // Claude's own PDF ingestion. Seen live on a CAD-plotted drawing sheet
+    // (Olsen Ave, 4 Aug 2026) that pdf-lib opened without complaint. The raw
+    // API message alone ("Could not process PDF") gives no next step, so a
+    // PDF-specific failure gets one: re-flattening through a different
+    // renderer (Preview's own PDF export) fixes internal-structure issues a
+    // permissive reader tolerates but Claude's ingestion doesn't.
+    if (isPdf) {
+      throw new Error(
+        `${err.message} — this PDF opened normally but was rejected by the AI's reader. ` +
+        `This can happen with CAD-exported/plotted drawings. Open it in Preview, ` +
+        `File → Export as PDF (or Print → Save as PDF), then re-upload the new copy.`
+      )
+    }
+    throw err
+  }
 
   return { filename, read: true, pages, ...digest }
 }
