@@ -168,17 +168,6 @@ function Bullets({ items, empty }) {
 /* ------------------------------------------------------------------ new tender */
 
 function NewTender({ onFiled, onCancel }) {
-  // TEMP diagnostic: if this logs twice for what should be one continuous
-  // New Tender session, the component is remounting between picks — which
-  // would explain "the browser captured file 2 correctly, but the list
-  // still only shows file 1": a remount resets useState([]) back to empty,
-  // so the second addFiles() genuinely starts from nothing, not a bug in
-  // the merge logic itself.
-  useEffect(() => {
-    console.log('[tender-upload] NewTender mounted')
-    return () => console.log('[tender-upload] NewTender UNmounted')
-  }, [])
-
   const fileInputRef = useRef(null)
   const [files, setFiles] = useState([])
   const [name, setName] = useState('')
@@ -196,21 +185,24 @@ function NewTender({ onFiled, onCancel }) {
   // every pick, which made a multi-folder pack impossible to assemble.
   // Dedupe on name+size so picking the same file twice doesn't upload it twice.
   function addFiles(incoming) {
-    // TEMP diagnostic: a live report showed the browser correctly capturing
-    // two separate files (confirmed via the onChange log) but the file list
-    // only ever showing one — meaning the loss happens somewhere between the
-    // input event and the rendered list. This logs the actual `prev` value
-    // the updater sees, which is the one thing not yet visible: if `prev` is
-    // empty on the second call despite the first having genuinely committed,
-    // that's state being reset (e.g. a remount), not a merge-logic bug.
-    console.log('[tender-upload] addFiles called with', Array.from(incoming).map(f => f.name))
+    // `incoming` is the input's live FileList (e.target.files), not a frozen
+    // snapshot. Diagnostics on a real failure showed the setFiles updater
+    // receiving an EMPTY result on every call, including the very first file
+    // ever added — the bug was never really about accumulation. React's
+    // functional setState updater isn't guaranteed to run at the exact
+    // moment setFiles is called; it can run slightly later. The very next
+    // line after setFiles clears the actual input (fileInputRef.current.value
+    // = ''), and because `incoming` references that same live input rather
+    // than a copy, by the time the (possibly-deferred) updater re-read
+    // `incoming` a second time, the input had already been cleared — so it
+    // saw nothing. Fix: read the files into a plain array exactly ONCE,
+    // synchronously, before anything else touches the input, and never
+    // reference `incoming` again after that.
+    const newFiles = Array.from(incoming)
     setFiles(prev => {
-      console.log('[tender-upload] setFiles updater sees prev:', prev.map(f => f.name))
       const key = f => `${f.name}|${f.size}`
       const seen = new Set(prev.map(key))
-      const merged = [...prev, ...Array.from(incoming).filter(f => !seen.has(key(f)))]
-      console.log('[tender-upload] merged result:', merged.map(f => f.name))
-      return merged
+      return [...prev, ...newFiles.filter(f => !seen.has(key(f)))]
     })
     // Clear the input so re-picking a file it already holds still fires change.
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -381,43 +373,19 @@ function NewTender({ onFiled, onCancel }) {
               borderRadius: 8, padding: '14px 16px', textAlign: 'center'
             }}
           >
-            {/* Two earlier attempts changed HOW this input was hidden
-                (display:none, then a clip-based visually-hidden pattern) on
-                the theory that Safari mishandles a fully display:none file
-                input reached via a <label>. Neither fixed it — the same
-                symptom (native picker completes, zero files land, ZERO
-                console output — not even an error) survived both. That
-                means the CSS hiding technique was never the actual
-                variable; the shared thing across every failed attempt was
-                triggering the input indirectly via <label htmlFor>. Safari
-                has known issues with label-activated hidden file inputs
-                specifically, independent of how the input is hidden.
-                Switched to the standard, most widely-compatible pattern
-                instead: a real <button> that calls .click() on the input
-                via a ref, inside a genuine user-gesture click handler. This
-                removes the label-activation mechanism entirely rather than
-                adjusting it a third time, so display:none is safe again —
-                it was never the problem when the input is opened this way.
-                Diagnostic logging added below (not the app's normal style)
-                because this bug has cost two blind guesses already; if it's
-                still wrong, next time there's real data instead of a third
-                theory. */}
+            {/* A real <button> calling .click() on the input via a ref,
+                rather than a <label htmlFor> — Safari has known issues with
+                label-activated hidden file inputs specifically, independent
+                of how the input is hidden. display:none is fine here since
+                the input is never reached via label activation. */}
             <input ref={fileInputRef} type="file" multiple
-              onChange={e => {
-                const picked = e.target.files
-                console.log('[tender-upload] input change fired, files:', picked?.length,
-                  picked ? Array.from(picked).map(f => `${f.name} (${f.size}b)`) : null)
-                addFiles(picked || [])
-              }}
+              onChange={e => addFiles(e.target.files || [])}
               disabled={running}
               style={{ display: 'none' }}
               id="tender-file-input" />
             <button type="button" className="btn btn-secondary"
               disabled={running}
-              onClick={() => {
-                console.log('[tender-upload] Choose documents clicked, calling input.click()')
-                fileInputRef.current?.click()
-              }}
+              onClick={() => fileInputRef.current?.click()}
               style={{ cursor: running ? 'not-allowed' : 'pointer' }}>
               {files.length ? '+ Add more documents' : 'Choose documents'}
             </button>
