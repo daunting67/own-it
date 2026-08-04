@@ -366,8 +366,24 @@ function NewTender({ onFiled, onCancel }) {
                 a real PDF selected, Upload clicked, zero console errors,
                 zero files landed. The genuinely-present-but-invisible
                 pattern below avoids that failure mode; visually identical
-                either way since the <label> is the only thing shown. */}
-            <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md,.docx,.xlsx" multiple
+                either way since the <label> is the only thing shown.
+
+                NO accept ATTRIBUTE — deliberately. Two separate live
+                failures from it in one session: an extension-only list
+                greyed out every non-PDF file (including genuinely readable
+                ones), and after adding .docx/.xlsx to that list, Safari
+                still didn't recognise them as selectable. macOS's file
+                dialog maps `accept` extensions to its own UTI system before
+                Safari ever sees the pick, and that mapping has proven
+                unreliable here twice. `accept` is only ever a pre-filter
+                hint, never a security boundary, so removing it changes
+                nothing about what the server will actually process — every
+                file still goes through isReadable() server-side with a
+                clear per-file reason and a Remove & retry action if it's
+                not supported. Letting the OS show everything and validating
+                after selection is more reliable than trusting the OS to
+                pre-filter correctly. */}
+            <input ref={fileInputRef} type="file" multiple
               onChange={e => addFiles(e.target.files || [])}
               disabled={running}
               style={{
