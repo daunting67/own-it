@@ -359,9 +359,22 @@ function NewTender({ onFiled, onCancel }) {
               borderRadius: 8, padding: '14px 16px', textAlign: 'center'
             }}
           >
+            {/* NOT display:none — Safari has a known history of failing to
+                deliver a file selection back to a fully display:none file
+                input when it's triggered indirectly via a <label> click (no
+                error, the pick just silently doesn't register). Seen live:
+                a real PDF selected, Upload clicked, zero console errors,
+                zero files landed. The genuinely-present-but-invisible
+                pattern below avoids that failure mode; visually identical
+                either way since the <label> is the only thing shown. */}
             <input ref={fileInputRef} type="file" accept=".pdf,.txt,.csv,.md" multiple
               onChange={e => addFiles(e.target.files || [])}
-              disabled={running} style={{ display: 'none' }} id="tender-file-input" />
+              disabled={running}
+              style={{
+                position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+                overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0
+              }}
+              id="tender-file-input" />
             <label htmlFor="tender-file-input" className="btn btn-secondary"
               style={{ cursor: running ? 'not-allowed' : 'pointer', display: 'inline-block' }}>
               {files.length ? '+ Add more documents' : 'Choose documents'}
