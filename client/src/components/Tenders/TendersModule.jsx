@@ -57,6 +57,103 @@ function Section({ title, children }) {
   )
 }
 
+const TAG_CLASS_STYLE = {
+  conflict: { bg: '#fdeaea', fg: '#a33', label: 'Conflict' },
+  applicable_clarification: { bg: '#fdf6e3', fg: '#a06a12', label: 'Review required' },
+  already_quantified: { bg: '#e8eefc', fg: '#2a4d9b', label: 'Already quantified' },
+  commercial_blanket: { bg: '#fdf6e3', fg: '#a06a12', label: 'Commercial review' }
+}
+
+function TagFindingCard({ group }) {
+  const primary = group[0]
+  const style = TAG_CLASS_STYLE[primary.classification] || { bg: 'var(--bg-secondary)', fg: 'var(--text-muted)', label: primary.classification }
+  return (
+    <div style={{ border: `1px solid ${style.fg}22`, borderRadius: 8, padding: '12px 14px', marginBottom: 10, background: style.bg }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: style.fg }}>
+          {group.map(f => `TAG ${f.tag_number}`).join(' + ')}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Pill bg={style.bg} fg={style.fg}>{style.label}</Pill>
+          <Pill bg="var(--bg-secondary)" fg="var(--text-muted)">
+            {primary.severity} · {Math.round((primary.confidence || 0) * 100)}% confidence
+          </Pill>
+        </div>
+      </div>
+      {group.map((f, i) => (
+        <div key={i} style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12.5, fontStyle: 'italic', color: 'var(--text-muted)', marginBottom: 2 }}>
+            TAG {f.tag_number} wording is in the standard register — see the TAG library.
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.6 }}>{f.reason}</div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}><strong>Recommended action:</strong> {f.recommended_action}</div>
+          {(f.evidence || []).map((e, j) => (
+            <div key={j} style={{ marginTop: 6, padding: '8px 10px', background: 'var(--bg-primary)', borderRadius: 6, fontSize: 12.5 }}>
+              <div style={{ color: 'var(--text-muted)', marginBottom: 3 }}>
+                {[f.filename, e.sheet_or_section, e.location].filter(Boolean).join(' · ') || f.filename}
+              </div>
+              <div style={{ fontStyle: 'italic' }}>&ldquo;{e.passage}&rdquo;</div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TagReviewSection({ tender }) {
+  const tr = tender.tagReview
+  if (!tr) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+        No TAG review was recorded for this tender (it may predate this feature, or the scan failed on every document).
+      </div>
+    )
+  }
+
+  const groups = tr.tagFindingGroups || []
+  const conflicts = groups.filter(g => g[0].classification === 'conflict')
+  const others = groups.filter(g => g[0].classification !== 'conflict')
+  const failed = (tr.documentCoverage || []).filter(d => d.status !== 'analysed')
+
+  return (
+    <div>
+      {conflicts.length > 0 && (
+        <div style={{
+          marginBottom: 14, padding: '10px 14px', borderRadius: 8, background: '#fdeaea',
+          color: '#a33', fontSize: 13, fontWeight: 600
+        }}>
+          ⚠️ {conflicts.length} unresolved conflict{conflicts.length > 1 ? 's' : ''} between the tender's requirements and our standard exclusions — review before submission.
+        </div>
+      )}
+      {groups.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No standard TAGs matched with reliable evidence in this pack.</div>
+      )}
+      {[...conflicts, ...others].map((g, i) => <TagFindingCard key={i} group={g} />)}
+
+      {tr.dayworksFindings?.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>Dayworks TAGs</div>
+          {tr.dayworksFindings.map((f, i) => <TagFindingCard key={i} group={[f]} />)}
+        </div>
+      )}
+
+      {tr.reviewGaps?.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 5 }}>Review gaps</div>
+          <Bullets items={tr.reviewGaps.map(g => `${g.topic} — ${g.reason}`)} empty="None." />
+        </div>
+      )}
+
+      {failed.length > 0 && (
+        <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>
+          TAG scan could not run on: {failed.map(d => `${d.file_name} (${d.notes || 'failed'})`).join('; ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Bullets({ items, empty }) {
   if (!items?.length) {
     return <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{empty}</div>
@@ -101,6 +198,21 @@ function NewTender({ onFiled, onCancel }) {
     setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
+  // Used from the failure list below — removing the file that just failed
+  // is a normal part of retrying, and having to scroll back up to the file
+  // picker to do it (the only way this worked before) reads as "you can't
+  // remove, only add, without starting over". Matches by filename since the
+  // per-document result doesn't carry the size dedupe key; first match is
+  // fine for the common case of one file per name in a pack.
+  function removeFailedFile(filename) {
+    setFiles(prev => {
+      const idx = prev.findIndex(f => f.name === filename)
+      return idx === -1 ? prev : prev.filter((_, i) => i !== idx)
+    })
+    setReadSoFar(prev => prev.filter(d => d.filename !== filename))
+    setError(null)
+  }
+
   const emptyFiles = files.filter(f => f.size === 0)
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
   const fileSize = (bytes) =>
@@ -114,6 +226,7 @@ function NewTender({ onFiled, onCancel }) {
     setError(null)
     setReadSoFar([])
     const digests = []
+    const tagResults = []
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -146,6 +259,16 @@ function NewTender({ onFiled, onCancel }) {
         const digest = await api.readTenderDocument(path)
         digests.push(digest)
         setReadSoFar([...digests])
+
+        setProgress(`Checking ${f.name} against our TAGs (${step})…`)
+        try {
+          const tagResult = await api.reviewTenderDocumentTags(path)
+          tagResults.push(tagResult)
+        } catch (err) {
+          // TAG review is a bonus on top of the debrief, not a blocker — a
+          // failed TAG scan on one document must not sink the whole tender.
+          tagResults.push({ filename: f.name, read: false, reason: err.message })
+        }
       }
 
       if (!digests.some(d => d.read)) {
@@ -163,7 +286,8 @@ function NewTender({ onFiled, onCancel }) {
         client: client.trim(),
         deadline: deadline.trim(),
         notes: notes.trim(),
-        digests
+        digests,
+        tagResults
       })
       onFiled(tender)
     } catch (err) {
@@ -317,13 +441,25 @@ function NewTender({ onFiled, onCancel }) {
       </div>
 
       {/* Stays visible after the run ends — the per-file reasons are the whole
-          diagnosis, and hiding them on failure left only a generic message. */}
+          diagnosis, and hiding them on failure left only a generic message.
+          Failed entries get their own remove action right here — this is
+          where the eye actually is after a failed run, and the only removal
+          path used to be scrolling back up to the file list above, which
+          read as "no way to remove without starting over". */}
       {readSoFar.length > 0 && (
-        <div style={{ marginTop: 18, fontSize: 12, display: 'grid', gap: 4 }}>
+        <div style={{ marginTop: 18, fontSize: 12, display: 'grid', gap: 6 }}>
           {readSoFar.map((d, i) => (
-            <div key={i} style={{ color: d.read ? 'var(--text)' : '#a33' }}>
-              {d.read ? '✓' : '⚠'} {d.filename}
-              {!d.read && <span style={{ color: 'var(--text-muted)' }}> — {d.reason}</span>}
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <span style={{ color: d.read ? 'var(--text)' : '#a33', flex: 1 }}>
+                {d.read ? '✓' : '⚠'} {d.filename}
+                {!d.read && <span style={{ color: 'var(--text-muted)' }}> — {d.reason}</span>}
+              </span>
+              {!d.read && !running && (
+                <button onClick={() => removeFailedFile(d.filename)}
+                  className="btn btn-secondary" style={{ fontSize: 11, padding: '3px 8px', flexShrink: 0 }}>
+                  Remove & retry
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -674,6 +810,11 @@ function Debrief({ tender, onBack, onUpdate, bidScoreThreshold }) {
               <Bullets items={d.questionsForTheClient} empty="None." />
             </div>
           )}
+        </Section>
+
+        {/* 7. tag review */}
+        <Section title="7. TAG Review">
+          <TagReviewSection tender={tender} />
         </Section>
 
         {/* our decision */}
