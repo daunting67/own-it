@@ -81,11 +81,19 @@ async function callClaude({ system, content, maxTokens, effort }) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
-    // Keep the error type alongside the message — "Could not process PDF" alone
-    // gave no way to tell a content-processing rejection from an auth or rate
-    // limit problem when this showed up in a real run (Olsen Ave, 4 Aug 2026).
+    const requestId = response.headers.get('request-id')
+    // A first fix attempt on a "Could not process PDF" rejection (Olsen Ave,
+    // 4 Aug 2026 — a corrupted embedded CMap, found via CG_PDF_VERBOSE)
+    // turned out NOT to be the actual cause: the re-rendered file was
+    // rejected identically. Rather than keep guessing client-side, log the
+    // FULL raw error body + request_id — Anthropic support can look up a
+    // request_id directly, which is more than the trimmed message alone
+    // ever gave us. Vercel function logs keep this even though the user
+    // only ever sees the short message below.
+    console.error('Claude API error, full body:', JSON.stringify(err), 'request-id:', requestId)
     const detail = err.error?.type ? ` (${err.error.type})` : ''
-    throw new Error((err.error?.message || `Claude API error ${response.status}`) + detail)
+    const idSuffix = requestId ? ` [ref: ${requestId}]` : ''
+    throw new Error((err.error?.message || `Claude API error ${response.status}`) + detail + idSuffix)
   }
 
   const data = await response.json()
@@ -185,16 +193,21 @@ async function digestDocument({ filename, buffer }) {
     // A PDF that is structurally fine (opens cleanly, normal size, normal
     // page count — checked all three above) can still be rejected by
     // Claude's own PDF ingestion. Seen live on a CAD-plotted drawing sheet
-    // (Olsen Ave, 4 Aug 2026) that pdf-lib opened without complaint. The raw
-    // API message alone ("Could not process PDF") gives no next step, so a
-    // PDF-specific failure gets one: re-flattening through a different
-    // renderer (Preview's own PDF export) fixes internal-structure issues a
-    // permissive reader tolerates but Claude's ingestion doesn't.
+    // (Olsen Ave, 4 Aug 2026) that pdf-lib opened without complaint.
+    // NOTE: a first fix attempt — re-rendering through PDFKit to repair a
+    // corrupted embedded CMap found via CG_PDF_VERBOSE — did NOT resolve it;
+    // the re-rendered file was rejected identically, so whatever Claude
+    // actually objects to here is still unconfirmed. Don't assert a fix that
+    // hasn't been proven; give the honest options instead. The full error
+    // body + request_id is logged server-side (see callClaude) for the next
+    // person who hits this to actually track it down.
     if (isPdf) {
       throw new Error(
         `${err.message} — this PDF opened normally but was rejected by the AI's reader. ` +
-        `This can happen with CAD-exported/plotted drawings. Open it in Preview, ` +
-        `File → Export as PDF (or Print → Save as PDF), then re-upload the new copy.`
+        `The exact cause isn't confirmed yet. Two things worth trying: re-export it from ` +
+        `whatever produced it (CAD software plotting to PDF is the common source of this), ` +
+        `or leave it out and proceed with the rest of the pack — one drawing missing is ` +
+        `noted in the debrief's coverage, not a blocker.`
       )
     }
     throw err
