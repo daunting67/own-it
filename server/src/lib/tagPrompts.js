@@ -230,7 +230,13 @@ async function digestAndReviewDocument({ filename, buffer, register }) {
   const result = await callClaude({
     system: combinedSystem(register),
     content,
-    maxTokens: 8000,
+    // 8000 was enough when this call only had to produce ONE schema (either
+    // the digest alone, or the TAG findings alone, in the two-call design
+    // this replaced). Combined, a content-rich document's response has to
+    // fit both — a rejected 101 Bruce Road PDF and a services-heavy spec
+    // both truncated mid-JSON at 8000 (5 Aug 2026), so this needs real
+    // headroom, not just a bit more.
+    maxTokens: 16000,
     effort: 'medium'
   })
 
