@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { api, uploadToSignedUrl } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
 import ScheduleOfQuantities from './ScheduleOfQuantities'
+import TagLibrary from './TagLibrary'
 
 const money = (n) =>
   typeof n === 'number' && Number.isFinite(n)
@@ -1054,11 +1056,13 @@ function TenderList() {
 
 const TABS = [
   { id: 'tenders', label: 'Tenders' },
-  { id: 'soq', label: 'Schedule of Quantities' }
+  { id: 'soq', label: 'Schedule of Quantities' },
+  { id: 'tags', label: 'TAG Library' }
 ]
 
 export default function TendersModule() {
   const [tab, setTab] = useState('tenders')
+  const { user } = useAuth()
 
   return (
     <div style={{ margin: '0 auto' }}>
@@ -1097,6 +1101,11 @@ export default function TendersModule() {
       {tab === 'soq' && (
         <div style={{ maxWidth: 800, margin: '28px auto 0' }}>
           <ScheduleOfQuantities />
+        </div>
+      )}
+      {tab === 'tags' && (
+        <div style={{ maxWidth: 1000, margin: '28px auto 0' }}>
+          <TagLibrary canEdit={!!user?.admin} />
         </div>
       )}
     </div>

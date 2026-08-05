@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const { randomUUID } = require('crypto')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/tenderUploads')
 const { saveTender, getTender, listTenders } = require('../lib/tenderStore')
 const {
@@ -12,6 +12,8 @@ const {
   totalHours,
   BID_SCORE_THRESHOLD
 } = require('../lib/tenderPrompts')
+const { analyzeDocumentForTags, mergeTagFindings } = require('../lib/tagPrompts')
+const { loadRegister, saveRegister, forMatching } = require('../lib/tagRegisterStore')
 
 // Tony's real figure, given 3 Aug 2026: base rate $135/hr + $5/hr office
 // equipment/software + $25/hr review cost (Rory/Dan review as a group,
@@ -151,6 +153,49 @@ router.post('/read', async (req, res) => {
   }
 })
 
+// TAG Review: same one-call-per-document pattern as /read, run alongside it
+// (not instead of it) while the document is still uploaded. The browser
+// calls this once per document and accumulates the results, then hands the
+// whole array to /debrief so it can be merged and stored with the tender —
+// after /debrief the uploads are deleted, so this has to happen now.
+router.get('/tags', async (req, res) => {
+  try {
+    const register = await loadRegister()
+    res.json(register)
+  } catch (err) {
+    console.error('Tag register load failed:', err)
+    res.status(500).json({ error: err.message || 'Could not load the TAG register' })
+  }
+})
+
+router.put('/tags', requireAdmin, async (req, res) => {
+  const { pricingTags, dayworksTags, dayworksRates } = req.body || {}
+  try {
+    const register = await saveRegister({ pricingTags, dayworksTags, dayworksRates, updatedBy: req.user?.email })
+    res.json(register)
+  } catch (err) {
+    console.error('Tag register save failed:', err)
+    res.status(500).json({ error: err.message || 'Could not save the TAG register' })
+  }
+})
+
+router.post('/tag-review', async (req, res) => {
+  const path = typeof req.body?.path === 'string' ? req.body.path : ''
+  if (!path) return res.status(400).json({ error: 'No document path supplied' })
+  const filename = path.split('/').pop()
+
+  try {
+    const fullRegister = await loadRegister()
+    const register = forMatching(fullRegister)
+    const buffer = await downloadUpload(path)
+    const result = await analyzeDocumentForTags({ filename, buffer, register })
+    res.json({ ...result, path })
+  } catch (err) {
+    console.error(`Tag review failed for ${filename}:`, err)
+    res.json({ filename, path, read: false, reason: err.message || 'Could not be read' })
+  }
+})
+
 // Step 3: combine the digests into the debrief and file the tender.
 router.post('/debrief', async (req, res) => {
   const name = (req.body?.name || '').trim()
@@ -158,12 +203,14 @@ router.post('/debrief', async (req, res) => {
   const deadline = (req.body?.deadline || '').trim()
   const notes = (req.body?.notes || '').trim()
   const digests = Array.isArray(req.body?.digests) ? req.body.digests : []
+  const tagResults = Array.isArray(req.body?.tagResults) ? req.body.tagResults : []
 
   if (!name) return res.status(400).json({ error: 'Give the tender a name' })
   if (!digests.length) return res.status(400).json({ error: 'Upload at least one document' })
 
   try {
     const debrief = await buildDebrief({ name, client, deadline, notes, digests, isKeyClient: !!matchedKeyClient(client) })
+    const tagReview = tagResults.length ? mergeTagFindings(tagResults) : null
 
     const tender = {
       id: randomUUID(),
@@ -186,6 +233,7 @@ router.post('/debrief', async (req, res) => {
         pages: d.pages || null
       })),
       debrief,
+      tagReview,
       createdAt: new Date().toISOString(),
       createdBy: req.user?.email || 'unknown'
     }
