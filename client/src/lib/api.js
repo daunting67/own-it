@@ -111,7 +111,6 @@ export const api = {
   getTender: (id) => request(`/api/tenders/${id}`),
   getTenderUploadUrl: (filename) => request('/api/tenders/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
   readTenderDocument: (path) => request('/api/tenders/read', { method: 'POST', body: JSON.stringify({ path }) }),
-  reviewTenderDocumentTags: (path) => request('/api/tenders/tag-review', { method: 'POST', body: JSON.stringify({ path }) }),
   buildTenderDebrief: (payload) => request('/api/tenders/debrief', { method: 'POST', body: JSON.stringify(payload) }),
   updateTender: (id, data) => request(`/api/tenders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getTagRegister: () => request('/api/tenders/tags'),

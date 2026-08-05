@@ -6,13 +6,12 @@ const { saveTender, getTender, listTenders } = require('../lib/tenderStore')
 const {
   isReadable,
   unreadableReason,
-  digestDocument,
   buildDebrief,
   overallScore,
   totalHours,
   BID_SCORE_THRESHOLD
 } = require('../lib/tenderPrompts')
-const { analyzeDocumentForTags, mergeTagFindings } = require('../lib/tagPrompts')
+const { digestAndReviewDocument, mergeTagFindings } = require('../lib/tagPrompts')
 const { loadRegister, saveRegister, forMatching } = require('../lib/tagRegisterStore')
 
 // Tony's real figure, given 3 Aug 2026: base rate $135/hr + $5/hr office
@@ -160,14 +159,22 @@ router.post('/upload-url', async (req, res) => {
 // Step 2: one call per document. The browser loops over the pack so each request
 // stays short — a whole tender pack in one request would exceed the function
 // timeout. A document that cannot be read comes back marked, never dropped.
+//
+// COST NOTE (5 Aug 2026): this used to be TWO calls per document (a digest
+// call here, then a separate call from a since-removed /tag-review route).
+// digestAndReviewDocument does both jobs in ONE call — see the comment at
+// the top of tagPrompts.js for why that matters (the document itself, not
+// the JSON schema, is the expensive part of either call).
 router.post('/read', async (req, res) => {
   const path = typeof req.body?.path === 'string' ? req.body.path : ''
   if (!path) return res.status(400).json({ error: 'No document path supplied' })
   const filename = path.split('/').pop()
 
   try {
+    const fullRegister = await loadRegister()
+    const register = forMatching(fullRegister)
     const buffer = await downloadUpload(path)
-    const digest = await digestDocument({ filename, buffer })
+    const digest = await digestAndReviewDocument({ filename, buffer, register })
     res.json({ ...digest, path })
   } catch (err) {
     console.error(`Tender read failed for ${filename}:`, err)
@@ -177,43 +184,23 @@ router.post('/read', async (req, res) => {
   }
 })
 
-// TAG Review: same one-call-per-document pattern as /read, run alongside it
-// (not instead of it) while the document is still uploaded. The browser
-// calls this once per document and accumulates the results, then hands the
-// whole array to /debrief so it can be merged and stored with the tender —
-// after /debrief the uploads are deleted, so this has to happen now.
-router.post('/tag-review', async (req, res) => {
-  const path = typeof req.body?.path === 'string' ? req.body.path : ''
-  if (!path) return res.status(400).json({ error: 'No document path supplied' })
-  const filename = path.split('/').pop()
-
-  try {
-    const fullRegister = await loadRegister()
-    const register = forMatching(fullRegister)
-    const buffer = await downloadUpload(path)
-    const result = await analyzeDocumentForTags({ filename, buffer, register })
-    res.json({ ...result, path })
-  } catch (err) {
-    console.error(`Tag review failed for ${filename}:`, err)
-    res.json({ filename, path, read: false, reason: err.message || 'Could not be read' })
-  }
-})
-
-// Step 3: combine the digests into the debrief and file the tender.
+// Step 3: combine the digests into the debrief and file the tender. Each
+// digest already carries its own tagFindings/dayworksFindings/reviewGaps
+// (from the merged /read call above) — mergeTagFindings just dedupes and
+// groups them across the whole pack, no extra Claude call needed here.
 router.post('/debrief', async (req, res) => {
   const name = (req.body?.name || '').trim()
   const client = (req.body?.client || '').trim()
   const deadline = (req.body?.deadline || '').trim()
   const notes = (req.body?.notes || '').trim()
   const digests = Array.isArray(req.body?.digests) ? req.body.digests : []
-  const tagResults = Array.isArray(req.body?.tagResults) ? req.body.tagResults : []
 
   if (!name) return res.status(400).json({ error: 'Give the tender a name' })
   if (!digests.length) return res.status(400).json({ error: 'Upload at least one document' })
 
   try {
     const debrief = await buildDebrief({ name, client, deadline, notes, digests, isKeyClient: !!matchedKeyClient(client) })
-    const tagReview = tagResults.length ? mergeTagFindings(tagResults) : null
+    const tagReview = mergeTagFindings(digests)
 
     const tender = {
       id: randomUUID(),

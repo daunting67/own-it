@@ -242,7 +242,6 @@ function NewTender({ onFiled, onCancel }) {
     setError(null)
     setReadSoFar([])
     const digests = []
-    const tagResults = []
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -271,20 +270,13 @@ function NewTender({ onFiled, onCancel }) {
           continue
         }
 
-        setProgress(`Reading ${f.name} (${step})…`)
+        // One call does the digest AND the TAG comparison together (see
+        // tagPrompts.js) — cheaper than the two separate calls this used to
+        // be, since the document itself is only sent to Claude once.
+        setProgress(`Reading ${f.name} and checking it against our TAGs (${step})…`)
         const digest = await api.readTenderDocument(path)
         digests.push(digest)
         setReadSoFar([...digests])
-
-        setProgress(`Checking ${f.name} against our TAGs (${step})…`)
-        try {
-          const tagResult = await api.reviewTenderDocumentTags(path)
-          tagResults.push(tagResult)
-        } catch (err) {
-          // TAG review is a bonus on top of the debrief, not a blocker — a
-          // failed TAG scan on one document must not sink the whole tender.
-          tagResults.push({ filename: f.name, read: false, reason: err.message })
-        }
       }
 
       if (!digests.some(d => d.read)) {
@@ -302,8 +294,7 @@ function NewTender({ onFiled, onCancel }) {
         client: client.trim(),
         deadline: deadline.trim(),
         notes: notes.trim(),
-        digests,
-        tagResults
+        digests
       })
       onFiled(tender)
     } catch (err) {
