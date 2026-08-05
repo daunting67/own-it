@@ -108,6 +108,30 @@ router.get('/', async (req, res) => {
   }
 })
 
+// Registered BEFORE /:id below — that route's :id param would otherwise
+// swallow "tags" as if it were a tender id (Express matches the first route
+// whose pattern fits, and /:id fits any single path segment).
+router.get('/tags', async (req, res) => {
+  try {
+    const register = await loadRegister()
+    res.json(register)
+  } catch (err) {
+    console.error('Tag register load failed:', err)
+    res.status(500).json({ error: err.message || 'Could not load the TAG register' })
+  }
+})
+
+router.put('/tags', requireAdmin, async (req, res) => {
+  const { pricingTags, dayworksTags, dayworksRates } = req.body || {}
+  try {
+    const register = await saveRegister({ pricingTags, dayworksTags, dayworksRates, updatedBy: req.user?.email })
+    res.json(register)
+  } catch (err) {
+    console.error('Tag register save failed:', err)
+    res.status(500).json({ error: err.message || 'Could not save the TAG register' })
+  }
+})
+
 router.get('/:id', async (req, res) => {
   const tender = await getTender(req.params.id)
   if (!tender) return res.status(404).json({ error: 'Tender not found' })
@@ -158,27 +182,6 @@ router.post('/read', async (req, res) => {
 // calls this once per document and accumulates the results, then hands the
 // whole array to /debrief so it can be merged and stored with the tender —
 // after /debrief the uploads are deleted, so this has to happen now.
-router.get('/tags', async (req, res) => {
-  try {
-    const register = await loadRegister()
-    res.json(register)
-  } catch (err) {
-    console.error('Tag register load failed:', err)
-    res.status(500).json({ error: err.message || 'Could not load the TAG register' })
-  }
-})
-
-router.put('/tags', requireAdmin, async (req, res) => {
-  const { pricingTags, dayworksTags, dayworksRates } = req.body || {}
-  try {
-    const register = await saveRegister({ pricingTags, dayworksTags, dayworksRates, updatedBy: req.user?.email })
-    res.json(register)
-  } catch (err) {
-    console.error('Tag register save failed:', err)
-    res.status(500).json({ error: err.message || 'Could not save the TAG register' })
-  }
-})
-
 router.post('/tag-review', async (req, res) => {
   const path = typeof req.body?.path === 'string' ? req.body.path : ''
   if (!path) return res.status(400).json({ error: 'No document path supplied' })
