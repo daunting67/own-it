@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth')
 const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
+const { submitToolboxTalk } = require('../lib/teammateToolboxTalk')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
@@ -14,7 +15,7 @@ const { nzLocalToUtc, nzDateOf, nzDateString } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
-const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start'])
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -40,6 +41,48 @@ function renderDebriefText(d) {
     d.solutions,
     '',
     'ACTION ITEMS',
+    actions
+  ].join('\n')
+}
+
+function renderToolboxTalkText(d) {
+  const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const actionItems = (d.actions || []).filter(Boolean)
+  const actions = actionItems.length
+    ? actionItems.map((a, i) => `${i + 1}. ${a.action || 'Not captured'} — Owner: ${a.owner || 'Not set'} — Due: ${a.due || 'Not set'}`).join('\n')
+    : 'No follow-up actions agreed.'
+  const attendees = Array.isArray(d.attendees) ? d.attendees.join(', ') : (d.attendees || '')
+  return [
+    'TOOLBOX TALK SAFETY MEETING',
+    'P&I (North) Ltd',
+    `${d.topic} | ${nz}`,
+    '',
+    `LOCATION: ${d.location || 'Not specified'}`,
+    `MEETING LEADER: ${d.leader || 'Tony Daunt'}`,
+    `ATTENDEES: ${attendees}${d.external_person ? ` (external: ${d.external_person})` : ''}`,
+    '',
+    'FOLLOW-UP ON LAST MEETING',
+    d.followup,
+    '',
+    'INCIDENTS, NEAR MISSES OR HAZARDS (PREVIOUS WEEK)',
+    d.incidents,
+    '',
+    `LAST WEEK'S PERFORMANCE RATING — ${d.performance_rating || 'Green'}`,
+    d.performance_comments,
+    '',
+    'CURRENT HEALTH, SAFETY AND ENVIRONMENTAL RISKS',
+    d.hse_risks,
+    '',
+    'Q5 — SAFETY / ENVIRONMENTAL / PRODUCTIVITY IMPROVEMENT SUGGESTIONS',
+    d.improvement_suggestions,
+    '',
+    "Q6 — THIS WEEK'S SAFETY FOCUS",
+    d.safety_focus,
+    '',
+    "Q7 — TODAY'S TRAINING TOPIC",
+    d.training_topic,
+    '',
+    'FOLLOW-UP ACTIONS',
     actions
   ].join('\n')
 }
@@ -397,6 +440,20 @@ router.post('/run/:id', async (req, res) => {
         output += teammateBanner(tm, 'debrief')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'toolbox-talk') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      if (coordinatorName && !parsed.leader) parsed.leader = coordinatorName
+      output = renderToolboxTalkText(parsed)
+      try {
+        const tm = await submitToolboxTalk(parsed, coordinatorName)
+        output += teammateBanner(tm, 'toolbox talk')
+        output += `\n\n📋 The "Current Health, Safety and Environmental risks" pick-list is a live Master Risk Register field — it isn't set automatically. In Teammate, open the form and tick the register entries matching: ${parsed.hse_risks || 'Not discussed'}`
+      } catch (tmErr) {
+        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe toolbox talk text above is still valid — copy it into Teammate manually.`
       }
     }
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
+import ProcessesModule from '../Processes/ProcessesModule'
 
 const STATUS_BADGE = {
   'In Progress': 'badge-warning',
@@ -11,7 +12,7 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-export default function HealthSafetyModule() {
+function IncidentsTab() {
   const [incidents, setIncidents] = useState(null)
   const [generatedAt, setGeneratedAt] = useState(null)
   const [error, setError] = useState(null)
@@ -29,14 +30,7 @@ export default function HealthSafetyModule() {
   useEffect(() => { load() }, [load])
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="page-title">Health & Safety</div>
-          <div className="page-subtitle">Incident reports from Teammate</div>
-        </div>
-      </div>
-
+    <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>Incident reports — last 4 weeks</div>
@@ -87,6 +81,41 @@ export default function HealthSafetyModule() {
           </table>
         </div>
       )}
+    </>
+  )
+}
+
+const TABS = [
+  { id: 'incidents', label: 'Incidents' },
+  { id: 'toolbox-talk', label: 'Toolbox Talk' },
+]
+
+export default function HealthSafetyModule() {
+  const [tab, setTab] = useState('incidents')
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <div className="page-title">Health & Safety</div>
+          <div className="page-subtitle">Incident reports from Teammate, and toolbox talk safety meetings</div>
+        </div>
+      </div>
+
+      <div className="tabs">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            className={`tab-btn${tab === t.id ? ' active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'incidents' && <IncidentsTab />}
+      {tab === 'toolbox-talk' && <ProcessesModule key="toolbox-talk" only="toolbox-talk" />}
     </div>
   )
 }

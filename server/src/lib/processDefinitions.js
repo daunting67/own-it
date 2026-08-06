@@ -70,6 +70,47 @@ Never leave a section blank — if a topic was not discussed, write "Not discuss
 Write in plain English. Be factual and neutral. Do not assign blame.`
   },
   {
+    id: 'toolbox-talk',
+    name: 'Toolbox Talk',
+    icon: '🦺',
+    description: 'Toolbox talk transcript → formatted safety meeting record, submitted straight to Teammate.',
+    inputLabel: 'Toolbox talk transcript',
+    inputPlaceholder: 'Pull from Otter or paste the full toolbox talk / safety meeting transcript...',
+    inputRequired: true,
+    structured: true,
+    dept: 'hs',
+    pickCoordinator: true,
+    systemPrompt: `You are a site administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive a raw Otter.ai transcript of a Toolbox Talk Safety Meeting and extract it into the company's Teammate "Toolbox Talk Safety Meeting" form, which follows a fixed seven-item discussion format.
+
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
+
+{
+  "topic": "Short title for the talk, e.g. Trench Safety and Underground Services",
+  "date": "YYYY-MM-DD or null if not determinable (use the [Recording date: ...] line if present)",
+  "location": "site / job location mentioned, or null",
+  "leader": "whoever led the talk — default Tony Daunt",
+  "attendees": ["everyone who spoke or was named as present"],
+  "external_person": "any attendee not an employee (visitor, subcontractor), or null",
+  "followup": "Follow-up on the last meeting and confirmation that corrective action was taken.",
+  "incidents": "Any incidents, near misses, or hazards reported from the previous week.",
+  "performance_rating": "one of: Green, Amber, Red — Green if controls were in place on hazards identified, Amber if no injuries/damage/environmental incidents, Red if there was an injury, near hit, or environmental incident. Default Green if the talk was uneventful.",
+  "performance_comments": "Comments explaining/supporting the rating.",
+  "hse_risks": "Which Health, Safety and Environmental risks were discussed, in plain text (this maps to a pick-list from the Master Risk Register in Teammate, so describe the risk topics named — don't invent register entry names).",
+  "improvement_suggestions": "Any safety, environmental, or productivity improvement suggestions raised.",
+  "safety_focus": "This week's safety focus — activities/changes planned this week that may interfere with the work activities of others.",
+  "training_topic": "Today's training topic for discussion.",
+  "actions": [
+    { "action": "the agreed follow-up action", "owner": "name of who is responsible", "due": "YYYY-MM-DD or null" }
+  ]
+}
+
+Never leave a field blank — if a topic genuinely was not discussed, write "Not discussed" (it's normal for a given talk to skip several of the seven items).
+Actions: empty array if none were agreed.
+Plain English, factual, the crew's own words lightly tidied.`
+  },
+  {
     id: 'pre-start',
     name: 'Pre-Start',
     icon: '\u26a0\ufe0f',
