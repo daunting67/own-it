@@ -104,14 +104,14 @@ function fmtDate(iso) {
 // physically split (via pdf-lib) into small page chunks before it ever reaches Claude,
 // and batches are then sized by TOTAL PAGES (not file count) up to MAX_PAGES_PER_BATCH.
 //
-// SPLIT_CHUNK_SIZE is deliberately much smaller than MAX_PAGES_PER_BATCH. The
-// self-adaptive retry (extractReceiptsBatch/extractInvoiceBatch) can only bisect a batch
-// that contains MULTIPLE files — a single already-atomic file that overflows on its own
-// has nothing left to divide. Splitting down to small chunks up front (rather than only
-// when a file exceeds the batch cap) guarantees there's always room for the recursive
-// halving to actually do something, even for a normal-length 2-3 page invoice.
+// SPLIT_CHUNK_SIZE is smaller than MAX_PAGES_PER_BATCH so there's always room for the
+// recursive halving (extractReceiptsBatch/extractInvoiceBatch bisect a batch on
+// truncation, but can't divide a single already-atomic file). Kept above 1-2 pages
+// deliberately — most receipts/invoices extract fine well under this size, so a small
+// starting chunk just means more calls than necessary; bisection handles the rare
+// batch that's actually too dense to fit.
 const MAX_PAGES_PER_BATCH = 8
-const SPLIT_CHUNK_SIZE = 2
+const SPLIT_CHUNK_SIZE = 6
 
 // Splits a PDF into contiguous SPLIT_CHUNK_SIZE-page chunks. Each chunk keeps the
 // ORIGINAL filename (so the engine's dedup/matching still treats them as one logical
@@ -179,7 +179,12 @@ async function extract(anthropicKey, system, files) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 8192, system, messages: [{ role: 'user', content }] })
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8192,
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content }]
+    })
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
