@@ -36,16 +36,14 @@ async function qbtGet(path, params = {}) {
 // between them (Tony, 12 Aug 2026: "we need to distinguish between 'ongoing leave' and
 // clusters of days close together" / "one start and finish date for the leave if it is
 // continuous, otherwise specify separate blocks"). Grouping is by QBT's own
-// time_off_request_id — the real request the days belong to — never inferred from date
-// proximity, so two genuinely separate requests are never merged just because their dates
-// happen to be close, and a single request that happens to cross a weekend is never split
-// (per-day entries don't exist for Sat/Sun, but they're still the one request).
-// ⚠️ UNVERIFIED AGAINST LIVE QBT DATA: time_off_request_id is assumed present on every
-// /time_off_request_entries row (matching the sibling user_id/jobcode_id fields already
-// used below) but has not been confirmed against a real API response — check the first
-// live run's output against Rory Pole's actual two requests once this is deployed. Entries
-// that are missing it fall back to REQUEST_GAP_FALLBACK_DAYS clustering so they still
-// surface rather than being silently dropped, but that path should be rare.
+// time_off_request_id, confirmed live and working as designed — but CONFIRMED LIVE 12 Aug
+// 2026 (Logan Sainty) that QBT itself sometimes records one continuous absence as several
+// separate day-by-day requests (evidently entered one day at a time rather than as a single
+// multi-day request) — a genuinely distinct time_off_request_id per day, even for
+// back-to-back dates. From a rostering point of view that's still one continuous absence,
+// so mergeAdjacentPeriods() below merges request-groups for the SAME employee back together
+// when they're immediately adjacent (or bridge only a weekend); a real gap (weeks apart,
+// like Rory Pole's two genuinely separate blocks) still stays separate.
 //
 // NOTE: the /time_off_requests object itself carries no date/hours/jobcode — those live
 // on its child /time_off_request_entries (one entry per calendar day: date, duration in
@@ -99,6 +97,33 @@ function periodFromGroup(entries, roleByName) {
     totalHours: sorted.reduce((sum, e) => sum + e.hours, 0),
     days: sorted.length,
   }
+}
+
+const MERGE_ADJACENT_GAP_DAYS = 3 // bridges a Fri→Mon weekend; see comment block above
+
+// Merge request-groups for the SAME employee back into one displayed block when they're
+// immediately adjacent (or only a weekend apart) — see the comment block above for why.
+function mergeAdjacentPeriods(periods) {
+  const byEmployee = {}
+  for (const p of periods) (byEmployee[p.employee] || (byEmployee[p.employee] = [])).push(p)
+
+  const merged = []
+  for (const list of Object.values(byEmployee)) {
+    const sorted = [...list].sort((a, b) => a.startDate.localeCompare(b.startDate))
+    let current = null
+    for (const p of sorted) {
+      if (current && daysBetween(current.endDate, p.startDate) <= MERGE_ADJACENT_GAP_DAYS) {
+        if (p.endDate > current.endDate) current.endDate = p.endDate
+        current.totalHours += p.totalHours
+        current.days += p.days
+        p.leaveType.split(' / ').forEach(t => current.leaveTypeSet.add(t))
+      } else {
+        current = { ...p, leaveTypeSet: new Set(p.leaveType.split(' / ')) }
+        merged.push(current)
+      }
+    }
+  }
+  return merged.map(({ leaveTypeSet, ...rest }) => ({ ...rest, leaveType: [...leaveTypeSet].join(' / ') }))
 }
 
 // Plain calendar-date shift on a YYYY-MM-DD string — no NZ-timezone lookup needed since
@@ -160,11 +185,16 @@ async function getUpcomingLeave(daysAhead = 91) {
   // Fetched once per status, matching the already-proven behaviour of the old single
   // status:'approved' call (its result matched the old manual Word-doc report) — assumed
   // to work symmetrically for 'pending', unlike the date params below it which QBT rejects.
-  const [approvedRaw, pendingRaw, users, ptoJobcodes, roleByName] = await Promise.all([
+  // Jobcodes fetched WITHOUT a type filter: an id that shows up on a leave entry is a
+  // leave type by definition, regardless of how QBT itself tags that jobcode's own `type`
+  // field — filtering to type:'pto' was producing "Leave type not recorded" for real leave
+  // logged under a jobcode QBT doesn't classify as pto (confirmed live 12 Aug 2026, Logan
+  // Sainty/Legacy Te Riini).
+  const [approvedRaw, pendingRaw, users, allJobcodes, roleByName] = await Promise.all([
     qbtGet('/time_off_request_entries', { status: 'approved' }),
     qbtGet('/time_off_request_entries', { status: 'pending' }),
     qbtGet('/users', { active: 'yes' }),
-    qbtGet('/jobcodes', { type: 'pto' }),
+    qbtGet('/jobcodes', {}),
     getRoleByName(),
   ])
 
@@ -173,7 +203,7 @@ async function getUpcomingLeave(daysAhead = 91) {
     userName[u.id] = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username
   }
   const leaveTypeName = {}
-  for (const j of Object.values(ptoJobcodes.jobcodes || {})) {
+  for (const j of Object.values(allJobcodes.jobcodes || {})) {
     leaveTypeName[j.id] = j.name
   }
 
@@ -193,10 +223,10 @@ async function getUpcomingLeave(daysAhead = 91) {
   }
 
   function periodsFor(rawEntries) {
-    return groupEntriesByRequest(normalise(rawEntries))
-      .map(entries => periodFromGroup(entries, roleByName))
-      // Include if the request overlaps the window at all: started before it and
-      // continuing in, entirely inside it, or starting inside it and finishing after.
+    const perRequest = groupEntriesByRequest(normalise(rawEntries)).map(entries => periodFromGroup(entries, roleByName))
+    return mergeAdjacentPeriods(perRequest)
+      // Include if the (possibly merged) block overlaps the window at all: started before
+      // it and continuing in, entirely inside it, or starting inside it and finishing after.
       .filter(p => p.startDate <= windowEnd && p.endDate >= windowStart)
   }
 
