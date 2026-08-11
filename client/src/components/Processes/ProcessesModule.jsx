@@ -49,7 +49,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
 
   function selectProcess(p) {
     setSelected(p)
-    setCoordinator(user?.name || '')
+    setCoordinator(p.id === 'office-minutes' ? 'Sandra Grace' : (user?.name || ''))
     setInput('')
     setResult(null)
     setDoc(null)
