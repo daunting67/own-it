@@ -182,17 +182,22 @@ async function getUpcomingLeave(daysAhead = 91) {
   const windowStart = nzDateString()
   const windowEnd = nzDateString(daysAhead)
 
-  // Fetched once per status, matching the already-proven behaviour of the old single
-  // status:'approved' call (its result matched the old manual Word-doc report) — assumed
-  // to work symmetrically for 'pending', unlike the date params below it which QBT rejects.
+  // /time_off_request_entries is fetched EXACTLY ONCE, with no status filter — it's the
+  // documented-slow, no-server-side-filtering endpoint (~130s, full account history every
+  // call). An earlier version of this fetched it twice (once per status) assuming the
+  // status param filtered it; two calls to an already-~130s endpoint risks exceeding
+  // Vercel's function time limit (no maxDuration is set in vercel.json, so whatever the
+  // plan default is applies) — a real "Unauthorised" seen live 12 Aug 2026 right after that
+  // change shipped is most likely this. Approval status is looked up from the much lighter
+  // /time_off_requests (the parent object) instead, keyed by id.
   // Jobcodes fetched WITHOUT a type filter: an id that shows up on a leave entry is a
   // leave type by definition, regardless of how QBT itself tags that jobcode's own `type`
   // field — filtering to type:'pto' was producing "Leave type not recorded" for real leave
   // logged under a jobcode QBT doesn't classify as pto (confirmed live 12 Aug 2026, Logan
   // Sainty/Legacy Te Riini).
-  const [approvedRaw, pendingRaw, users, allJobcodes, roleByName] = await Promise.all([
-    qbtGet('/time_off_request_entries', { status: 'approved' }),
-    qbtGet('/time_off_request_entries', { status: 'pending' }),
+  const [allEntriesRaw, allRequestsRaw, users, allJobcodes, roleByName] = await Promise.all([
+    qbtGet('/time_off_request_entries', {}),
+    qbtGet('/time_off_requests', {}),
     qbtGet('/users', { active: 'yes' }),
     qbtGet('/jobcodes', {}),
     getRoleByName(),
@@ -206,24 +211,33 @@ async function getUpcomingLeave(daysAhead = 91) {
   for (const j of Object.values(allJobcodes.jobcodes || {})) {
     leaveTypeName[j.id] = j.name
   }
+  // ⚠️ UNVERIFIED AGAINST LIVE QBT DATA: assumes /time_off_requests rows carry `id` + a
+  // `status` field with values including 'approved'/'pending' — the standard shape for a
+  // request-approval object, but not yet confirmed against a real response. An entry whose
+  // request status can't be resolved this way is dropped from BOTH approved and pending
+  // (never guessed into either).
+  const requestStatus = {}
+  for (const r of Object.values(allRequestsRaw.time_off_requests || {})) {
+    requestStatus[r.id] = r.status
+  }
 
   // Never guess a missing date or employee — an entry lacking either is dropped rather
   // than attributed to a placeholder. A missing leave type is labelled as such, not guessed.
-  function normalise(raw) {
-    return Object.values(raw || {})
-      .filter(e => e.date && e.user_id != null)
-      .map(e => ({
-        date: e.date,
-        hours: (Number(e.duration) || 0) / 3600,
-        leaveType: e.jobcode_id != null && leaveTypeName[e.jobcode_id] ? leaveTypeName[e.jobcode_id] : 'Leave type not recorded',
-        userId: e.user_id,
-        employeeName: userName[e.user_id] || `User ${e.user_id}`,
-        time_off_request_id: e.time_off_request_id,
-      }))
-  }
+  const allEntries = Object.values(allEntriesRaw.time_off_request_entries || {})
+    .filter(e => e.date && e.user_id != null)
+    .map(e => ({
+      date: e.date,
+      hours: (Number(e.duration) || 0) / 3600,
+      leaveType: e.jobcode_id != null && leaveTypeName[e.jobcode_id] ? leaveTypeName[e.jobcode_id] : 'Leave type not recorded',
+      userId: e.user_id,
+      employeeName: userName[e.user_id] || `User ${e.user_id}`,
+      time_off_request_id: e.time_off_request_id,
+      status: requestStatus[e.time_off_request_id],
+    }))
 
-  function periodsFor(rawEntries) {
-    const perRequest = groupEntriesByRequest(normalise(rawEntries)).map(entries => periodFromGroup(entries, roleByName))
+  function periodsFor(status) {
+    const matching = allEntries.filter(e => e.status === status)
+    const perRequest = groupEntriesByRequest(matching).map(entries => periodFromGroup(entries, roleByName))
     return mergeAdjacentPeriods(perRequest)
       // Include if the (possibly merged) block overlaps the window at all: started before
       // it and continuing in, entirely inside it, or starting inside it and finishing after.
@@ -232,7 +246,7 @@ async function getUpcomingLeave(daysAhead = 91) {
 
   const sortRows = (a, b) => a.startDate.localeCompare(b.startDate) || a.employee.localeCompare(b.employee)
 
-  const approvedPeriods = periodsFor(approvedRaw.time_off_request_entries)
+  const approvedPeriods = periodsFor('approved')
   const roleConflicts = findRoleConflicts(approvedPeriods, windowStart, windowEnd)
   const conflictDatesByRole = {}
   for (const c of roleConflicts) (conflictDatesByRole[c.role] || (conflictDatesByRole[c.role] = new Set())).add(c.date)
@@ -245,7 +259,7 @@ async function getUpcomingLeave(daysAhead = 91) {
     }))
     .sort(sortRows)
 
-  const pending = periodsFor(pendingRaw.time_off_request_entries)
+  const pending = periodsFor('pending')
     .map(p => ({ ...p, ongoing: p.startDate <= windowStart }))
     .sort(sortRows)
 
