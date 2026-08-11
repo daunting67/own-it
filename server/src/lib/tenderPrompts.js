@@ -283,85 +283,41 @@ async function digestDocument({ filename, buffer }) {
 // ---------------------------------------------------------------- stage two
 
 const DEBRIEF_SYSTEM = `You are a bid manager at P&I (North) Ltd (Pipeline & Infrastructure), a
-New Zealand civil contractor. You have been given per-document notes taken from every document in
-a tender pack. Produce the tender debrief that decides whether this tender is worth our time to
-price at all.
+New Zealand civil contractor doing earthworks, drainage, stormwater, wastewater, water supply,
+accessways and kerbing, retaining, fencing, and subdivision infrastructure. It does not do
+vertical construction.
 
-Context that shapes your judgement:
-- P&I does earthworks, drainage, stormwater, wastewater, water supply, accessways and kerbing,
-  retaining, fencing, and subdivision infrastructure. It does not do vertical construction.
-- Several tenders arrive at once and the estimating team can only price some of them. The whole
-  point of this debrief is to help rank them.
-- Estimating time is the scarce resource. Be realistic about how long pricing this properly takes.
+You have been given per-document notes taken from every document in a tender pack. Produce a
+short, plain summary of the tender — NOT a scored recommendation. Someone reading this decides
+for themselves whether it's worth pricing; your job is to give them the essential facts in about
+3 pages, one concise paragraph per field.
 
 Rules you must follow:
 - Work only from the notes provided. Never invent a figure. Where the notes do not support a
   number, say what is missing rather than guessing.
-- The estimated tender value is an indication for ranking purposes only. Give a range, state the
-  basis, and keep it clearly separate from a real estimate.
-- Estimating hours must be broken down by task so the total can be argued with, not just accepted.
-- Be direct. A tender we should walk away from should say so plainly and say why.
-
-Score each criterion 1-5, where 1 is poor and 5 is excellent for P&I:
-- fit: how well the work matches what P&I actually does
-- value: the size of the prize relative to what it costs us to chase it
-- winChance: our realistic chance of winning it
-- capacity: how comfortably we could resource and deliver it in the programmed window
-- risk: the client and contract risk (5 = low risk, 1 = high risk)
-- clientRelationship: our relationship with THIS CLIENT, not the job itself. A known repeat client
-  who has paid reliably and whose past jobs went well scores high (5). A new client with no red
-  flags scores in the middle (3) — do not assume a new client is risky just for being new. A client
-  we know pays late, disputes claims, or where a past job went badly scores low (1-2). Score this
-  ONLY from the notes the bid team gave you and anything the tender pack itself states about the
-  relationship (e.g. a returning-client statement, a referenced prior contract). If nothing is said
-  about relationship, payment history, or repeat potential, score it 3 (neutral) and say so in the
-  "client" section below rather than guessing either way.
+- Keep every field to roughly one paragraph — concise and condensed, not exhaustive.
+- The estimated duration and estimated tender value are indications only, for ranking tenders
+  against each other. State the basis and how much confidence to place in each.
+- Do not include TAGs or pricing exclusions here — that is a separate process that happens after
+  a job is priced, not part of this summary.
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
-  "scope": {
-    "headline": "<one sentence: what this job is>",
-    "principal": "<client name, or 'Not stated in the pack'>",
-    "engineer": "<engineer/superintendent, or 'Not stated in the pack'>",
-    "location": "<site location>",
-    "summary": [ "<a paragraph of plain-English description of the works>" ],
-    "majorElements": [ { "element": "<work element>", "detail": "<quantities or extent where known>" } ],
-    "programme": [ { "what": "<milestone>", "when": "<as stated, or 'Not stated'>" } ]
-  },
-  "client": {
-    "relationship": "<'Repeat client' | 'New client' | 'Not stated'>",
-    "history": "<what we know about past jobs with this client — how they went, or 'Not stated in the pack or notes'>",
-    "paymentReliability": "<what we know about how reliably they pay, or 'Not stated — worth checking before bidding'>",
-    "ongoingWorkPotential": "<whether this could lead to further work with them, or 'Not stated'>"
-  },
-  "clientExpectations": {
-    "mandatory": [ "<prequalification, accreditation, insurance level, or similar we must hold>" ],
-    "onerousConditions": [ "<contract condition carrying unusual risk, with the figure or clause>" ],
-    "submissionRequirements": [ "<what we must produce, in what format, by when>" ],
-    "disqualifiers": [ "<anything that would rule us out or that we cannot currently deliver>" ]
-  },
-  "costToTender": {
-    "tasks": [ { "task": "<estimating task, e.g. 'Quantity take-off — earthworks and drainage'>", "hours": <number>, "note": "<why it takes that long>" } ],
-    "otherCosts": [ { "item": "<e.g. subcontractor pricing rounds, specialist input, site visit>", "note": "<what is involved>" } ]
+  "projectName": "<name of the project>",
+  "client": "<client name and contact person, or 'Not stated in the pack'>",
+  "scope": "<one paragraph: what is being tendered>",
+  "estimatedDuration": {
+    "hours": <number, our estimate of how many hours it will take to cost this tender>,
+    "summary": "<one paragraph: how long this will take to cost, and the basis for that estimate>"
   },
   "estimatedValue": {
-    "low": <number, NZD excluding GST>,
-    "high": <number, NZD excluding GST>,
-    "basis": "<how you arrived at the range and how much confidence to place in it>"
+    "amount": <number, NZD excluding GST — our estimate of the cost of the tendered work>,
+    "summary": "<one paragraph: the estimated cost of the work, and how much confidence to place in it>"
   },
-  "recommendation": {
-    "decision": "<bid | no-bid | marginal>",
-    "headline": "<one sentence stating the recommendation and the main reason>",
-    "reasons": [ "<a specific reason supporting the recommendation>" ],
-    "scores": { "fit": <1-5>, "value": <1-5>, "winChance": <1-5>, "capacity": <1-5>, "risk": <1-5>, "clientRelationship": <1-5> },
-    "redFlags": [ "<something that should make us think hard about walking away>" ],
-    "opportunities": [ "<something that makes this one worth chasing>" ]
-  },
-  "questionsForTheClient": [ "<a question we should ask before or during the tender period>" ],
-  "coverageNotes": "<what the notes did NOT cover, and what that means for how much to trust this debrief. Say 'The pack appears complete.' only if nothing important is missing.>"
+  "coverageNotes": "<what the notes did NOT cover, and what that means for how much to trust this summary. Say 'The pack appears complete.' only if nothing important is missing.>"
 }`
 
-async function buildDebrief({ name, client, deadline, notes, digests, isKeyClient }) {
+async function buildDebrief({ name, client, deadline, notes, digests }) {
   const read = digests.filter(d => d.read)
   const unread = digests.filter(d => !d.read)
 
@@ -374,15 +330,6 @@ async function buildDebrief({ name, client, deadline, notes, digests, isKeyClien
     client ? `Client: ${client}` : null,
     deadline ? `Submission deadline: ${deadline}` : null,
     notes ? `Notes from the bid team: ${notes}` : null,
-    // The score must stay an honest read of the tender itself — a strategic
-    // account does not make the job a better fit or lower risk. This is
-    // context for the recommendation's reasons/opportunities text only; it
-    // is surfaced to Tony as a SEPARATE flag alongside the score, not folded
-    // into it, so "proceed anyway for the relationship" stays a visible,
-    // deliberate human call rather than a silently inflated number.
-    isKeyClient
-      ? `This client is one of P&I's named key strategic accounts. Note that in your reasons or opportunities — P&I may choose to proceed even on a marginal score to protect this relationship — but do NOT raise the fit/value/winChance/capacity/risk/clientRelationship scores on account of it. Score those honestly from the tender itself.`
-      : null,
     '',
     `Documents read (${read.length}):`,
     ...read.map(d => `- ${d.filename}${d.pages ? ` (${d.pages} pages)` : ''} — ${d.documentType || 'unclassified'}`),
@@ -407,66 +354,10 @@ async function buildDebrief({ name, client, deadline, notes, digests, isKeyClien
   return debrief
 }
 
-// Overall score out of 100. Weighted, not equal — computed in code from the
-// model's 1-5 ratings rather than asked of the model, so every tender is
-// ranked by the same rule. WEIGHTS and BID_SCORE_THRESHOLD are Tony's
-// PROPOSED defaults (3 Aug 2026), not yet confirmed — he agreed weighted
-// scoring "works well" and added clientRelationship, but hasn't set the
-// actual weights or the bid/no-bid cutoff. Change these two constants when
-// he does; nothing else needs to change.
-const CRITERIA = ['fit', 'value', 'winChance', 'capacity', 'risk', 'clientRelationship']
-
-const WEIGHTS = {
-  value: 25,           // the size of the prize vs. what it costs us to chase it
-  winChance: 20,        // realistic chance of winning
-  clientRelationship: 20, // repeat client, payment history, ongoing-work potential
-  capacity: 15,          // can we resource and deliver it in the window
-  risk: 10,              // client and contract risk
-  fit: 10                // how well it matches what P&I does
-}
-// WEIGHTS must sum to 100 — a scoring rule that silently doesn't add up would
-// mis-rank every tender in a way nobody would notice by looking at one score.
-const WEIGHTS_TOTAL = Object.values(WEIGHTS).reduce((a, b) => a + b, 0)
-if (WEIGHTS_TOTAL !== 100) {
-  throw new Error(`Tender scoring WEIGHTS must sum to 100 — currently ${WEIGHTS_TOTAL}`)
-}
-
-// Score at or above this is recommended to bid by the rule. Below it, the
-// spec is that the estimating team can still agree to proceed (a strategic
-// account, a new-scope opportunity) — that's the existing Bid/No-bid buttons
-// with a reason, not a separate mechanism.
-const BID_SCORE_THRESHOLD = 60
-
-function overallScore(scores) {
-  if (!scores) return null
-  const weighted = CRITERIA.reduce((sum, k) => {
-    const v = Number(scores[k])
-    return Number.isFinite(v) ? sum + v * WEIGHTS[k] : sum
-  }, 0)
-  const presentWeight = CRITERIA.reduce((sum, k) => Number.isFinite(Number(scores[k])) ? sum + WEIGHTS[k] : sum, 0)
-  if (presentWeight === 0) return null
-  // Missing criteria are excluded from both the numerator and the denominator
-  // rather than treated as zero, so one gap doesn't crater an otherwise-good
-  // score — same principle as the rest of the module: report what's missing,
-  // don't let it silently corrupt the rest.
-  return Math.round((weighted / (presentWeight * 5)) * 100)
-}
-
-function totalHours(costToTender) {
-  const tasks = costToTender?.tasks || []
-  const sum = tasks.reduce((acc, t) => acc + (Number(t.hours) || 0), 0)
-  return Math.round(sum * 10) / 10
-}
-
 module.exports = {
   MODEL,
-  CRITERIA,
-  WEIGHTS,
-  BID_SCORE_THRESHOLD,
   isReadable,
   unreadableReason,
   digestDocument,
-  buildDebrief,
-  overallScore,
-  totalHours
+  buildDebrief
 }

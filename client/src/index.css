@@ -73,7 +73,11 @@ a:hover { color: var(--pi-orange); }
   margin-top: 10px; font-size: 11px; color: var(--pi-orange);
   text-transform: uppercase; letter-spacing: .18em; font-weight: 800;
 }
-.side-nav { flex: 1; padding: 10px 0; display: flex; flex-direction: column; overflow-y: auto; }
+/* min-height: 0 is required here — a flex item with overflow-y:auto inside a
+   flex-column parent won't actually shrink/scroll without it (it defaults to
+   min-height:auto, i.e. "never smaller than my content"), so a full nav list
+   silently clipped instead of scrolling on shorter screens. */
+.side-nav { flex: 1; min-height: 0; padding: 10px 0; display: flex; flex-direction: column; overflow-y: auto; }
 .nav-item {
   display: flex; align-items: center; gap: 8px; text-align: left;
   font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;

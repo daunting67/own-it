@@ -6,31 +6,22 @@ const { saveTender, getTender, listTenders } = require('../lib/tenderStore')
 const {
   isReadable,
   unreadableReason,
-  buildDebrief,
-  overallScore,
-  totalHours,
-  BID_SCORE_THRESHOLD
+  buildDebrief
 } = require('../lib/tenderPrompts')
 const { digestAndReviewDocument, mergeTagFindings } = require('../lib/tagPrompts')
 const { loadRegister, saveRegister, forMatching } = require('../lib/tagRegisterStore')
 
-// Tony's real figure, given 3 Aug 2026: base rate $135/hr + $5/hr office
-// equipment/software + $25/hr review cost (Rory/Dan review as a group,
-// averaging ~2hrs — roughly $1,200 on a 50hr tender, which is what the
-// $25/hr component works out to). Editable per tender — see PATCH below —
-// this is just the default a new tender starts at.
-const DEFAULT_ESTIMATING_RATE = 165
-
-// Weekly estimating capacity, given 3 Aug 2026: Tony 40hrs, Josh 20hrs,
-// Rory 20hrs — Josh and Rory help estimate but carry other responsibilities
-// that limit how much of their week goes to it. This is a simple aggregate
-// gauge (committed hours vs this total), not a scheduler — deadlines are
-// free text on a tender, not parsed dates, so there's no way to know which
-// week a tender's hours actually fall in. Treat the flag as approximate.
+// Weekly estimating capacity, given 3 Aug 2026 (Josh/Rory unchanged; Tony's
+// share reassigned to Hamish): Hamish 40hrs, Josh 20hrs, Rory 20hrs — Josh
+// and Rory help estimate but carry other responsibilities that limit how
+// much of their week goes to it. This is a simple aggregate gauge (total
+// estimated hours across open tenders vs this total), not a scheduler —
+// deadlines are free text on a tender, not parsed dates, so there's no way
+// to know which week a tender's hours actually fall in. Treat it as approximate.
 const ESTIMATING_CAPACITY = {
   weeklyHours: 80,
   breakdown: [
-    { name: 'Tony', hoursPerWeek: 40 },
+    { name: 'Hamish', hoursPerWeek: 40 },
     { name: 'Josh', hoursPerWeek: 20 },
     { name: 'Rory', hoursPerWeek: 20 }
   ]
@@ -48,42 +39,27 @@ function matchedKeyClient(clientName) {
   return KEY_CLIENTS.find(k => name.includes(k.toLowerCase())) || null
 }
 
-const STATUSES = ['open', 'bidding', 'submitted', 'won', 'lost', 'declined']
-const DECISIONS = ['undecided', 'bid', 'no-bid']
-
 function safePathPart(name) {
   return (name || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
 }
 
-// Cost-to-tender is derived, never stored twice: hours come from the debrief (or
-// Tony's override), the rate from the tender record. Recomputed on every read so
-// changing the rate updates historical tenders too.
+// Hours are derived, never stored twice: they come from the debrief's
+// estimatedDuration, or Tony's override if he's set one. Recomputed on every
+// read so an override always wins even if the debrief is re-read.
 function withDerived(tender) {
   if (!tender) return tender
-  const rate = Number(tender.estimatingRate) || DEFAULT_ESTIMATING_RATE
-  const aiHours = totalHours(tender.debrief?.costToTender)
+  const aiHours = Number(tender.debrief?.estimatedDuration?.hours)
   // Number(null) is 0, not NaN — testing Number.isFinite alone would treat an
-  // absent override as an override of zero and silently zero the cost.
+  // absent override as an override of zero and silently zero the hours.
   const hasOverride = tender.hoursOverride !== null
     && tender.hoursOverride !== undefined
     && tender.hoursOverride !== ''
     && Number.isFinite(Number(tender.hoursOverride))
-  const hours = hasOverride ? Number(tender.hoursOverride) : aiHours
-  const score = overallScore(tender.debrief?.recommendation?.scores)
+  const hours = hasOverride ? Number(tender.hoursOverride) : (Number.isFinite(aiHours) ? aiHours : null)
   return {
     ...tender,
-    estimatingRate: rate,
-    aiHours,
+    aiHours: Number.isFinite(aiHours) ? aiHours : null,
     hours,
-    costToTender: Math.round(hours * rate),
-    score,
-    // Two independent signals shown side by side, deliberately not merged:
-    // the rule (score vs threshold) and the named-account override. Folding
-    // "it's Fletcher" into the score would make the number stop meaning
-    // "how good is this tender" — the whole reason it's kept separate is so
-    // a marginal-score bid for a strategic account reads as a visible,
-    // deliberate exception rather than a quietly inflated score.
-    meetsBidThreshold: score !== null ? score >= BID_SCORE_THRESHOLD : null,
     keyClient: matchedKeyClient(tender.client)
   }
 }
@@ -97,8 +73,6 @@ router.get('/', async (req, res) => {
     const tenders = await listTenders()
     res.json({
       tenders: tenders.map(withDerived),
-      defaultRate: DEFAULT_ESTIMATING_RATE,
-      bidScoreThreshold: BID_SCORE_THRESHOLD,
       capacity: ESTIMATING_CAPACITY
     })
   } catch (err) {
@@ -199,7 +173,7 @@ router.post('/debrief', async (req, res) => {
   if (!digests.length) return res.status(400).json({ error: 'Upload at least one document' })
 
   try {
-    const debrief = await buildDebrief({ name, client, deadline, notes, digests, isKeyClient: !!matchedKeyClient(client) })
+    const debrief = await buildDebrief({ name, client, deadline, notes, digests })
     const tagReview = mergeTagFindings(digests)
 
     const tender = {
@@ -208,12 +182,6 @@ router.post('/debrief', async (req, res) => {
       client,
       deadline,
       notes,
-      status: 'open',
-      decision: 'undecided',
-      decisionReason: '',
-      decisionBy: '',
-      decisionAt: null,
-      estimatingRate: DEFAULT_ESTIMATING_RATE,
       hoursOverride: null,
       documents: digests.map(d => ({
         filename: d.filename,
@@ -239,35 +207,13 @@ router.post('/debrief', async (req, res) => {
   }
 })
 
-// Decision, status, rate and hours override. Decisions are recorded with a name
-// against them but nothing is locked — a no-bid can be reversed if the week changes.
+// Hours override only — lets Tony correct a bad AI duration estimate so the
+// capacity gauge stays accurate.
 router.patch('/:id', async (req, res) => {
   const tender = await getTender(req.params.id)
   if (!tender) return res.status(404).json({ error: 'Tender not found' })
 
-  const { decision, decisionReason, status, estimatingRate, hoursOverride } = req.body || {}
-
-  if (decision !== undefined) {
-    if (!DECISIONS.includes(decision)) return res.status(400).json({ error: 'Unknown decision' })
-    tender.decision = decision
-    tender.decisionBy = req.user?.email || 'unknown'
-    tender.decisionAt = new Date().toISOString()
-    if (decisionReason !== undefined) tender.decisionReason = String(decisionReason).slice(0, 2000)
-    // Saying "bid" moves it into the bidding column unless it's already further on.
-    if (decision === 'bid' && tender.status === 'open') tender.status = 'bidding'
-    if (decision === 'no-bid') tender.status = 'declined'
-  }
-
-  if (status !== undefined) {
-    if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Unknown status' })
-    tender.status = status
-  }
-
-  if (estimatingRate !== undefined) {
-    const rate = Number(estimatingRate)
-    if (!Number.isFinite(rate) || rate <= 0) return res.status(400).json({ error: 'Rate must be a positive number' })
-    tender.estimatingRate = Math.round(rate * 100) / 100
-  }
+  const { hoursOverride } = req.body || {}
 
   if (hoursOverride !== undefined) {
     if (hoursOverride === null || hoursOverride === '') {
