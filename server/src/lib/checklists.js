@@ -15,6 +15,10 @@ const TEMPLATES = {
       { label: 'IRD number recorded', done: false },
       { label: 'Tax code confirmed', done: false },
       { label: 'Bank account details received', done: false },
+      { label: 'IRD forms sent', done: false },
+      { label: 'IRD forms received', done: false },
+      { label: 'KiwiSaver forms sent', done: false },
+      { label: 'KiwiSaver forms received', done: false },
       { label: 'Payroll set up in system', done: false },
     ]},
     { section: 'PPE & equipment', items: [
@@ -106,6 +110,10 @@ const TEMPLATES = {
       { label: 'IRD number recorded', done: false },
       { label: 'Tax code confirmed', done: false },
       { label: 'Bank account details received', done: false },
+      { label: 'IRD forms sent', done: false },
+      { label: 'IRD forms received', done: false },
+      { label: 'KiwiSaver forms sent', done: false },
+      { label: 'KiwiSaver forms received', done: false },
     ]},
     { section: 'PPE & equipment', items: [
       { label: 'PPE sizes confirmed', done: false },
@@ -158,4 +166,29 @@ function markChecklistComplete(checklist) {
   }))
 }
 
-module.exports = { buildChecklist, applySiteInductions, markChecklistComplete }
+// Existing staff already have a checklist saved from whenever their profile
+// was created — adding new items to TEMPLATES above doesn't retroactively
+// touch stored rows. Called on read so older checklists (like someone
+// onboarded before KiwiSaver/IRD form tracking existed) pick up any items the
+// template has gained, without a bulk migration that could clobber done state.
+function mergeMissingChecklistItems(checklist, hireType) {
+  const template = buildChecklist(hireType)
+  if (!template.length) return checklist || []
+  const existing = checklist || []
+  const merged = existing.map(s => ({ ...s, items: s.items.map(i => ({ ...i })) }))
+  for (const templateSection of template) {
+    let section = merged.find(s => s.section === templateSection.section)
+    if (!section) {
+      section = { section: templateSection.section, items: [] }
+      merged.push(section)
+    }
+    for (const templateItem of templateSection.items) {
+      if (!section.items.some(i => i.label === templateItem.label)) {
+        section.items.push({ ...templateItem })
+      }
+    }
+  }
+  return merged
+}
+
+module.exports = { buildChecklist, applySiteInductions, markChecklistComplete, mergeMissingChecklistItems }

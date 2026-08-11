@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const db = require('../lib/supabase')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { buildChecklist, applySiteInductions, markChecklistComplete } = require('../lib/checklists')
+const { buildChecklist, applySiteInductions, markChecklistComplete, mergeMissingChecklistItems } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
 const { importStaffDetails } = require('../lib/staffDetailsImport')
@@ -19,7 +19,8 @@ function touchStaffCsv() {
 
 router.get('/', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').order('createdAt', { ascending: false })
-  res.json(data || [])
+  const people = (data || []).map(p => ({ ...p, checklist: mergeMissingChecklistItems(p.checklist, p.hireType) }))
+  res.json(people)
 })
 
 // Always regenerated live from the Staff table on every download — the
@@ -105,7 +106,7 @@ router.post('/import', requireAdmin, async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { data } = await db.from('Staff').select('*,site:Site(*),supplier:Supplier(*)').eq('id', req.params.id).single()
   if (!data) return res.status(404).json({ error: 'Not found' })
-  res.json(data)
+  res.json({ ...data, checklist: mergeMissingChecklistItems(data.checklist, data.hireType) })
 })
 
 // Re-import path for an edited staff-list.csv: the CSV is the master list, so
