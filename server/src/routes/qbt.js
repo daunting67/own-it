@@ -11,8 +11,8 @@ router.use(requireAuth)
 // QBT doesn't support server-side date filtering on this endpoint).
 router.get('/leave', async (req, res) => {
   try {
-    const { rows, generatedAt } = await getCachedUpcomingLeave()
-    res.json({ rows, generatedAt })
+    const { approved, pending, overlaps, windowStart, windowEnd, generatedAt } = await getCachedUpcomingLeave()
+    res.json({ approved, pending, overlaps, windowStart, windowEnd, generatedAt })
   } catch (err) {
     console.error('QBT leave fetch failed:', err)
     res.status(500).json({ error: err.message || 'Could not reach QuickBooks Time' })
@@ -22,8 +22,8 @@ router.get('/leave', async (req, res) => {
 // Branded .docx for meetings, built from the same cached data as the dashboard.
 router.get('/leave/document', async (req, res) => {
   try {
-    const { rows } = await getCachedUpcomingLeave()
-    const buf = await buildLeaveDocx(rows)
+    const { approved, pending, overlaps, windowStart, windowEnd } = await getCachedUpcomingLeave()
+    const buf = await buildLeaveDocx({ approved, pending, overlaps, windowStart, windowEnd })
     res.json({ filename: leaveFilename(), document: buf.toString('base64') })
   } catch (err) {
     console.error('QBT leave document build failed:', err)

@@ -34,40 +34,50 @@ function bodyCell(text) {
   })
 }
 
-// rows = getUpcomingLeave() output. One continuous table, one row per employee,
-// no month-splitting, no methodology notes — per Tony's explicit spec.
-async function buildLeaveDocx(rows) {
-  const today = new Date()
-  const end = new Date(today)
-  end.setDate(end.getDate() + 91)
-  const rangeLabel = `${fmtDate(today.toISOString().split('T')[0])} – ${fmtDate(end.toISOString().split('T')[0])}`
+function leaveTable(rows, { includeStatus }) {
+  const headers = [headerCell('Employee'), headerCell('Dates')]
+  if (includeStatus) headers.push(headerCell('Status'))
+  headers.push(headerCell('Leave Type'), headerCell('Total Hours'))
 
-  const extended = rows.filter(r => r.days >= 15)
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: gridBorders(),
+    rows: [
+      new TableRow({ tableHeader: true, children: headers }),
+      ...rows.map(r => {
+        const cells = [bodyCell(r.employee), bodyCell(`${fmtDateShort(r.startDate)} – ${fmtDateShort(r.endDate)}`)]
+        if (includeStatus) cells.push(bodyCell(r.ongoing ? 'Ongoing' : 'Upcoming'))
+        cells.push(bodyCell(r.leaveType), bodyCell(r.totalHours.toFixed(2)))
+        return new TableRow({ children: cells })
+      }),
+    ],
+  })
+}
+
+// {approved, pending, overlaps, windowStart, windowEnd} = getUpcomingLeave() output. One
+// row per LEAVE REQUEST (an employee with two separate requests gets two rows), approved
+// and pending kept in separate tables — no month-splitting, no methodology notes, per
+// Tony's explicit spec.
+async function buildLeaveDocx({ approved, pending, overlaps, windowStart, windowEnd }) {
+  const rangeLabel = `${fmtDate(windowStart)} – ${fmtDate(windowEnd)}`
+
+  const extended = approved.filter(r => r.days >= 15)
   const summaryParts = [
-    `${rows.length} employee${rows.length === 1 ? '' : 's'} with leave scheduled in this period.`,
+    `${approved.length} approved leave request${approved.length === 1 ? '' : 's'} in this period` +
+      (pending.length ? `, plus ${pending.length} pending request${pending.length === 1 ? '' : 's'} awaiting approval.` : '.'),
   ]
   if (extended.length) {
     summaryParts.push(`Notable extended absence: ${extended.map(r => `${r.employee} (${r.days} days)`).join(', ')}.`)
   }
 
-  const table = new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: gridBorders(),
-    rows: [
-      new TableRow({
-        tableHeader: true,
-        children: [headerCell('Employee'), headerCell('Dates'), headerCell('Leave Type'), headerCell('Total Hours')],
-      }),
-      ...rows.map(r => new TableRow({
-        children: [
-          bodyCell(r.employee),
-          bodyCell(`${fmtDateShort(r.startDate)} – ${fmtDateShort(r.endDate)}`),
-          bodyCell(r.leaveType),
-          bodyCell(r.totalHours.toFixed(2)),
-        ],
-      })),
-    ],
-  })
+  const overlapParagraphs = overlaps.length
+    ? [
+        new Paragraph({ children: [new TextRun({ text: '⚠ Overlapping leave', bold: true, color: BRAND, size: 22 })], spacing: { before: 200, after: 80 } }),
+        ...overlaps.map(o => new Paragraph({
+          children: [new TextRun({ text: `${fmtDate(o.date)}: ${o.employees.join(', ')}`, size: 20 })],
+        })),
+      ]
+    : []
 
   const doc = new Document({
     styles: { default: { document: { run: { font: 'Calibri', size: 21 } } } },
@@ -96,7 +106,16 @@ async function buildLeaveDocx(rows) {
         new Paragraph({ children: [new TextRun({ text: 'Staff Leave Schedule', bold: true, color: BRAND, size: 36 })] }),
         new Paragraph({ children: [new TextRun({ text: rangeLabel, color: '555555', size: 22 })], spacing: { after: 200 } }),
         new Paragraph({ children: [new TextRun({ text: summaryParts.join(' '), size: 21 })], spacing: { after: 240 } }),
-        rows.length ? table : new Paragraph({ children: [new TextRun({ text: 'No leave is currently scheduled in this period.', size: 21 })] }),
+        ...overlapParagraphs,
+        approved.length
+          ? leaveTable(approved, { includeStatus: true })
+          : new Paragraph({ children: [new TextRun({ text: 'No approved leave is currently scheduled in this period.', size: 21 })] }),
+        ...(pending.length
+          ? [
+              new Paragraph({ children: [new TextRun({ text: 'Pending requests (awaiting approval)', bold: true, color: BRAND, size: 24 })], spacing: { before: 320, after: 120 } }),
+              leaveTable(pending, { includeStatus: false }),
+            ]
+          : []),
       ],
     }],
   })
