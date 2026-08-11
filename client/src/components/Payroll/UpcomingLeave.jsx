@@ -27,6 +27,7 @@ function LeaveTable({ rows, showStatus }) {
         <thead>
           <tr>
             <th>Employee</th>
+            <th>Role</th>
             <th>Dates</th>
             {showStatus && <th>Status</th>}
             <th>Leave type</th>
@@ -35,11 +36,12 @@ function LeaveTable({ rows, showStatus }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} style={r.hasOverlap ? { background: 'rgba(232,91,26,.08)' } : undefined}>
+            <tr key={i} style={r.hasRoleConflict ? { background: 'rgba(232,91,26,.08)' } : undefined}>
               <td>{r.employee}</td>
+              <td>{r.role || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
               <td>
                 {fmtDate(r.startDate)} – {fmtDate(r.endDate)}
-                {r.hasOverlap && <span title="Overlaps with another employee's leave" style={{ marginLeft: 6 }}>⚠️</span>}
+                {r.hasRoleConflict && <span title={`Another ${r.role} is away the same day`} style={{ marginLeft: 6 }}>⚠️</span>}
               </td>
               {showStatus && (
                 <td>
@@ -61,7 +63,7 @@ function LeaveTable({ rows, showStatus }) {
 export default function UpcomingLeave() {
   const [approved, setApproved] = useState(null)
   const [pending, setPending] = useState(null)
-  const [overlaps, setOverlaps] = useState([])
+  const [roleConflicts, setRoleConflicts] = useState([])
   const [generatedAt, setGeneratedAt] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -75,7 +77,7 @@ export default function UpcomingLeave() {
       .then(res => {
         setApproved(res.approved)
         setPending(res.pending)
-        setOverlaps(res.overlaps || [])
+        setRoleConflicts(res.roleConflicts || [])
         setGeneratedAt(res.generatedAt)
       })
       .catch(err => setError(err.message || 'Could not load leave from QuickBooks Time'))
@@ -124,12 +126,12 @@ export default function UpcomingLeave() {
         </div>
       )}
 
-      {!error && overlaps.length > 0 && (
+      {!error && roleConflicts.length > 0 && (
         <div style={{ padding: 12, marginBottom: 12, background: 'rgba(232,91,26,.12)', borderRadius: 6, fontSize: 13 }}>
-          <strong>⚠️ Overlapping leave — more than one person away:</strong>
+          <strong>⚠️ Role conflicts — same role away together:</strong>
           <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-            {overlaps.map((o, i) => (
-              <li key={i}>{fmtDate(o.date)}: {o.employees.join(', ')}</li>
+            {roleConflicts.map((c, i) => (
+              <li key={i}>{fmtDate(c.date)} — {c.role}: {c.employees.join(', ')}</li>
             ))}
           </ul>
         </div>

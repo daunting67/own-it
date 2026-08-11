@@ -54,11 +54,11 @@ function leaveTable(rows, { includeStatus }) {
   })
 }
 
-// {approved, pending, overlaps, windowStart, windowEnd} = getUpcomingLeave() output. One
-// row per LEAVE REQUEST (an employee with two separate requests gets two rows), approved
+// {approved, pending, roleConflicts, windowStart, windowEnd} = getUpcomingLeave() output.
+// One row per LEAVE REQUEST (an employee with two separate requests gets two rows), approved
 // and pending kept in separate tables — no month-splitting, no methodology notes, per
 // Tony's explicit spec.
-async function buildLeaveDocx({ approved, pending, overlaps, windowStart, windowEnd }) {
+async function buildLeaveDocx({ approved, pending, roleConflicts, windowStart, windowEnd }) {
   const rangeLabel = `${fmtDate(windowStart)} – ${fmtDate(windowEnd)}`
 
   const extended = approved.filter(r => r.days >= 15)
@@ -70,11 +70,14 @@ async function buildLeaveDocx({ approved, pending, overlaps, windowStart, window
     summaryParts.push(`Notable extended absence: ${extended.map(r => `${r.employee} (${r.days} days)`).join(', ')}.`)
   }
 
-  const overlapParagraphs = overlaps.length
+  // Role conflicts (2+ people in the same role away the same day) matter more than a
+  // generic "someone else is also off" — that's why it's the flag shown here, not just
+  // any-two-people overlap.
+  const conflictParagraphs = roleConflicts.length
     ? [
-        new Paragraph({ children: [new TextRun({ text: '⚠ Overlapping leave', bold: true, color: BRAND, size: 22 })], spacing: { before: 200, after: 80 } }),
-        ...overlaps.map(o => new Paragraph({
-          children: [new TextRun({ text: `${fmtDate(o.date)}: ${o.employees.join(', ')}`, size: 20 })],
+        new Paragraph({ children: [new TextRun({ text: '⚠ Role conflicts — same role away together', bold: true, color: BRAND, size: 22 })], spacing: { before: 200, after: 80 } }),
+        ...roleConflicts.map(c => new Paragraph({
+          children: [new TextRun({ text: `${fmtDate(c.date)} — ${c.role}: ${c.employees.join(', ')}`, size: 20 })],
         })),
       ]
     : []
@@ -106,7 +109,7 @@ async function buildLeaveDocx({ approved, pending, overlaps, windowStart, window
         new Paragraph({ children: [new TextRun({ text: 'Staff Leave Schedule', bold: true, color: BRAND, size: 36 })] }),
         new Paragraph({ children: [new TextRun({ text: rangeLabel, color: '555555', size: 22 })], spacing: { after: 200 } }),
         new Paragraph({ children: [new TextRun({ text: summaryParts.join(' '), size: 21 })], spacing: { after: 240 } }),
-        ...overlapParagraphs,
+        ...conflictParagraphs,
         approved.length
           ? leaveTable(approved, { includeStatus: true })
           : new Paragraph({ children: [new TextRun({ text: 'No approved leave is currently scheduled in this period.', size: 21 })] }),

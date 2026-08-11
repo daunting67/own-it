@@ -87,10 +87,12 @@ function groupEntriesByRequest(rawEntries) {
   return groups
 }
 
-function periodFromGroup(entries) {
+function periodFromGroup(entries, roleByName) {
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date))
+  const employee = sorted[0].employeeName
   return {
-    employee: sorted[0].employeeName,
+    employee,
+    role: roleByName[employee.trim().toLowerCase()] || null,
     startDate: sorted[0].date,
     endDate: sorted[sorted.length - 1].date,
     leaveType: [...new Set(sorted.map(e => e.leaveType))].join(' / '),
@@ -111,21 +113,44 @@ function datesInRange(startDate, endDate) {
   return dates
 }
 
-// Days (within the window) where 2+ different employees are both away on APPROVED leave —
-// pending requests aren't a confirmed absence yet, so they're excluded from this check.
-function findOverlaps(periods, windowStart, windowEnd) {
+// Days (within the window) where 2+ employees sharing the SAME role are both away on
+// APPROVED leave — the real operational risk (e.g. every Excavator Operator away at once),
+// not just "any two people happen to be off the same day" (an office admin and a machine
+// operator both away is not a conflict). Pending requests aren't a confirmed absence yet,
+// so they're excluded from this check. Role comes from the portal's own Staff table
+// (matched by exact name, case/whitespace-insensitive — never guessed or fuzzy-matched);
+// an employee with no role recorded, or no matching Staff record at all, can never be
+// flagged, since there's nothing honest to compare them against.
+function findRoleConflicts(periods, windowStart, windowEnd) {
   const byDate = {}
   for (const p of periods) {
+    if (!p.role) continue
     const from = p.startDate < windowStart ? windowStart : p.startDate
     const to = p.endDate > windowEnd ? windowEnd : p.endDate
     for (const day of datesInRange(from, to)) {
-      (byDate[day] || (byDate[day] = new Set())).add(p.employee)
+      const roles = byDate[day] || (byDate[day] = {})
+      ;(roles[p.role] || (roles[p.role] = new Set())).add(p.employee)
     }
   }
-  return Object.entries(byDate)
-    .filter(([, emps]) => emps.size > 1)
-    .map(([date, emps]) => ({ date, employees: [...emps].sort() }))
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const conflicts = []
+  for (const [date, roles] of Object.entries(byDate)) {
+    for (const [role, emps] of Object.entries(roles)) {
+      if (emps.size > 1) conflicts.push({ date, role, employees: [...emps].sort() })
+    }
+  }
+  return conflicts.sort((a, b) => a.date.localeCompare(b.date) || a.role.localeCompare(b.role))
+}
+
+// Name -> role, from the portal's own Staff table (not QBT — QBT has no concept of role).
+// Exact match only, trimmed + lowercased; a QBT name that doesn't match any Staff record
+// (different spelling, contractor not yet added, etc.) simply gets no role, never a guess.
+async function getRoleByName() {
+  const { data } = await db.from('Staff').select('name,role')
+  const map = {}
+  for (const s of data || []) {
+    if (s.name && s.role) map[s.name.trim().toLowerCase()] = s.role
+  }
+  return map
 }
 
 async function getUpcomingLeave(daysAhead = 91) {
@@ -135,11 +160,12 @@ async function getUpcomingLeave(daysAhead = 91) {
   // Fetched once per status, matching the already-proven behaviour of the old single
   // status:'approved' call (its result matched the old manual Word-doc report) — assumed
   // to work symmetrically for 'pending', unlike the date params below it which QBT rejects.
-  const [approvedRaw, pendingRaw, users, ptoJobcodes] = await Promise.all([
+  const [approvedRaw, pendingRaw, users, ptoJobcodes, roleByName] = await Promise.all([
     qbtGet('/time_off_request_entries', { status: 'approved' }),
     qbtGet('/time_off_request_entries', { status: 'pending' }),
     qbtGet('/users', { active: 'yes' }),
     qbtGet('/jobcodes', { type: 'pto' }),
+    getRoleByName(),
   ])
 
   const userName = {}
@@ -168,7 +194,7 @@ async function getUpcomingLeave(daysAhead = 91) {
 
   function periodsFor(rawEntries) {
     return groupEntriesByRequest(normalise(rawEntries))
-      .map(periodFromGroup)
+      .map(entries => periodFromGroup(entries, roleByName))
       // Include if the request overlaps the window at all: started before it and
       // continuing in, entirely inside it, or starting inside it and finishing after.
       .filter(p => p.startDate <= windowEnd && p.endDate >= windowStart)
@@ -177,14 +203,15 @@ async function getUpcomingLeave(daysAhead = 91) {
   const sortRows = (a, b) => a.startDate.localeCompare(b.startDate) || a.employee.localeCompare(b.employee)
 
   const approvedPeriods = periodsFor(approvedRaw.time_off_request_entries)
-  const overlaps = findOverlaps(approvedPeriods, windowStart, windowEnd)
-  const overlapDates = new Set(overlaps.map(o => o.date))
+  const roleConflicts = findRoleConflicts(approvedPeriods, windowStart, windowEnd)
+  const conflictDatesByRole = {}
+  for (const c of roleConflicts) (conflictDatesByRole[c.role] || (conflictDatesByRole[c.role] = new Set())).add(c.date)
 
   const approved = approvedPeriods
     .map(p => ({
       ...p,
       ongoing: p.startDate <= windowStart,
-      hasOverlap: datesInRange(p.startDate, p.endDate).some(day => overlapDates.has(day)),
+      hasRoleConflict: !!p.role && datesInRange(p.startDate, p.endDate).some(day => conflictDatesByRole[p.role]?.has(day)),
     }))
     .sort(sortRows)
 
@@ -192,13 +219,13 @@ async function getUpcomingLeave(daysAhead = 91) {
     .map(p => ({ ...p, ongoing: p.startDate <= windowStart }))
     .sort(sortRows)
 
-  return { approved, pending, overlaps, windowStart, windowEnd }
+  return { approved, pending, roleConflicts, windowStart, windowEnd }
 }
 
 // Cached wrapper — serves a stored copy when fresh (<15min old) so the Payroll
 // page loads fast; only pays the ~130s QBT cost when the cache has gone stale.
 // Stored under the existing 'rows' jsonb column even though it now holds the full
-// {approved,pending,overlaps,...} bundle rather than a flat array — no schema migration
+// {approved,pending,roleConflicts,...} bundle rather than a flat array — no schema migration
 // available in this project, so the column just carries whatever shape the cache needs.
 async function getCachedUpcomingLeave() {
   const { data: cached } = await db.from('QbtLeaveCache').select('*').eq('id', 'singleton').maybeSingle()
