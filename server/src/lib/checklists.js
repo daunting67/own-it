@@ -2,13 +2,12 @@ const TEMPLATES = {
   'Direct Hire': [
     { section: 'Pre-start', items: [
       { label: 'Offer letter sent', done: false },
-      { label: 'Offer letter signed & returned', done: false },
       { label: 'Reference checks complete', done: false },
       { label: 'Right to work verified', done: false },
     ]},
     { section: 'Candidate form', items: [
-      { label: 'Intake form sent to candidate', done: false },
-      { label: 'Intake form completed', done: false },
+      { label: 'Personal Details Form sent to candidate', done: false },
+      { label: 'Personal Details Form completed', done: false },
       { label: 'Photo received & approved', done: false },
     ]},
     { section: 'Payroll & admin', items: [
@@ -37,9 +36,12 @@ const TEMPLATES = {
       { label: 'Emergency contacts entered', done: false },
       { label: 'Licences/certs uploaded', done: false },
     ]},
-    { section: 'ID card', items: [
-      { label: 'Site ID card generated', done: false },
-      { label: 'ID card issued to worker', done: false },
+    { section: 'Company Vehicles', items: [
+      { label: "Driver's licence verified", done: false },
+      { label: 'Vehicle policy signed', done: false },
+      { label: 'Vehicle allocated', done: false },
+      { label: 'Vehicle handover/induction completed', done: false },
+      { label: 'Fuel card issued', done: false },
     ]},
   ],
   'Labour Hire': [
@@ -48,8 +50,8 @@ const TEMPLATES = {
       { label: 'Right to work verified', done: false },
     ]},
     { section: 'Candidate form', items: [
-      { label: 'Intake form sent to candidate', done: false },
-      { label: 'Intake form completed', done: false },
+      { label: 'Personal Details Form sent to candidate', done: false },
+      { label: 'Personal Details Form completed', done: false },
       { label: 'Photo received & approved', done: false },
     ]},
     { section: 'Payroll & admin', items: [
@@ -65,9 +67,12 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
     ]},
-    { section: 'ID card', items: [
-      { label: 'Site ID card generated', done: false },
-      { label: 'ID card issued to worker', done: false },
+    { section: 'Company Vehicles', items: [
+      { label: "Driver's licence verified", done: false },
+      { label: 'Vehicle policy signed', done: false },
+      { label: 'Vehicle allocated', done: false },
+      { label: 'Vehicle handover/induction completed', done: false },
+      { label: 'Fuel card issued', done: false },
     ]},
   ],
   'Contractor': [
@@ -78,8 +83,8 @@ const TEMPLATES = {
       { label: 'Right to work verified', done: false },
     ]},
     { section: 'Candidate form', items: [
-      { label: 'Intake form sent', done: false },
-      { label: 'Intake form completed', done: false },
+      { label: 'Personal Details Form sent', done: false },
+      { label: 'Personal Details Form completed', done: false },
       { label: 'Photo received & approved', done: false },
     ]},
     { section: 'Inductions', items: [
@@ -91,9 +96,12 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Certs/licences uploaded', done: false },
     ]},
-    { section: 'ID card', items: [
-      { label: 'Site ID card generated', done: false },
-      { label: 'ID card issued to worker', done: false },
+    { section: 'Company Vehicles', items: [
+      { label: "Driver's licence verified", done: false },
+      { label: 'Vehicle policy signed', done: false },
+      { label: 'Vehicle allocated', done: false },
+      { label: 'Vehicle handover/induction completed', done: false },
+      { label: 'Fuel card issued', done: false },
     ]},
   ],
   'Casual': [
@@ -102,8 +110,8 @@ const TEMPLATES = {
       { label: 'Right to work verified', done: false },
     ]},
     { section: 'Candidate form', items: [
-      { label: 'Intake form sent to candidate', done: false },
-      { label: 'Intake form completed', done: false },
+      { label: 'Personal Details Form sent to candidate', done: false },
+      { label: 'Personal Details Form completed', done: false },
       { label: 'Photo received & approved', done: false },
     ]},
     { section: 'Payroll & admin', items: [
@@ -128,9 +136,12 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
     ]},
-    { section: 'ID card', items: [
-      { label: 'Site ID card generated', done: false },
-      { label: 'ID card issued to worker', done: false },
+    { section: 'Company Vehicles', items: [
+      { label: "Driver's licence verified", done: false },
+      { label: 'Vehicle policy signed', done: false },
+      { label: 'Vehicle allocated', done: false },
+      { label: 'Vehicle handover/induction completed', done: false },
+      { label: 'Fuel card issued', done: false },
     ]},
   ],
 }
