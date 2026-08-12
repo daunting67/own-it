@@ -3,13 +3,34 @@ const { randomUUID } = require('crypto')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/tenderUploads')
 const { saveTender, getTender, listTenders } = require('../lib/tenderStore')
+const mammoth = require('mammoth')
 const {
   isReadable,
   unreadableReason,
-  buildDebrief
+  buildDebrief,
+  extractXlsxText
 } = require('../lib/tenderPrompts')
 const { digestAndReviewDocument, mergeTagFindings } = require('../lib/tagPrompts')
+const { triageDocument } = require('../lib/tenderTriage')
 const { loadRegister, saveRegister, forMatching } = require('../lib/tagRegisterStore')
+
+const TEXT_FILE = /\.(txt|md|csv|tsv|log)$/i
+const DOCX_FILE = /\.docx$/i
+const XLSX_FILE = /\.xlsx$/i
+
+// Best-effort plain-text excerpt for the triage step only — cheap, local,
+// no Claude call. Never throws: if extraction fails, triage just skips
+// itself for this document and the full digest+TAG read proceeds as normal.
+async function excerptText(filename, buffer) {
+  try {
+    if (TEXT_FILE.test(filename)) return buffer.toString('utf8')
+    if (DOCX_FILE.test(filename)) return (await mammoth.extractRawText({ buffer })).value
+    if (XLSX_FILE.test(filename)) return await extractXlsxText(buffer)
+  } catch {
+    return null
+  }
+  return null
+}
 
 // Weekly estimating capacity, given 3 Aug 2026 (Josh/Rory unchanged; Tony's
 // share reassigned to Hamish): Hamish 40hrs, Josh 20hrs, Rory 20hrs — Josh
@@ -148,6 +169,39 @@ router.post('/read', async (req, res) => {
     const fullRegister = await loadRegister()
     const register = forMatching(fullRegister)
     const buffer = await downloadUpload(path)
+
+    // Cheap pre-check before the expensive sonnet digest+TAG call. Only ever
+    // skips the full read when confident there's nothing bid-relevant here —
+    // any doubt, or any triage failure, falls through to the normal full
+    // read below. Never marks a document unread: a skipped document still
+    // shows up in coverage with the triage's own reason.
+    const text = await excerptText(filename, buffer)
+    const triage = await triageDocument({ filename, buffer, extractedText: text })
+
+    if (triage?.skip) {
+      res.json({
+        filename,
+        path,
+        read: true,
+        skipped: true,
+        pages: null,
+        documentType: triage.documentType,
+        summary: `Not fully analysed — ${triage.reason || 'triaged as administrative content with no bid-relevant detail.'}`,
+        keyFacts: [],
+        scopeItems: [],
+        requirements: [],
+        onerousTerms: [],
+        quantities: [],
+        dates: [],
+        risks: [],
+        gaps: [],
+        tagFindings: [],
+        dayworksFindings: [],
+        reviewGaps: []
+      })
+      return
+    }
+
     const digest = await digestAndReviewDocument({ filename, buffer, register })
     res.json({ ...digest, path })
   } catch (err) {
@@ -188,7 +242,8 @@ router.post('/debrief', async (req, res) => {
         read: !!d.read,
         reason: d.reason || null,
         documentType: d.documentType || null,
-        pages: d.pages || null
+        pages: d.pages || null,
+        skipped: !!d.skipped
       })),
       debrief,
       tagReview,

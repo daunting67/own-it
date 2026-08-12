@@ -359,5 +359,6 @@ module.exports = {
   isReadable,
   unreadableReason,
   digestDocument,
-  buildDebrief
+  buildDebrief,
+  extractXlsxText
 }

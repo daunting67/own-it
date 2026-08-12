@@ -478,6 +478,7 @@ function Debrief({ tender, onBack, onUpdate }) {
 
   const d = tender.debrief || {}
   const notRead = (tender.documents || []).filter(doc => !doc.read)
+  const skipped = (tender.documents || []).filter(doc => doc.read && doc.skipped)
 
   async function patch(body) {
     setSaving(true)
@@ -549,6 +550,16 @@ function Debrief({ tender, onBack, onUpdate }) {
                 <li key={i}><strong>{doc.filename}</strong> — {doc.reason}</li>
               ))}
             </ul>
+          )}
+          {skipped.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Fast-tracked (no bid-relevant content found, not fully analysed):</strong>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                {skipped.map((doc, i) => (
+                  <li key={i}><strong>{doc.filename}</strong> — {doc.documentType || 'unclassified'}</li>
+                ))}
+              </ul>
+            </div>
           )}
           {d.coverageNotes && <div style={{ marginTop: 8 }}>{d.coverageNotes}</div>}
         </div>
