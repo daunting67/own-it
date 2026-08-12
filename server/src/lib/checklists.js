@@ -182,10 +182,19 @@ function markChecklistComplete(checklist) {
 // touch stored rows. Called on read so older checklists (like someone
 // onboarded before KiwiSaver/IRD form tracking existed) pick up any items the
 // template has gained, without a bulk migration that could clobber done state.
+//
+// If the checklist was already 100% complete under the OLD template, a newly
+// added item must default to done:true, not false — otherwise every time a
+// section gets added to TEMPLATES (e.g. Company Vehicles), every already-
+// onboarded person on the portal instantly reverts to "in progress", which is
+// exactly the kind of "disconnected from reality" tracker state this module
+// exists to prevent. Someone genuinely still mid-onboarding isn't affected
+// either way — they show up as in-progress regardless of the new item.
 function mergeMissingChecklistItems(checklist, hireType) {
   const template = buildChecklist(hireType)
   if (!template.length) return checklist || []
   const existing = checklist || []
+  const wasComplete = existing.length > 0 && existing.every(s => s.items.every(i => i.done))
   const merged = existing.map(s => ({ ...s, items: s.items.map(i => ({ ...i })) }))
   for (const templateSection of template) {
     let section = merged.find(s => s.section === templateSection.section)
@@ -195,7 +204,7 @@ function mergeMissingChecklistItems(checklist, hireType) {
     }
     for (const templateItem of templateSection.items) {
       if (!section.items.some(i => i.label === templateItem.label)) {
-        section.items.push({ ...templateItem })
+        section.items.push({ ...templateItem, done: wasComplete })
       }
     }
   }
