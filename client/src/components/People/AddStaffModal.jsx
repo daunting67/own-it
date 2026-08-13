@@ -5,7 +5,7 @@ import { HIRE_TYPES } from '../../lib/checklists'
 export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
   const [form, setForm] = useState({
     name: '', hireType: 'Direct Hire', siteId: '', position: '',
-    mobile: '', email: '', startDate: '', supplierId: '', role: ''
+    mobile: '', email: '', startDate: '', supplierId: '', role: '', hasCompanyVehicle: false
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -87,6 +87,15 @@ export default function AddStaffModal({ sites, suppliers, onSave, onClose }) {
             <div className="form-group">
               <label className="form-label">Role</label>
               <input className="form-input" value={form.role} onChange={e => set('role', e.target.value)} placeholder="e.g. Labourer" />
+            </div>
+            {/* Not every staff member drives a company vehicle — this adds
+                the Company Vehicles checklist section rather than baking it
+                into every hire type. */}
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.hasCompanyVehicle} onChange={e => set('hasCompanyVehicle', e.target.checked)} />
+                <span className="form-label" style={{ margin: 0 }}>Has a company vehicle</span>
+              </label>
             </div>
             {error && <div className="banner banner-danger">{error}</div>}
           </div>

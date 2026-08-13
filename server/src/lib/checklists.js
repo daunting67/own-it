@@ -1,3 +1,14 @@
+// Only staff who actually drive a company vehicle need this section — most
+// don't, so it's opt-in per person (toggled from the Details tab) rather than
+// baked into every hire-type template. See applyCompanyVehicle below.
+const COMPANY_VEHICLE_ITEMS = [
+  { label: "Driver's licence verified", done: false },
+  { label: 'Vehicle policy signed', done: false },
+  { label: 'Vehicle allocated', done: false },
+  { label: 'Vehicle handover/induction completed', done: false },
+  { label: 'Fuel card issued', done: false },
+]
+
 const TEMPLATES = {
   'Direct Hire': [
     { section: 'Pre-start', items: [
@@ -36,13 +47,6 @@ const TEMPLATES = {
       { label: 'Emergency contacts entered', done: false },
       { label: 'Licences/certs uploaded', done: false },
     ]},
-    { section: 'Company Vehicles', items: [
-      { label: "Driver's licence verified", done: false },
-      { label: 'Vehicle policy signed', done: false },
-      { label: 'Vehicle allocated', done: false },
-      { label: 'Vehicle handover/induction completed', done: false },
-      { label: 'Fuel card issued', done: false },
-    ]},
   ],
   'Labour Hire': [
     { section: 'Pre-start', items: [
@@ -67,13 +71,6 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
     ]},
-    { section: 'Company Vehicles', items: [
-      { label: "Driver's licence verified", done: false },
-      { label: 'Vehicle policy signed', done: false },
-      { label: 'Vehicle allocated', done: false },
-      { label: 'Vehicle handover/induction completed', done: false },
-      { label: 'Fuel card issued', done: false },
-    ]},
   ],
   'Contractor': [
     { section: 'Pre-start', items: [
@@ -95,13 +92,6 @@ const TEMPLATES = {
       { label: 'Profile created in Teammate', done: false },
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Certs/licences uploaded', done: false },
-    ]},
-    { section: 'Company Vehicles', items: [
-      { label: "Driver's licence verified", done: false },
-      { label: 'Vehicle policy signed', done: false },
-      { label: 'Vehicle allocated', done: false },
-      { label: 'Vehicle handover/induction completed', done: false },
-      { label: 'Fuel card issued', done: false },
     ]},
   ],
   'Casual': [
@@ -136,13 +126,6 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
     ]},
-    { section: 'Company Vehicles', items: [
-      { label: "Driver's licence verified", done: false },
-      { label: 'Vehicle policy signed', done: false },
-      { label: 'Vehicle allocated', done: false },
-      { label: 'Vehicle handover/induction completed', done: false },
-      { label: 'Fuel card issued', done: false },
-    ]},
   ],
 }
 
@@ -154,6 +137,23 @@ function buildChecklist(hireType) {
   const template = key ? TEMPLATES[key] : null
   if (!template) return []
   return template.map(s => ({ section: s.section, items: s.items.map(i => ({ ...i })) }))
+}
+
+// Adds or removes the Company Vehicles section based on a per-staff toggle.
+// Turning it OFF removes the section entirely (not just hides it) so it
+// never counts toward that person's progress percentage; turning it ON adds
+// it fresh and unchecked — a deliberate one-off action on that one person,
+// not a template-wide change, so there's no "was this person already
+// complete" concern the way there is in mergeMissingChecklistItems.
+function applyCompanyVehicle(checklist, hasCompanyVehicle) {
+  const list = checklist || []
+  const has = list.some(s => s.section === 'Company Vehicles')
+  if (hasCompanyVehicle) {
+    if (has) return list
+    return [...list, { section: 'Company Vehicles', items: COMPANY_VEHICLE_ITEMS.map(i => ({ ...i })) }]
+  }
+  if (!has) return list
+  return list.filter(s => s.section !== 'Company Vehicles')
 }
 
 function applySiteInductions(checklist, site) {
@@ -211,4 +211,4 @@ function mergeMissingChecklistItems(checklist, hireType) {
   return merged
 }
 
-module.exports = { buildChecklist, applySiteInductions, markChecklistComplete, mergeMissingChecklistItems }
+module.exports = { buildChecklist, applySiteInductions, applyCompanyVehicle, markChecklistComplete, mergeMissingChecklistItems }

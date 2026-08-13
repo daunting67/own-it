@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const db = require('../lib/supabase')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { buildChecklist, applySiteInductions, markChecklistComplete, mergeMissingChecklistItems } = require('../lib/checklists')
+const { buildChecklist, applySiteInductions, applyCompanyVehicle, markChecklistComplete, mergeMissingChecklistItems } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
 const { importStaffDetails } = require('../lib/staffDetailsImport')
@@ -147,20 +147,21 @@ router.post('/import-details', requireAdmin, async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
-  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role } = req.body
+  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, hasCompanyVehicle } = req.body
   if (!name || !hireType) return res.status(400).json({ error: 'Name and hire type required' })
   let checklist = buildChecklist(hireType)
   if (siteId) {
     const { data: site } = await db.from('Site').select('*').eq('id', siteId).single()
     if (site) checklist = applySiteInductions(checklist, site)
   }
+  if (hasCompanyVehicle) checklist = applyCompanyVehicle(checklist, true)
   const { data } = await db.from('Staff').insert({ id: randomUUID(), name, hireType, siteId: siteId || null, position, mobile, email, startDate, supplierId: supplierId || null, role, checklist }).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
   res.status(201).json(data)
 })
 
 router.patch('/:id', async (req, res) => {
-  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, checklist } = req.body
+  const { name, hireType, siteId, position, mobile, email, startDate, supplierId, role, checklist, hasCompanyVehicle } = req.body
   const { data: existing } = await db.from('Staff').select('*').eq('id', req.params.id).single()
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const updates = { updatedAt: new Date().toISOString() }
@@ -189,6 +190,13 @@ router.patch('/:id', async (req, res) => {
     } else {
       updates.checklist = newChecklist
     }
+  }
+  // The Company Vehicles section isn't a DB column — it's a toggle that adds
+  // or removes a section from the checklist itself, applied last so it layers
+  // on top of whatever checklist state this same request is otherwise saving
+  // (a plain edit, or a site-change rebuild) rather than being clobbered by it.
+  if (hasCompanyVehicle !== undefined) {
+    updates.checklist = applyCompanyVehicle(updates.checklist !== undefined ? updates.checklist : existing.checklist, hasCompanyVehicle)
   }
   const { data } = await db.from('Staff').update(updates).eq('id', req.params.id).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()

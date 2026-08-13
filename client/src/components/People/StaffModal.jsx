@@ -92,6 +92,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
       startDate: m.startDate ? String(m.startDate).slice(0, 10) : '',
       supplierId: m.supplierId || '',
       role: m.role || '',
+      hasCompanyVehicle: (m.checklist || []).some(s => s.section === 'Company Vehicles'),
     }
   }
 
@@ -101,7 +102,12 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
     setDetailsSaving(true)
     setDetailsError('')
     try {
-      await onUpdate(member.id, details)
+      const updated = await onUpdate(member.id, details)
+      // The Company Vehicles toggle changes the checklist server-side, but
+      // this modal's checklist state was only seeded once on open — without
+      // this, switching to the Checklist tab after toggling would still show
+      // the old section list until the modal is closed and reopened.
+      if (updated?.checklist) setChecklist(updated.checklist)
     } catch (err) {
       setDetailsError(err.message || 'Could not save')
     } finally {
@@ -285,6 +291,15 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
                   <label className="form-label">Role</label>
                   <input className="form-input" value={details.role} onChange={e => setDetail('role', e.target.value)} placeholder="e.g. Labourer" />
                 </div>
+              </div>
+              {/* Not every staff member drives a company vehicle — this adds
+                  or removes the Company Vehicles checklist section rather
+                  than being baked into every hire type. */}
+              <div className="form-group" style={{ marginTop: 14 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={details.hasCompanyVehicle} onChange={e => setDetail('hasCompanyVehicle', e.target.checked)} />
+                  <span className="form-label" style={{ margin: 0 }}>Has a company vehicle</span>
+                </label>
               </div>
               {detailsError && <div className="banner banner-danger" style={{ marginTop: 10 }}>{detailsError}</div>}
               <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={saveDetails} disabled={detailsSaving}>
