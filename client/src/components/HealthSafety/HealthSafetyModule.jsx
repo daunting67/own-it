@@ -88,6 +88,7 @@ function IncidentsTab() {
 const TABS = [
   { id: 'incidents', label: 'Incidents' },
   { id: 'toolbox-talk', label: 'Toolbox Talk' },
+  { id: 'hse-committee', label: 'HSE Committee' },
 ]
 
 export default function HealthSafetyModule() {
@@ -116,6 +117,7 @@ export default function HealthSafetyModule() {
 
       {tab === 'incidents' && <IncidentsTab />}
       {tab === 'toolbox-talk' && <ProcessesModule key="toolbox-talk" only="toolbox-talk" />}
+      {tab === 'hse-committee' && <ProcessesModule key="hse-committee" only="hse-committee" />}
     </div>
   )
 }

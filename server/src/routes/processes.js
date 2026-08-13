@@ -6,6 +6,7 @@ const PROCESSES = require('../lib/processDefinitions')
 const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { submitToolboxTalk } = require('../lib/teammateToolboxTalk')
+const { submitHseCommittee } = require('../lib/teammateHseCommittee')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
@@ -15,7 +16,7 @@ const { nzLocalToUtc, nzDateOf, nzDateString } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
-const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk'])
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk', 'hse-committee'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -83,6 +84,53 @@ function renderToolboxTalkText(d) {
     d.training_topic,
     '',
     'FOLLOW-UP ACTIONS',
+    actions
+  ].join('\n')
+}
+
+function renderHseCommitteeText(d) {
+  const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const actionItems = (d.actions || []).filter(Boolean)
+  const actions = actionItems.length
+    ? actionItems.map((a, i) => `${i + 1}. ${a.action || 'Not captured'} — Owner: ${a.owner || 'Not set'} — Due: ${a.due || 'Not set'}`).join('\n')
+    : 'No actions agreed.'
+  const attendees = Array.isArray(d.attendees) ? d.attendees.join(', ') : (d.attendees || '')
+  return [
+    'HSE COMMITTEE MEETING MINUTES',
+    'P&I (North) Ltd',
+    `${nz}`,
+    '',
+    `LOCATION: ${d.location || 'Not specified'}`,
+    `ATTENDED BY: ${attendees}`,
+    '',
+    'PREVIOUS MEETING MINUTES ACTION ITEMS',
+    d.previous_action_items,
+    '',
+    'STAFF TRAINING',
+    d.staff_training,
+    '',
+    'ACCIDENTS & ENVIRONMENTAL INCIDENTS',
+    d.incidents,
+    '',
+    'IMPROVEMENT SUGGESTIONS',
+    d.improvement_suggestions,
+    '',
+    'EMERGENCY PRACTICES',
+    d.emergency_practices,
+    '',
+    'RISK AND ENVIRONMENTAL ASPECT REGISTER REVIEW',
+    d.risk_register_review,
+    '',
+    'REVIEW OF NEW HAZARDS',
+    d.new_hazards,
+    '',
+    'PLANT / EQUIPMENT / VEHICLES',
+    d.plant_equipment_vehicles,
+    '',
+    'OTHER ITEMS',
+    d.other_items,
+    '',
+    'ACTIONS',
     actions
   ].join('\n')
 }
@@ -454,6 +502,18 @@ router.post('/run/:id', async (req, res) => {
         output += `\n\n📋 The "Current Health, Safety and Environmental risks" pick-list is a live Master Risk Register field — it isn't set automatically. In Teammate, open the form and tick the register entries matching: ${parsed.hse_risks || 'Not discussed'}`
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe toolbox talk text above is still valid — copy it into Teammate manually.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'hse-committee') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      output = renderHseCommitteeText(parsed)
+      try {
+        const tm = await submitHseCommittee(parsed, coordinatorName)
+        output += teammateBanner(tm, 'HSE committee meeting minutes')
+      } catch (tmErr) {
+        output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
       }
     }
 

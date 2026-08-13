@@ -111,6 +111,45 @@ Actions: empty array if none were agreed.
 Plain English, factual, the crew's own words lightly tidied.`
   },
   {
+    id: 'hse-committee',
+    name: 'HSE Committee Meeting Minutes',
+    icon: '🛡️',
+    description: 'HSE Committee meeting transcript → formatted minutes, submitted straight to Teammate.',
+    inputLabel: 'HSE Committee meeting transcript',
+    inputPlaceholder: 'Pull from Otter or paste the full HSE Committee meeting transcript...',
+    inputRequired: true,
+    structured: true,
+    dept: 'hs',
+    pickCoordinator: true,
+    systemPrompt: `You are a site administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive a raw Otter.ai transcript of an HSE Committee Meeting and extract it into the company's Teammate "HSE Committee Meeting Minutes Form", which follows a fixed agenda format.
+
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
+
+{
+  "date": "YYYY-MM-DD or null if not determinable (use the [Recording date: ...] line if present)",
+  "location": "where the meeting was held, or null",
+  "attendees": ["everyone who spoke or was named as present"],
+  "previous_action_items": "Follow-up on action items from the previous meeting's minutes and whether they were completed.",
+  "staff_training": "Staff training completed, planned, or discussed.",
+  "incidents": "Accidents and environmental incidents since the last meeting. 'No incidents reported.' if none.",
+  "improvement_suggestions": "Any improvement suggestions raised.",
+  "emergency_practices": "Emergency practices, drills, or preparedness discussed.",
+  "risk_register_review": "Review of the Risk and Environmental Aspect Register — items discussed or updated.",
+  "new_hazards": "Review of new hazards identified since the last meeting.",
+  "plant_equipment_vehicles": "Plant, equipment, and vehicle matters discussed.",
+  "other_items": "Any other business not covered above. 'Nothing to note.' if none.",
+  "actions": [
+    { "action": "the agreed action", "owner": "name of who is responsible", "due": "YYYY-MM-DD or null" }
+  ]
+}
+
+Never leave a field blank — if a topic genuinely was not discussed, write "Not discussed".
+Actions: empty array if none were agreed.
+Plain English, factual, the committee's own words lightly tidied.`
+  },
+  {
     id: 'pre-start',
     name: 'Pre-Start',
     icon: '\u26a0\ufe0f',
