@@ -8,11 +8,21 @@ import { calcProgress } from '../../lib/checklists'
 // isn't on the list. Never counted as a person.
 const isNotAPerson = name => String(name || '').trim().toUpperCase() === 'OTHER NOT LISTED'
 
+// Which department gates each dashboard tile/task type. Admins (and anyone
+// with the matching department) see it; everyone else doesn't — reuses the
+// same departments already assignable per user in Users → Edit, so there's
+// one access model for the whole app rather than a second dashboard-only one.
+const hasDept = (user, dept) => !!user?.admin || (user?.departments || []).includes(dept)
+
 export default function Dashboard({ onNavigate }) {
   const { user } = useAuth()
   const [staff, setStaff] = useState(null)
   const [invoices, setInvoices] = useState(null)
   const [runs, setRuns] = useState(null)
+
+  const canPeople = hasDept(user, 'people')
+  const canPayroll = hasDept(user, 'payroll')
+  const canRuns = user?.admin || ['meetings', 'hs', 'prestart', 'people'].some(d => hasDept(user, d))
 
   useEffect(() => {
     api.getStaff().then(setStaff).catch(() => setStaff([]))
@@ -31,7 +41,7 @@ export default function Dashboard({ onNavigate }) {
   const runsThisWeek = (runs || []).filter(r => new Date(r.createdAt).getTime() > weekAgo)
 
   const tasks = [
-    ...pending.map(inv => ({
+    ...(canPayroll ? pending.map(inv => ({
       key: `inv-${inv.id}`,
       name: `Invoice ${inv.invNumber || '—'}${inv.supplier?.name ? ` — ${inv.supplier.name}` : ''}`,
       dept: 'Payroll',
@@ -40,8 +50,8 @@ export default function Dashboard({ onNavigate }) {
       status: 'Needs Input',
       tagClass: 'tag-needsinput',
       nav: 'payroll',
-    })),
-    ...onboarding.map(s => ({
+    })) : []),
+    ...(canPeople ? onboarding.map(s => ({
       key: `staff-${s.id}`,
       name: `Onboarding — ${s.name}`,
       dept: 'HR & People',
@@ -50,18 +60,18 @@ export default function Dashboard({ onNavigate }) {
       status: calcProgress(s.checklist) > 0 ? 'In Progress' : 'Not Started',
       tagClass: calcProgress(s.checklist) > 0 ? 'tag-inprogress' : 'tag-neutral',
       nav: 'people',
-    })),
+    })) : []),
   ].slice(0, 8)
 
-  const attention = pending.length + onboarding.length
+  const attention = (canPayroll ? pending.length : 0) + (canPeople ? onboarding.length : 0)
   const loading = staff === null || invoices === null || runs === null
 
   const metrics = [
-    { kicker: 'Staff Records', num: people.length, meta: `${onboarding.length} onboarding` },
-    { kicker: 'Pending Invoices', num: pending.length, meta: pending.length > 0 ? 'needs review' : 'all clear', urgent: pending.length > 0 },
-    { kicker: 'Onboarding Open', num: onboarding.length, meta: `of ${people.length} staff` },
-    { kicker: 'Runs This Week', num: runsThisWeek.length, meta: `${(runs || []).length} all time` },
-  ]
+    canPeople && { kicker: 'Staff Records', num: people.length, meta: `${onboarding.length} onboarding` },
+    canPayroll && { kicker: 'Pending Invoices', num: pending.length, meta: pending.length > 0 ? 'needs review' : 'all clear', urgent: pending.length > 0 },
+    canPeople && { kicker: 'Onboarding Open', num: onboarding.length, meta: `of ${people.length} staff` },
+    canRuns && { kicker: 'Runs This Week', num: runsThisWeek.length, meta: `${(runs || []).length} all time` },
+  ].filter(Boolean)
 
   return (
     <>
