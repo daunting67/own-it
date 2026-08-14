@@ -34,6 +34,22 @@ function normProduct(p) {
 function isFuel(p) { return p === 'Diesel' || p === '91 Unleaded' || p === 'Premium'; }
 
 function round2(x) { return Math.round((x + Number.EPSILON) * 100) / 100; }
+
+// The COMMENTS box on a receipt cover sheet is handwritten, so it arrives with stray
+// newlines and padding, and the same note can appear on two copies of one fill.
+function commentText(receipts) {
+  const seen = new Set();
+  const out = [];
+  for (const r of receipts) {
+    const t = r && r.comments != null ? String(r.comments).replace(/\s+/g, ' ').trim() : '';
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.join(' · ');
+}
 // Z's pump prints litres to 3dp but the tax invoice TRUNCATES to 2dp (not rounds) —
 // e.g. a till slip's "55.366 ltr" bills as 55.36, not 55.37. Receipt-side litres must
 // be truncated the same way before comparing, or an honest match reads as a variance.
@@ -203,6 +219,9 @@ function reconcile(invoice, receipts, opts = {}) {
       for (let i = 1; i < c.length; i++) {
         c[i].duplicate = true; c[i].used = true; duplicateCount++;
         c[i].keptReceiptId = c[0].receipt._id;    // so its own receipt can inherit "covered" status
+        // the driver may have written the COMMENTS note on the copy we're dropping,
+        // so carry every merged cover sheet through to the keeper
+        c[0]._mergedReceipts = (c[0]._mergedReceipts || []).concat([c[i].receipt]);
         duplicates.push({ product: c[i].product, litres: c[i].litres, date: c[i].receipt._date,
           source: c[i].receipt.source_file, page: c[i].receipt.page || null,
           kept: c[0].receipt.source_file });
@@ -267,9 +286,11 @@ function reconcile(invoice, receipts, opts = {}) {
 
     const notes = [];
     let status, matchedReceiptId = null, litreVar = null, saving = null;
+    let commentReceipts = [];
 
     if (match) {
       match.used = true;
+      commentReceipts = [match.receipt].concat(match._mergedReceipts || []);
       status = 'Matched';
       matchedReceiptId = match.receipt._id;
       if (fuel && match.litres != null && line.litres != null) litreVar = round2(match.litres - line.litres);
@@ -284,7 +305,7 @@ function reconcile(invoice, receipts, opts = {}) {
       // lost? look for a lost-receipt note attributable to this driver near this date
       const lost = inPeriod.find((r) => r.photo_type === 'lost_receipt'
         && nameMatch(r.cover_name, line.driver) && dayDiff(bestReceiptDate(r), line.date) <= 2);
-      if (lost) { status = 'Lost receipt'; matchedReceiptId = lost._id; notes.push('handwritten LOST RECEIPT note — unverifiable'); }
+      if (lost) { status = 'Lost receipt'; matchedReceiptId = lost._id; commentReceipts = [lost]; notes.push('handwritten LOST RECEIPT note — unverifiable'); }
       else { status = 'Missing receipt'; notes.push('No receipt supplied'); }
     }
 
@@ -293,6 +314,7 @@ function reconcile(invoice, receipts, opts = {}) {
       receipt: match ? match.receipt : null,
       receiptLitres: match ? match.litres : null,
       litreVar, saving, notes,
+      comments: commentText(commentReceipts),
     });
   }
 

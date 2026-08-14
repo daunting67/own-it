@@ -64,6 +64,12 @@ Wash — list each as a separate item). If the fuel grade is not legible on a bl
 product to null rather than guessing — litres is the reliable field. Mark ocr_confidence "low" for
 blurry/glare-affected bowser photos, "high" for clear till slips.
 
+The COMMENTS box matters and is easy to overlook: transcribe it VERBATIM into "comments". It is
+handwritten and is the driver's own explanation of the spend (e.g. "wrong pump", "jerry can for the
+genset", "customer vehicle", "took the truck to Whangarei"). Keep the driver's own wording — do not
+summarise, tidy or interpret it — and use null ONLY when the box is genuinely empty. If the
+handwriting is partly illegible, transcribe what you can read and append " [illegible]".
+
 Return ONLY valid JSON (no markdown fences, no explanation): an object with a "receipts" array:
 {
   "receipts": [

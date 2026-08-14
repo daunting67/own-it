@@ -153,13 +153,13 @@ function buildFuelReconXlsx(R, meta = {}) {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
   })
   placeLogo(wb, rec, 50)
-  titleBand(rec, 16, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
+  titleBand(rec, 17, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
     `Period ending ${meta.periodEndLabel || inv.periodEnd}  ·  Account ${inv.account}  ·  Total invoice $${inv.total.toLocaleString('en-NZ', { minimumFractionDigits: 2 })} (incl GST)`)
 
   const recHeaders = ['Date', 'Driver', 'Card (invoice)', 'Product', 'Txn', 'Inv. litres',
     'Pump rate', 'Your rate', 'Invoice $ (incl GST)', 'Receipt', 'Receipt litres', 'Litre var.',
-    'Receipt $ (pump)', 'Discount saving', 'Status', 'Notes']
-  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 11, L: 9, M: 11, N: 11, O: 14, P: 46 }
+    'Receipt $ (pump)', 'Discount saving', 'Status', 'Notes', 'Comments']
+  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 11, L: 9, M: 11, N: 11, O: 14, P: 46, Q: 40 }
   headerRow(rec, 4, recHeaders, recWidths)
   let rr = 5
   const firstDataRow = rr
@@ -170,18 +170,20 @@ function buildFuelReconXlsx(R, meta = {}) {
       l.pump_rate, l.your_rate, l.amount_incl,
       res.status === 'Matched' ? 'Yes' : res.status === 'Lost receipt' ? 'Lost' : 'No',
       res.receiptLitres, res.litreVar, res.saving != null ? round2(res.saving + l.amount_incl) : null,
-      res.saving, res.status, res.notes.join(' · '),
+      res.saving, res.status, res.notes.join(' · '), res.comments || '',
     ]
     cells.forEach((v, i) => {
       const c = rec.getCell(rr, i + 1)
       c.value = v ?? ''
       c.font = font(9)
       if ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(i + 1)) c.alignment = { horizontal: 'right' }
+      // Comments is free handwriting off the cover sheet — wrap it instead of letting it run
+      if (i + 1 === 17) c.alignment = { vertical: 'top', wrapText: true }
       if ([6, 9, 13, 14].includes(i + 1)) c.numFmt = MONEY
       c.border = allBorder
     })
     const sf = statusFill(res.status)
-    if (sf) for (let col = 1; col <= 16; col++) rec.getCell(rr, col).fill = fill(sf)
+    if (sf) for (let col = 1; col <= 17; col++) rec.getCell(rr, col).fill = fill(sf)
     rr += 1
   }
   // totals row
@@ -192,7 +194,7 @@ function buildFuelReconXlsx(R, meta = {}) {
   rec.getCell(rr, 13).value = { formula: `SUM(M${firstDataRow}:M${rr - 1})` }
   rec.getCell(rr, 14).value = { formula: `SUM(N${firstDataRow}:N${rr - 1})` }
   for (const col of [6, 9, 13, 14]) { const c = rec.getCell(rr, col); c.numFmt = MONEY; c.font = font(10, true, NAVY) }
-  for (let col = 1; col <= 16; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
+  for (let col = 1; col <= 17; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
 
   // ================= Missing Receipts =================
   const missing = wb.addWorksheet('Missing Receipts', { views: [{ showGridLines: false }] })
