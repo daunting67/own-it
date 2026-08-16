@@ -167,6 +167,33 @@ function batchByPageCount(entries) {
   return batches
 }
 
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
+
+// A month's run fires many batches concurrently (see the Promise.all in /run) — a single
+// 429 (rate limited) or 529 (overloaded) among them used to propagate straight out and
+// kill the WHOLE run, including every batch that had already succeeded: the catch block
+// in /run deletes all uploads on any failure, so one transient rate limit meant re-
+// uploading and re-paying for everything. Retry those two codes specifically, with
+// backoff, before giving up — everything else (a real 4xx, a genuine parse failure)
+// still fails immediately as before.
+async function fetchAnthropic(anthropicKey, body) {
+  const MAX_ATTEMPTS = 4
+  let response
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (response.status !== 429 && response.status !== 529) return response
+    if (attempt === MAX_ATTEMPTS) return response
+    const retryAfter = Number(response.headers.get('retry-after'))
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * (2 ** (attempt - 1))
+    await sleep(delayMs)
+  }
+  return response
+}
+
 // One extraction call: system prompt + a list of { filename, buffer, label, pageOffset,
 // isSplitPart }. Returns the parsed JSON, with any receipt "page" corrected back to the
 // ORIGINAL scan's page number when the file was a split excerpt. Throws a clear error if
@@ -182,23 +209,19 @@ async function extract(anthropicKey, system, files) {
     content.push({ type: 'text', text: `FILE (${f.label}): ${f.filename}${excerptNote}` })
     content.push({ type: kind, source: { type: 'base64', media_type, data: f.buffer.toString('base64') } })
   }
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8192,
-      // This is financial-reconciliation extraction, not creative writing — variance
-      // across runs is a defect here, not a feature. Confirmed live 14 Aug 2026: two
-      // runs of the SAME invoice + SAME receipt files (default temperature, i.e. 1.0)
-      // classified three specific files differently ("not on invoice" in one run,
-      // matched in the other). temperature:0 makes the model as deterministic as it can
-      // be — it does not guarantee byte-identical output, but removes the single
-      // biggest unforced source of run-to-run disagreement.
-      temperature: 0,
-      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content }]
-    })
+  const response = await fetchAnthropic(anthropicKey, {
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 8192,
+    // This is financial-reconciliation extraction, not creative writing — variance
+    // across runs is a defect here, not a feature. Confirmed live 14 Aug 2026: two
+    // runs of the SAME invoice + SAME receipt files (default temperature, i.e. 1.0)
+    // classified three specific files differently ("not on invoice" in one run,
+    // matched in the other). temperature:0 makes the model as deterministic as it can
+    // be — it does not guarantee byte-identical output, but removes the single
+    // biggest unforced source of run-to-run disagreement.
+    temperature: 0,
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content }]
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
@@ -417,7 +440,14 @@ router.post('/run', async (req, res) => {
     const { workbook, stats } = buildFuelReconXlsx(R, { periodEndLabel })
     const buf = await workbook.xlsx.writeBuffer()
 
-    const filename = `Fuel Reconciliation - ${invoiceData.invoice_number || runId.slice(0, 8)}.xlsx`
+    // invoice_number comes straight from the model's reading of the invoice header — an
+    // unsanitised "/" in it (some suppliers format invoice numbers like "INV/2026/0731")
+    // would make saveCostDoc's `${runId}/${filename}` a NESTED path, and getCostDoc's
+    // `list(runId, {limit:1})` then returns the folder placeholder instead of the file —
+    // download 404s every time despite the run showing "completed". safePathPart is the
+    // same sanitiser already used for uploaded filenames (SOQ's builder applies the
+    // equivalent slugFilename() for the same reason).
+    const filename = safePathPart(`Fuel Reconciliation - ${invoiceData.invoice_number || runId.slice(0, 8)}.xlsx`)
     await saveCostDoc(runId, filename, buf)
 
     const totalLabel = R.summary.invoiceTotal != null ? `$${R.summary.invoiceTotal.toFixed(2)}` : '(total not read from invoice)'
@@ -437,13 +467,16 @@ router.post('/run', async (req, res) => {
       invoiceData.invoice_date ? ' · ' + fmtDate(invoiceData.invoice_date) : periodEndLabel ? ' · ' + periodEndLabel : ''
     }`
     await db.from('ProcessRun').update({ input: invoiceLabel, output, status: 'completed' }).eq('id', runId)
-    removeUploads(allPaths).catch(() => {})
+    // Awaited, not fire-and-forget: a Vercel function instance can freeze the moment the
+    // response is sent, so a detached `.catch(()=>{})` with no await had no guarantee of
+    // completing before the delete request even left — temp uploads could leak silently.
+    await removeUploads(allPaths).catch(() => {})
     res.json({ id: runId, output, document: buf.toString('base64'), filename, stats, summary: R.summary })
 
   } catch (err) {
     console.error('Cost Control run failed:', err)
     await db.from('ProcessRun').update({ output: err.message, status: 'failed' }).eq('id', runId)
-    removeUploads(allPaths).catch(() => {})
+    await removeUploads(allPaths).catch(() => {})
     res.status(500).json({ error: err.message || 'Reconciliation failed' })
   }
 })

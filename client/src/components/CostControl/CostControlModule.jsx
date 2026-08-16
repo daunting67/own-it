@@ -26,6 +26,11 @@ export default function CostControlModule() {
   const [history, setHistory] = useState([])
   const [historyDocFetching, setHistoryDocFetching] = useState(null)
   const [historyError, setHistoryError] = useState(null)
+  // Bumped after a successful run to remount the file inputs (clearing their displayed
+  // selection — a plain state reset doesn't do this for <input type="file">, since its
+  // value isn't React-controlled). Deliberately NOT bumped on failure: a failed run keeps
+  // its selection so the user can fix one file and retry without re-picking everything.
+  const [resetKey, setResetKey] = useState(0)
 
   useEffect(() => {
     api.getCostControlRuns().then(setHistory).catch(() => {})
@@ -71,6 +76,12 @@ export default function CostControlModule() {
       setProgress('Reading invoice & receipts, matching transactions… (can take a minute)')
       const res = await api.runCostControl(invoicePaths, receiptPaths)
       setResult(res)
+      // Clear the selection so this month's files can't accidentally carry over into the
+      // next run — previously they stayed selected, and choosing a NEW invoice without
+      // also clearing receipts would reconcile a new invoice against old receipts.
+      setInvoiceFile(null)
+      setReceiptFiles([])
+      setResetKey(k => k + 1)
       api.getCostControlRuns().then(setHistory).catch(() => {})
     } catch (err) {
       setError(err.message)
@@ -115,6 +126,7 @@ export default function CostControlModule() {
               Supplier invoice (PDF) — one file, e.g. the Z Energy tax invoice
             </label>
             <input
+              key={`invoice-${resetKey}`}
               type="file"
               accept="application/pdf,.pdf"
               onChange={onInvoiceChosen}
@@ -131,6 +143,7 @@ export default function CostControlModule() {
               Receipts & bowser photos — driver "Fuel Card Receipts" PDFs, batch scans, or photos of the pump display
             </label>
             <input
+              key={`receipts-${resetKey}`}
               type="file"
               accept="application/pdf,.pdf,image/png,image/jpeg,.jpg,.jpeg,.png"
               multiple

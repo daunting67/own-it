@@ -495,7 +495,11 @@ function reconcile(invoice, receipts, opts = {}) {
     // null (not Infinity/NaN) when the invoice total itself didn't read — Infinity/NaN
     // would flow into the printed run summary and JSON.stringify silently turns Infinity
     // into null anyway, so make that "we don't know" explicit rather than accidental.
-    pctSupported: invoice.total_due ? round2(val(matched) / invoice.total_due) : null,
+    // Rounded to 4dp (not round2's 2dp) because round2 on a 0-1 FRACTION rounds to the
+    // nearest whole PERCENTAGE POINT — a real 26.65% becomes 0.27, and the workbook's
+    // one-decimal '0.0%' format then prints a fake-precise "27.0%" for what was actually
+    // rounded a full point away from the true figure.
+    pctSupported: invoice.total_due ? Math.round((val(matched) / invoice.total_due) * 10000) / 10000 : null,
     duplicatesRemoved: duplicateCount,
     nextPeriodCount: nextPeriod.length,
     cardMismatchCount: cardMismatches.length,
@@ -512,7 +516,7 @@ function reconcile(invoice, receipts, opts = {}) {
         products: it.map((x) => x.product).join(' + '),
         litres: round2(it.reduce((a, x) => a + (x.litres || 0), 0)) || null,
         total: round2(it.reduce((a, x) => a + (x.total || 0), 0)) || null,
-        source: r.source_file };
+        source: r.source_file, comments: commentText([r]) };
     }),
     duplicates,
   };
