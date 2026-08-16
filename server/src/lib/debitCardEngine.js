@@ -1,0 +1,355 @@
+'use strict';
+/*
+ * Debit Card Receipt reconciliation engine — deterministic. Mirrors fuelEngine.js's
+ * structure (dedupe -> match -> exceptions -> validation -> summary) for the Debit Card
+ * Receipts process, but simplified: there is no litres/product/fleet-discount concept
+ * here — a debit card receipt should show the SAME dollar amount as the statement line
+ * (no discounted "your rate" vs pump-price gap), so amount itself is the strongest match
+ * key instead of a secondary one.
+ *
+ * Input:
+ *   statement = { statement_number, account, statement_date, period_end, total_due, lines[] }
+ *   receipts  = [ { source_file, page?, cover_date, cover_name, cover_card, comments,
+ *                   photo_type, merchant, txn_date, card_last4, ocr_confidence,
+ *                   items:[{description,amount}], notes } ]
+ *
+ * Output: a ReconResult object (see bottom) — same shape family as fuelEngine's, so the
+ * workbook builder can follow the same pattern.
+ */
+
+function round2(x) { return Math.round((x + Number.EPSILON) * 100) / 100; }
+
+// Same robust coercion as fuelEngine.toNumber — model output can quote a comma-grouped or
+// $-prefixed figure (JSON has no literal for "1,240.50"); a bare Number() would turn that
+// into NaN, which is `!= null` and so slides past every "is this usable?" guard downstream.
+function toNumber(x) {
+  if (x == null) return null;
+  if (typeof x === 'number') return Number.isFinite(x) ? x : null;
+  const s = String(x).trim().replace(/[$,\s]/g, '');
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function amtKey(x) { return x == null ? null : round2(Number(x)).toFixed(2); }
+
+function commentText(receipts) {
+  const seen = new Set();
+  const out = [];
+  for (const r of receipts) {
+    const t = r && r.comments != null ? String(r.comments).replace(/\s+/g, ' ').trim() : '';
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.join(' · ');
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  let y, m, d;
+  let mm = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (mm) { y = +mm[1]; m = +mm[2]; d = +mm[3]; }
+  else {
+    mm = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if (!mm) return null;
+    d = +mm[1]; m = +mm[2]; y = +mm[3];
+    if (y < 100) y += 2000;
+  }
+  if (!m || !d) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const serial = Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+  return { y, m, d, serial };
+}
+function dayDiff(a, b) {
+  const pa = parseDate(a), pb = parseDate(b);
+  if (!pa || !pb) return Infinity;
+  return Math.abs(pa.serial - pb.serial);
+}
+
+function normName(n) {
+  return String(n || '').toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = Math.min(dp[i-1][j] + 1, dp[i][j-1] + 1, dp[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return dp[m][n];
+}
+function tokenSim(a, b) {
+  const ta = normName(a).split(' ').filter(Boolean);
+  const tb = normName(b).split(' ').filter(Boolean);
+  if (!ta.length || !tb.length) return 0;
+  let matched = 0;
+  for (const x of ta) {
+    let best = 0;
+    for (const y of tb) {
+      const d = levenshtein(x, y);
+      const sim = 1 - d / Math.max(x.length, y.length);
+      if (sim > best) best = sim;
+    }
+    if (best >= 0.7) matched++;
+  }
+  return matched / Math.max(ta.length, tb.length);
+}
+// Same 0.6 threshold and same reasoning as fuelEngine.nameMatch — proven against real
+// fleet names to reject one-token surname/given-name coincidences while still passing
+// genuine spelling variants (see fuelEngine.js for the worked examples).
+function nameMatch(a, b) { return tokenSim(a, b) >= 0.6; }
+
+function cardsDiffer(a, b) {
+  const da = String(a || '').replace(/\D/g, '');
+  const db = String(b || '').replace(/\D/g, '');
+  if (!da || !db) return false;
+  if (da === db) return false;
+  const len = Math.min(da.length, db.length, 6);
+  if (len < 4) return false;
+  const tail = (x) => x.slice(-len);
+  return tail(da) !== tail(db);
+}
+function last4(card) { const d = String(card || '').replace(/\D/g, ''); return d ? d.slice(-4) : null; }
+
+function bestReceiptDate(r) {
+  if (r.photo_type === 'till_slip' && r.txn_date) return r.txn_date;
+  return r.txn_date || r.cover_date || null;
+}
+
+// ---------- engine ----------
+function reconcile(statement, receipts, opts = {}) {
+  const periodEnd = statement.period_end || statement.statement_date;
+  const periodEndP = parseDate(periodEnd);
+  // period start estimate: 35 days before period end — a monthly card statement is
+  // shorter than the ~45-day fuel invoice window fuelEngine uses, so a tighter lookback
+  // keeps a genuinely prior-month stray flagged rather than silently accepted.
+  const periodStartSerial = periodEndP.serial - 35;
+
+  // 0) Coerce every numeric statement-line field once, up front — never NaN (see toNumber).
+  const lines = statement.lines.map((l) => ({ ...l, amount: toNumber(l.amount) }));
+
+  // 1) Normalise receipts + explode into receipt-items (one per line item on the till slip)
+  let rid = 0;
+  const allReceipts = receipts.map((r) => {
+    const date = bestReceiptDate(r);
+    const dp = parseDate(date);
+    return {
+      ...r,
+      _id: 'R' + (++rid),
+      _date: date,
+      _serial: dp ? dp.serial : null,
+      // Same +1 day tolerance as the matcher itself (below), so a receipt dated one day
+      // after period end can still be considered for the statement's last line instead
+      // of being quarantined into Next Period before matching ever runs.
+      _nextPeriod: dp ? dp.serial > periodEndP.serial + 1 : false,
+      items: (r.items || []).map((it) => ({ ...it })),
+    };
+  });
+
+  // 2) Period split
+  const nextPeriod = allReceipts.filter((r) => r._nextPeriod);
+  const inPeriod = allReceipts.filter((r) => !r._nextPeriod);
+
+  // 3) Flatten in-period receipts to matchable items
+  let iid = 0;
+  let items = [];
+  for (const r of inPeriod) {
+    for (const it of r.items) {
+      items.push({
+        _iid: 'I' + (++iid),
+        receipt: r,
+        description: it.description || null,
+        amount: toNumber(it.amount),
+        used: false,
+        duplicate: false,
+      });
+    }
+  }
+
+  // 4) Dedupe: same amount + close date + (same driver OR same card) — a batch scan copy
+  // and a till-slip copy of the same purchase collapse together, same clustering logic as
+  // fuelEngine's litres-keyed dedupe but keyed on amount, the debit-card equivalent of the
+  // strongest field.
+  const dupGroups = {};
+  for (const it of items) {
+    const key = it.amount != null ? `A|${amtKey(it.amount)}` : `N|${(it.description || '').toLowerCase()}`;
+    (dupGroups[key] = dupGroups[key] || []).push(it);
+  }
+  let duplicateCount = 0;
+  const duplicates = [];
+  for (const key of Object.keys(dupGroups)) {
+    const grp = dupGroups[key];
+    if (grp.length < 2) continue;
+    const clusters = [];
+    for (const it of grp) {
+      let placed = false;
+      for (const c of clusters) {
+        const ref = c[0];
+        const closeDate = dayDiff(it.receipt._date, ref.receipt._date) <= 1;
+        const sameDriver = nameMatch(it.receipt.cover_name, ref.receipt.cover_name);
+        const sameCard = last4(it.receipt.cover_card) && last4(it.receipt.cover_card) === last4(ref.receipt.cover_card);
+        const sameL4 = it.receipt.card_last4 && it.receipt.card_last4 === ref.receipt.card_last4;
+        if (closeDate && (sameDriver || sameCard || sameL4 || !it.receipt.cover_name)) { c.push(it); placed = true; break; }
+      }
+      if (!placed) clusters.push([it]);
+    }
+    for (const c of clusters) {
+      if (c.length < 2) continue;
+      const rank = (it) => (it.receipt.photo_type === 'till_slip' ? 2 : 0)
+        + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0);
+      c.sort((a, b) => rank(b) - rank(a));
+      for (let i = 1; i < c.length; i++) {
+        c[i].duplicate = true; c[i].used = true; duplicateCount++;
+        c[i].keptReceiptId = c[0].receipt._id;
+        c[0]._mergedReceipts = (c[0]._mergedReceipts || []).concat([c[i].receipt]);
+        duplicates.push({ description: c[i].description, amount: c[i].amount, date: c[i].receipt._date,
+          source: c[i].receipt.source_file, page: c[i].receipt.page || null, kept: c[0].receipt.source_file });
+      }
+    }
+  }
+  const activeItems = items.filter((it) => !it.duplicate);
+
+  // 5) Match statement lines. Amount(0.01) + date(±2d) is the primary key — the debit
+  // card statement should show the SAME figure as the receipt (no discount gap the way
+  // fuel's pump-vs-your-rate differs), so a single exact pass covers this; there is no
+  // fuzzy/approx fallback because there is no equivalent of a blurry litres reading — a
+  // wrong amount is either the wrong receipt or genuinely unsupported.
+  const matchOf = new Array(lines.length).fill(null);
+  lines.forEach((line, i) => {
+    if (line.amount == null) return;
+    let cands = activeItems.filter((it) => !it.used
+      && it.amount != null && amtKey(it.amount) === amtKey(line.amount)
+      && dayDiff(it.receipt._date, line.date) <= 2);
+    if (cands.length > 1) {
+      cands.sort((a, b) => {
+        const sa = (nameMatch(a.receipt.cover_name, line.cardholder) ? 2 : 0)
+          + (!cardsDiffer(a.receipt.cover_card, line.card) ? 1 : 0)
+          + (dayDiff(a.receipt._date, line.date) === 0 ? 0.5 : 0)
+          + (a.receipt.photo_type === 'till_slip' ? 0.25 : 0);
+        const sb = (nameMatch(b.receipt.cover_name, line.cardholder) ? 2 : 0)
+          + (!cardsDiffer(b.receipt.cover_card, line.card) ? 1 : 0)
+          + (dayDiff(b.receipt._date, line.date) === 0 ? 0.5 : 0)
+          + (b.receipt.photo_type === 'till_slip' ? 0.25 : 0);
+        return sb - sa;
+      });
+    }
+    const match = cands[0] || null;
+    if (match) { match.used = true; matchOf[i] = match; }
+  });
+
+  // 5b) Build results in original statement-line order.
+  const results = [];
+  const usedLostIds = new Set();
+  lines.forEach((line, i) => {
+    const match = matchOf[i];
+    const notes = [];
+    let status, matchedReceiptId = null;
+    let commentReceipts = [];
+
+    if (match) {
+      commentReceipts = [match.receipt].concat(match._mergedReceipts || []);
+      status = 'Matched';
+      matchedReceiptId = match.receipt._id;
+      if (cardsDiffer(match.receipt.cover_card, line.card))
+        notes.push(`card mismatch: cover ${match.receipt.cover_card} vs statement ${line.card}`);
+      // Same as fuelEngine: with a single candidate, driver name is only a tiebreak when
+      // several candidates existed, never a gate — flag a name disagreement rather than
+      // let a receipt book against the wrong cardholder silently.
+      if (match.receipt.cover_name && line.cardholder && !nameMatch(match.receipt.cover_name, line.cardholder))
+        notes.push(`cardholder name mismatch: receipt says "${match.receipt.cover_name}", statement line is "${line.cardholder}" — verify manually`);
+      const m = match.receipt.merchant || match.description;
+      notes.push(`${m || 'receipt'}${match.receipt.page ? ' (batch scan p' + match.receipt.page + ')' : ''}`);
+    } else {
+      const lost = inPeriod.find((r) => r.photo_type === 'lost_receipt' && !usedLostIds.has(r._id)
+        && nameMatch(r.cover_name, line.cardholder) && dayDiff(bestReceiptDate(r), line.date) <= 2);
+      if (lost) {
+        usedLostIds.add(lost._id);
+        status = 'Lost receipt'; matchedReceiptId = lost._id; commentReceipts = [lost];
+        notes.push('handwritten LOST RECEIPT note — unverifiable');
+      } else { status = 'Missing receipt'; notes.push('No receipt supplied'); }
+    }
+
+    results.push({
+      line, status, matchedReceiptId,
+      receipt: match ? match.receipt : null,
+      receiptAmount: match ? match.amount : null,
+      notes,
+      comments: commentText(commentReceipts),
+    });
+  });
+
+  // 6) Card-mismatch exceptions (from matched lines) — one row per cardholder+cover card
+  const cardMismatches = [];
+  const seenCM = new Set();
+  for (const r of results) {
+    if (r.status !== 'Matched' || !r.receipt) continue;
+    if (!cardsDiffer(r.receipt.cover_card, r.line.card)) continue;
+    const k = normName(r.line.cardholder) + '|' + String(r.receipt.cover_card).replace(/\D/g, '');
+    if (seenCM.has(k)) continue;
+    seenCM.add(k);
+    cardMismatches.push({ date: r.line.date, cardholder: r.line.cardholder, coverCard: r.receipt.cover_card,
+      statementCard: r.line.card, amount: r.line.amount });
+  }
+
+  // 7) Receipts not on statement
+  const matchedReceiptIds = new Set(results.filter((r) => r.receipt).map((r) => r.receipt._id));
+  const usedForLost = new Set(results.filter((r) => r.status === 'Lost receipt' && r.matchedReceiptId).map((r) => r.matchedReceiptId));
+  const coveredViaDup = new Set();
+  for (const it of items) {
+    if (it.duplicate && it.keptReceiptId && matchedReceiptIds.has(it.keptReceiptId)) coveredViaDup.add(it.receipt._id);
+  }
+  const notOnStatement = [];
+  for (const r of inPeriod) {
+    if (matchedReceiptIds.has(r._id) || usedForLost.has(r._id) || coveredViaDup.has(r._id)) continue;
+    if (r.photo_type === 'lost_receipt') continue;
+    const dp = parseDate(bestReceiptDate(r));
+    const kind = dp && dp.serial < periodStartSerial ? 'Prior-period stray' : 'Receipt not on statement';
+    const it0 = (r.items || [])[0] || {};
+    notOnStatement.push({ kind, date: bestReceiptDate(r), cardholder: r.cover_name, merchant: r.merchant || it0.description || null,
+      amount: it0.amount != null ? round2(it0.amount) : null, source: r.source_file, page: r.page || null,
+      card: r.cover_card || r.card_last4 || null });
+  }
+
+  // 8) Validation
+  const sumAmount = round2(lines.reduce((a, l) => a + (l.amount || 0), 0));
+  const validation = {
+    totalTiesOut: Math.abs(sumAmount - (statement.total_due || 0)) < 0.005,
+    sumAmount,
+  };
+
+  // 9) Summary
+  const matched = results.filter((r) => r.status === 'Matched');
+  const missing = results.filter((r) => r.status === 'Missing receipt');
+  const lost = results.filter((r) => r.status === 'Lost receipt');
+  const val = (arr) => round2(arr.reduce((a, r) => a + (r.line.amount || 0), 0));
+  const summary = {
+    statementTotal: statement.total_due, lineCount: lines.length,
+    matchedCount: matched.length, matchedValue: val(matched),
+    missingCount: missing.length, missingValue: val(missing),
+    lostCount: lost.length, lostValue: val(lost),
+    pctSupported: statement.total_due ? Math.round((val(matched) / statement.total_due) * 10000) / 10000 : null,
+    duplicatesRemoved: duplicateCount,
+    nextPeriodCount: nextPeriod.length,
+    cardMismatchCount: cardMismatches.length,
+    notOnStatementCount: notOnStatement.length,
+  };
+
+  return {
+    statement: { number: statement.statement_number, account: statement.account,
+      date: statement.statement_date, periodEnd, total: statement.total_due },
+    summary, validation, results, cardMismatches, notOnStatement,
+    nextPeriod: nextPeriod.map((r) => {
+      const it = (r.items || []);
+      return { date: bestReceiptDate(r), cardholder: r.cover_name, merchant: r.merchant || (it[0] && it[0].description) || null,
+        amount: round2(it.reduce((a, x) => a + (toNumber(x.amount) || 0), 0)) || null,
+        source: r.source_file, comments: commentText([r]) };
+    }),
+    duplicates,
+  };
+}
+
+module.exports = { reconcile, parseDate, nameMatch, cardsDiffer };

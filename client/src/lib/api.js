@@ -106,6 +106,13 @@ export const api = {
   runCostControl: (invoicePaths, receiptPaths) =>
     request('/api/cost-control/run', { method: 'POST', body: JSON.stringify({ invoicePaths, receiptPaths }) }),
 
+  // Cost Control — debit card receipt reconciliation
+  getDebitCardRuns: () => request('/api/cost-control-debit/runs'),
+  getDebitCardRunDocument: (id) => request(`/api/cost-control-debit/runs/${id}/document`),
+  getDebitCardUploadUrl: (filename) => request('/api/cost-control-debit/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  runDebitCardRecon: (statementPaths, receiptPaths) =>
+    request('/api/cost-control-debit/run', { method: 'POST', body: JSON.stringify({ invoicePaths: statementPaths, receiptPaths }) }),
+
   // Tenders
   getTenders: () => request('/api/tenders'),
   getTender: (id) => request(`/api/tenders/${id}`),
