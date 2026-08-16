@@ -27,4 +27,18 @@ function requireAdmin(req, res, next) {
   next()
 }
 
-module.exports = { requireAuth, requireRole, requireAdmin, JWT_SECRET }
+// Gate for a specific department's API routes — mirrors canAccessProcess() in
+// processes.js (admins always pass; everyone else must hold the department). Several
+// department modules (e.g. Cost Control) previously relied ONLY on the client hiding the
+// nav item/page for access control: requireAuth verifies the JWT but never reads
+// departments, so any authenticated user of ANY department could call the routes
+// directly. Use this on every department-scoped router alongside requireAuth.
+function requireDept(dept) {
+  return (req, res, next) => {
+    if (req.user?.admin) return next()
+    if (Array.isArray(req.user?.departments) && req.user.departments.includes(dept)) return next()
+    res.status(403).json({ error: 'Forbidden' })
+  }
+}
+
+module.exports = { requireAuth, requireRole, requireAdmin, requireDept, JWT_SECRET }

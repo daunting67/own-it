@@ -2,7 +2,7 @@ const { Router } = require('express')
 const { randomUUID } = require('crypto')
 const { PDFDocument } = require('pdf-lib')
 const db = require('../lib/supabase')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, requireDept } = require('../middleware/auth')
 const { reconcile } = require('../lib/fuelEngine')
 const { buildFuelReconXlsx } = require('../lib/buildFuelReconXlsx')
 const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
@@ -188,6 +188,14 @@ async function extract(anthropicKey, system, files) {
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 8192,
+      // This is financial-reconciliation extraction, not creative writing — variance
+      // across runs is a defect here, not a feature. Confirmed live 14 Aug 2026: two
+      // runs of the SAME invoice + SAME receipt files (default temperature, i.e. 1.0)
+      // classified three specific files differently ("not on invoice" in one run,
+      // matched in the other). temperature:0 makes the model as deterministic as it can
+      // be — it does not guarantee byte-identical output, but removes the single
+      // biggest unforced source of run-to-run disagreement.
+      temperature: 0,
       system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content }]
     })
@@ -228,7 +236,24 @@ async function extract(anthropicKey, system, files) {
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
   try {
     const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files)
-    return Array.isArray(parsed?.receipts) ? parsed.receipts : []
+    if (!Array.isArray(parsed?.receipts)) {
+      // A response that parses as JSON but isn't {"receipts":[...]} used to silently
+      // become an empty array here — the batch's files would vanish with NO error, NO
+      // log, and NO count anywhere, and the run would still say "completed". Every
+      // invoice line those receipts would have matched then read as an honest-looking
+      // "Missing receipt". That is worse than failing: a wrong answer that looks right.
+      // Throwing here instead means the batch is retried like any other failure and, if
+      // it still can't be read, the run fails LOUDLY with the actual files named, rather
+      // than quietly reporting a clean-looking reconciliation that is short by however
+      // many receipts this batch was holding.
+      const shape = Array.isArray(parsed) ? 'a bare JSON array'
+        : parsed && typeof parsed === 'object' ? `an object with keys [${Object.keys(parsed).join(', ')}]`
+        : typeof parsed
+      throw new Error(`Extraction for ${files.map(f => f.filename).join(', ')} came back as ${shape}, `
+        + `not the expected {"receipts":[...]}. Nothing was silently dropped — re-run, or remove the `
+        + `problem file and re-run without it.`)
+    }
+    return parsed.receipts
   } catch (err) {
     if (err.isMaxTokens && files.length > 1 && depth < 8) {
       const mid = Math.ceil(files.length / 2)
@@ -284,8 +309,13 @@ async function extractInvoiceBatch(anthropicKey, files, depth = 0) {
 
 const router = Router()
 router.use(requireAuth)
+// Fuel spend, driver names and card numbers are sensitive — gate every route in this
+// router to the Cost Control department (admins always pass). Previously ONLY the client
+// hid the module for non-Cost-Control staff; the API itself accepted any authenticated
+// user's token, so any portal login could list and download every run's workbook.
+router.use(requireDept('cost'))
 
-// Run history — visible to all staff (Cost Control department gates the module itself).
+// Run history — every run for every driver's fuel spend; restricted to Cost Control above.
 router.get('/runs', async (req, res) => {
   const { data, error } = await db
     .from('ProcessRun')
@@ -372,6 +402,16 @@ router.post('/run', async (req, res) => {
     if (!invoiceData?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
     const receipts = batchResults.flat()
 
+    // Coverage check: which uploaded receipt files never produced a single extracted
+    // receipt? A split PDF's chunks all keep the ORIGINAL filename (see splitPdfIfNeeded),
+    // so this compares fairly regardless of splitting. This can't catch every failure
+    // mode (a file could legitimately contribute nothing — see below) but it is a real,
+    // free check that previously didn't exist anywhere: files went in, and nothing
+    // compared that count against what came out.
+    const receiptFilenames = receiptPaths.map(p => p.split('/').pop())
+    const receiptFilesSeen = new Set(receipts.map(r => r.source_file).filter(Boolean))
+    const receiptFilesMissing = receiptFilenames.filter(f => !receiptFilesSeen.has(f))
+
     const R = reconcile(invoiceData, receipts)
     const periodEndLabel = fmtDate(invoiceData.period_end)
     const { workbook, stats } = buildFuelReconXlsx(R, { periodEndLabel })
@@ -380,11 +420,16 @@ router.post('/run', async (req, res) => {
     const filename = `Fuel Reconciliation - ${invoiceData.invoice_number || runId.slice(0, 8)}.xlsx`
     await saveCostDoc(runId, filename, buf)
 
+    const totalLabel = R.summary.invoiceTotal != null ? `$${R.summary.invoiceTotal.toFixed(2)}` : '(total not read from invoice)'
+    const pctLabel = stats.pctSupported != null ? `${(stats.pctSupported * 100).toFixed(1)}%` : 'an unknown %'
     const output = [
-      `Reconciliation ready — ${R.summary.lineCount} invoice lines, $${R.summary.invoiceTotal.toFixed(2)}.`,
-      `Matched ${stats.matched} · Missing ${R.summary.missingCount} · Lost ${stats.lost} · ${(stats.pctSupported * 100).toFixed(1)}% of invoice value supported by a receipt.`,
+      `Reconciliation ready — ${R.summary.lineCount} invoice lines, ${totalLabel}.`,
+      `Matched ${stats.matched} · Missing ${R.summary.missingCount} · Lost ${stats.lost} · ${pctLabel} of invoice value supported by a receipt.`,
       R.summary.cardMismatchCount ? `${R.summary.cardMismatchCount} card-number mismatch(es) flagged in Exceptions.` : null,
       R.summary.nextPeriodCount ? `${R.summary.nextPeriodCount} receipt(s) held for next period.` : null,
+      receiptFilesMissing.length
+        ? `⚠️ ${receiptFilesMissing.length} uploaded file(s) produced NO receipt data — check these were readable and re-upload if needed: ${receiptFilesMissing.join(', ')}.`
+        : null,
       'Download the .xlsx below — Missing Receipts is the chase-up worklist, Exceptions needs a decision.',
     ].filter(Boolean).join('\n')
 

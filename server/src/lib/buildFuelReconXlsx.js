@@ -170,16 +170,20 @@ function buildFuelReconXlsx(R, meta = {}) {
       l.pump_rate, l.your_rate, l.amount_incl,
       res.status === 'Matched' ? 'Yes' : res.status === 'Lost receipt' ? 'Lost' : 'No',
       res.receiptLitres, res.litreVar, res.saving != null ? round2(res.saving + l.amount_incl) : null,
-      res.saving, res.status, res.notes.join(' · '), res.comments || '',
+      res.saving, res.status, res.notes.join(' · '), res.comments,
     ]
     cells.forEach((v, i) => {
-      const c = rec.getCell(rr, i + 1)
-      c.value = v ?? ''
+      const col = i + 1
+      const c = rec.getCell(rr, col)
+      // Notes (P) and Comments (Q) are long free text, so wrap both. An absent one must be
+      // left GENUINELY empty: an empty string still counts as a neighbouring value and stops
+      // Excel spilling the text beside it, which clipped Notes to the column width.
+      const isText = col === 16 || col === 17
+      c.value = isText ? (v || null) : (v ?? '')
       c.font = font(9)
-      if ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(i + 1)) c.alignment = { horizontal: 'right' }
-      // Comments is free handwriting off the cover sheet — wrap it instead of letting it run
-      if (i + 1 === 17) c.alignment = { vertical: 'top', wrapText: true }
-      if ([6, 9, 13, 14].includes(i + 1)) c.numFmt = MONEY
+      if ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(col)) c.alignment = { horizontal: 'right' }
+      if (isText) c.alignment = { vertical: 'top', wrapText: true }
+      if ([6, 9, 13, 14].includes(col)) c.numFmt = MONEY
       c.border = allBorder
     })
     const sf = statusFill(res.status)
