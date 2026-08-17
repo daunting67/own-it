@@ -655,6 +655,9 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
 .ps-signon-meta { font-size: 12.5px; color: var(--pi-body-muted); }
 .ps-signon-sig { height: 46px; max-width: 190px; object-fit: contain; background: #fff; border-radius: 3px; }
 
+.ps-runsheet-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.ps-runsheet-title { font-size: 18px; font-weight: 900; color: var(--pi-ink); }
+
 .ps-photo { display: flex; flex-direction: column; gap: 10px; }
 .ps-photo-preview { max-width: 100%; max-height: 320px; object-fit: contain; border-radius: 4px; border: 1px solid rgba(0,0,0,.12); background: #fff; }
 .ps-photo-actions { display: flex; gap: 10px; flex-wrap: wrap; }

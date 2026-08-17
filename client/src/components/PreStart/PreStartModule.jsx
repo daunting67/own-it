@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import BriefingRunner, { DRAFT_KEY } from './BriefingRunner'
 import BriefingView from './BriefingView'
+import RunSheetView from './RunSheetView'
 import ProcessesModule from '../Processes/ProcessesModule'
 
 function fmtTime(iso) {
@@ -54,7 +55,7 @@ export default function PreStartModule() {
   // there's never a separate list to keep in sync.
   const [roster, setRoster] = useState([])
   const [mode, setMode] = useState('list')       // list | run | view
-  const [tab, setTab] = useState('briefings')    // briefings | transcript
+  const [tab, setTab] = useState('briefings')    // briefings | runsheet | transcript
   const [current, setCurrent] = useState(null)
   const [draft, setDraft] = useState(null)
   const [error, setError] = useState('')
@@ -167,10 +168,18 @@ export default function PreStartModule() {
         <button className={`tab-btn${tab === 'briefings' ? ' active' : ''}`} onClick={() => { setTab('briefings'); load() }}>
           Briefings
         </button>
+        <button className={`tab-btn${tab === 'runsheet' ? ' active' : ''}`} onClick={() => setTab('runsheet')}>
+          Run Sheet
+        </button>
         <button className={`tab-btn${tab === 'transcript' ? ' active' : ''}`} onClick={() => { setTab('transcript'); load() }}>
           From a transcript
         </button>
       </div>
+
+      {/* The full facilitator script, for whoever's running the briefing to
+          follow along on their own device while Otter records — no formal
+          briefing session needed, nothing here saves. */}
+      {tab === 'runsheet' && <RunSheetView form={form} />}
 
       {/* A pre-start that was recorded rather than tapped out: Claude reads the
           Otter transcript and files the same briefing record, which then shows

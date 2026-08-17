@@ -191,10 +191,10 @@ const SECTIONS = [
       'them out loud, they recognise them, remember them, and take ownership of managing them. The ' +
       "goal isn't just to complete a pre-start — it's to make sure everyone goes home safe.",
     lines: [
-      { ref: '4.1', say: "Ask the team — what hazards could stop us completing today's mission safely?" },
-      { ref: '4.2', say: "Any hazards we've missed? Now let's compare that with the Pre-start and JSEA." },
-      { ref: '4.3', say: 'What could change during the day? Any new hazards we should be ready for?' },
-      { ref: '4.4', say: "What could push us into the Red today? What's our plan if that happens?" },
+      { ref: '5.1', say: "Ask the team — what hazards could stop us completing today's mission safely?" },
+      { ref: '5.2', say: "Any hazards we've missed? Now let's compare that with the Pre-start and JSEA." },
+      { ref: '5.3', say: 'What could change during the day? Any new hazards we should be ready for?' },
+      { ref: '5.4', say: "What could push us into the Red today? What's our plan if that happens?" },
     ],
     fields: [
       { id: 'hazards', label: 'Hazards and controls', type: 'hazards', required: true,
@@ -215,8 +215,8 @@ const SECTIONS = [
       'what makes Decentralised Command work, so everyone can make decisions and execute. Listen for ' +
       "gaps. If they can't say it back, the brief wasn't clear enough — that's on you.",
     lines: [
-      { ref: '5.1', say: 'Please readback your mission today. Go around — in your own words.' },
-      { ref: '5.2', say: 'Anyone need anything from anyone on the team?' },
+      { ref: '6.1', say: 'Please readback your mission today. Go around — in your own words.' },
+      { ref: '6.2', say: 'Anyone need anything from anyone on the team?' },
     ],
     fields: [
       { id: 'readbackGaps', label: 'Gaps heard in the readback · what we re-briefed', type: 'textarea', rows: 2 },
