@@ -32,6 +32,18 @@ function checkSignature(signature) {
   return null
 }
 
+// The Vehicle Movement Plan diagram is a photo, not a finger-drawn signature,
+// so it's allowed far more room — base64 inflates size by ~1/3, so 3MB of
+// photo is roughly 4MB of data URL.
+const MAX_PHOTO_CHARS = 4 * 1024 * 1024
+
+function checkPhoto(photo) {
+  if (!photo) return null
+  if (typeof photo !== 'string' || !photo.startsWith('data:image/')) return 'Diagram must be an image'
+  if (photo.length > MAX_PHOTO_CHARS) return 'Diagram image is too large'
+  return null
+}
+
 // The run sheet and the briefing form itself — served rather than duplicated in
 // the client so the words the crew hears are only ever written in one place.
 router.get('/form', (_req, res) => {
@@ -94,6 +106,8 @@ router.post('/briefings', async (req, res) => {
     if (!briefing.jobSite && briefing.status === 'complete') {
       return res.status(400).json({ error: 'Job site is required to complete a briefing' })
     }
+    const photoProblem = checkPhoto(briefing.values?.vmpDiagram)
+    if (photoProblem) return res.status(400).json({ error: photoProblem })
     for (const signOn of briefing.signOns || []) {
       const problem = checkSignature(signOn.signature)
       if (problem) return res.status(400).json({ error: `${signOn.name || 'Sign-on'}: ${problem}` })

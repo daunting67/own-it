@@ -4,9 +4,10 @@
 // truth for both so the iPad, the saved record and the read-back view can
 // never drift apart:
 //
-//   1. "P&I Prestart Book Run Sheet - v8" — the FACILITATOR script. Six
-//      sections, ~23 minutes, each with a WHY and the words to say. The portal
-//      walks the foreman through these in order.
+//   1. "P&I Prestart Book Run Sheet - v8" — the FACILITATOR script, extended
+//      with a Vehicle Movement Plan section. Seven sections, ~26 minutes, each
+//      with a WHY and the words to say. The portal walks the foreman through
+//      these in order.
 //   2. "P&I - Daily Site Briefing" (P&I-HSE-SB-001 | Rev 3 | June 2026) — the
 //      RECORD. Job details, works description, permits, life saving rules,
 //      hazards and controls, and the crew sign-on sheet.
@@ -17,7 +18,7 @@
 
 const DOC_CONTROL = 'P&I-HSE-SB-001 | Rev 3 | June 2026'
 const RUN_SHEET_REF = 'P&I Prestart Book Run Sheet - v8'
-const TOTAL_MINUTES = 23
+const TOTAL_MINUTES = 26
 
 // The declaration each crew member signs against.
 const SIGN_ON_DECLARATION =
@@ -156,8 +157,33 @@ const SECTIONS = [
     ],
   },
   {
-    id: 'hazards',
+    id: 'vmp',
     number: 4,
+    title: 'Vehicle Movement Plan',
+    minutes: 3,
+    why:
+      'Vehicles and mobile plant moving around a live site are one of our biggest hazards. Agreeing ' +
+      'routes, entry/exit points and who is controlling traffic BEFORE anyone moves stops the crew ' +
+      'improvising it on the fly.',
+    lines: [
+      { ref: '4.1', say: 'Where do vehicles and plant enter and exit the site today?' },
+      { ref: '4.2', say: 'What are the routes around site — any one-way, reversing or shared areas with pedestrians?',
+        note: 'Sketch or photograph the plan if it helps — attach it below.' },
+      { ref: '4.3', say: 'Who is spotting, and what signage or exclusion zones are we using?' },
+    ],
+    fields: [
+      { id: 'vmpDiagram', label: 'Site diagram / vehicle movement sketch', type: 'photo',
+        help: 'Photo of a hand-drawn plan, or an existing site diagram — entry/exit points, routes, parking, exclusion zones.' },
+      { id: 'vmpEntryExit', label: 'Site entry & exit points', type: 'textarea', rows: 2 },
+      { id: 'vmpRoutes', label: 'Vehicle routes on site · one-way, reversing & shared areas', type: 'textarea', rows: 3 },
+      { id: 'vmpPedestrianSeparation', label: 'Pedestrian / plant separation', type: 'textarea', rows: 2 },
+      { id: 'vmpControls', label: 'Traffic control measures', type: 'controls', required: true,
+        help: 'Spotters, signage, speed limits, exclusion zones — one row each.' },
+    ],
+  },
+  {
+    id: 'hazards',
+    number: 5,
     title: "Today's Hazards",
     minutes: 5,
     why:
@@ -181,7 +207,7 @@ const SECTIONS = [
   },
   {
     id: 'readback',
-    number: 5,
+    number: 6,
     title: 'Readback',
     minutes: 3,
     why:
@@ -199,7 +225,7 @@ const SECTIONS = [
   },
   {
     id: 'signon',
-    number: 6,
+    number: 7,
     title: 'Sign-on & Go Execute',
     minutes: null,
     kind: 'signon',

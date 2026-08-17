@@ -193,6 +193,53 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
             onChange={rows => setValue(field.id, rows)}
           />
         )
+      case 'controls':
+        return (
+          <RowEditor
+            rows={value || []}
+            columns={[
+              { id: 'measure', placeholder: 'Control · e.g. spotter, signage, speed limit, exclusion zone', flex: 1 },
+              { id: 'detail', placeholder: 'Detail · where, who, what', flex: 2 },
+            ]}
+            onChange={rows => setValue(field.id, rows)}
+          />
+        )
+      case 'photo': {
+        const MAX_PHOTO_BYTES = 3 * 1024 * 1024
+        return (
+          <div className="ps-photo">
+            {value && <img className="ps-photo-preview" src={value} alt={field.label} />}
+            <div className="ps-photo-actions">
+              <label className="btn btn-secondary ps-btn-lg">
+                {value ? 'Replace photo' : 'Add a photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (!file) return
+                    if (file.size > MAX_PHOTO_BYTES) {
+                      setError(`${field.label}: photo is too large — try a smaller image`)
+                      return
+                    }
+                    const reader = new FileReader()
+                    reader.onload = () => setValue(field.id, reader.result)
+                    reader.readAsDataURL(file)
+                  }}
+                />
+              </label>
+              {value && (
+                <button className="btn btn-secondary ps-btn-lg" onClick={() => setValue(field.id, null)}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      }
       case 'rules': {
         const on = value || []
         return (
@@ -334,7 +381,9 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
           <div className="ps-view-section" style={{ marginTop: 18 }}>
             Today's run sheet — {form.runSheetRef}
           </div>
-          <div className="ps-help">{form.totalMinutes} minutes, six sections. Read it through, then press Begin.</div>
+          <div className="ps-help">
+            {form.totalMinutes} minutes, {sections.filter(s => s.number).length} sections. Read it through, then press Begin.
+          </div>
           <div className="ps-outline">
             {sections.filter(s => s.number).map(s => (
               <div className="ps-outline-row" key={s.id}>

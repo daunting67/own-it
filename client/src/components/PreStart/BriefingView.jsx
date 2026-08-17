@@ -36,6 +36,7 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
   const permits = Object.entries(values.permits || {}).filter(([, p]) => p?.required)
   const hazards = values.hazards || []
   const actions = values.actions || []
+  const vmpControls = values.vmpControls || []
 
   async function addLateSignOn(entry) {
     setError('')
@@ -83,6 +84,34 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
           <Block label="Required plant & materials"><Text value={values.plantMaterials} /></Block>
           <Block label="What the team needs"><Text value={values.teamNeeds} /></Block>
         </div>
+      </div>
+
+      <div className="ps-card">
+        <div className="ps-view-section">Vehicle Movement Plan</div>
+        {values.vmpDiagram && (
+          <div className="ps-view-block">
+            <div className="ps-view-label">Site diagram / vehicle movement sketch</div>
+            <img className="ps-photo-preview" src={values.vmpDiagram} alt="Vehicle movement plan diagram" />
+          </div>
+        )}
+        <div className="ps-view-grid">
+          <Block label="Site entry & exit points"><Text value={values.vmpEntryExit} /></Block>
+          <Block label="Vehicle routes · one-way, reversing & shared areas"><Text value={values.vmpRoutes} /></Block>
+          <Block label="Pedestrian / plant separation"><Text value={values.vmpPedestrianSeparation} /></Block>
+        </div>
+        <div className="ps-view-label" style={{ marginTop: 16 }}>Traffic control measures</div>
+        {vmpControls.length === 0 ? (
+          <div className="ps-view-blank">None recorded.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Control</th><th>Detail</th></tr></thead>
+              <tbody>
+                {vmpControls.map((c, i) => <tr key={i}><td>{c.measure}</td><td>{c.detail}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="ps-card">
