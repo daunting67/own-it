@@ -203,9 +203,19 @@ export default function ReconciliationCard({
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Recent reconciliations</div>
           <div style={{ display: 'grid', gap: 8 }}>
             {history.map(run => (
-              <div key={run.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: 13 }}>
-                <div>
-                  <div>{run.input || 'Reconciliation'}</div>
+              <div key={run.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: 13 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  {/* A failed/running run's `input` can still be the full raw upload
+                      list (a month's worth of filenames) — the success path shortens it
+                      to a one-line label, but a run that errors before that point never
+                      gets the chance. Clamp to 2 lines so a long one can't blow out the
+                      row and shove the download button off to one side. */}
+                  <div style={{
+                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden', wordBreak: 'break-word',
+                  }}>
+                    {run.input || 'Reconciliation'}
+                  </div>
                   <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                     {new Date(run.createdAt).toLocaleString('en-NZ')} · {run.runBy} · {run.status}
                   </div>
@@ -218,8 +228,9 @@ export default function ReconciliationCard({
                     className="btn btn-secondary"
                     onClick={() => downloadRun(run.id)}
                     disabled={historyDocFetching === run.id}
+                    style={{ flexShrink: 0 }}
                   >
-                    {historyDocFetching === run.id ? 'Loading…' : `Download – ${run.input || 'Reconciliation'}`}
+                    {historyDocFetching === run.id ? 'Loading…' : 'Download'}
                   </button>
                 )}
               </div>
