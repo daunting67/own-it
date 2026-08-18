@@ -168,7 +168,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
     `Period ending ${meta.periodEndLabel || st.periodEnd}  ·  Account ${st.account || ''}  ·  Total statement ${statementTotalLabel}`)
 
   const recHeaderRow = TITLE_ROW + 3
-  const recHeaders = ['Date', 'Cardholder', 'Card (statement)', 'Merchant', 'Statement $',
+  const recHeaders = ['Date', 'Cardholder Name', 'Card (statement)', 'Merchant', 'Statement $',
     'Receipt', 'Receipt $', 'Variance', 'Status', 'Notes', 'Comments']
   const recWidths = { A: 10, B: 16, C: 18, D: 22, E: 12, F: 8, G: 11, H: 10, I: 14, J: 46, K: 40 }
   headerRow(rec, recHeaderRow, recHeaders, recWidths)
@@ -216,7 +216,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
   titleBand(missing, 6, 'Missing Receipts — statement lines with NO supporting receipt',
     'Follow up with each cardholder to obtain the receipt or explain the spend')
   const missHeaderRow = TITLE_ROW + 3
-  const missHeaders = ['Date', 'Cardholder', 'Card', 'Merchant', 'Amount', 'Note']
+  const missHeaders = ['Date', 'Cardholder Name', 'Card', 'Merchant', 'Amount', 'Note']
   headerRow(missing, missHeaderRow, missHeaders, { A: 10, B: 16, C: 18, D: 26, E: 12, F: 40 })
   let mr = missHeaderRow + 1
   const missFirst = mr
@@ -248,7 +248,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
   placeLogo(exc, logoId, 50)
   titleBand(exc, 6, 'Exceptions & anomalies', 'Items needing a decision or follow-up')
   const excHeaderRow = TITLE_ROW + 3
-  headerRow(exc, excHeaderRow, ['Type', 'Date', 'Cardholder', 'Detail', 'Amount $', 'Action'],
+  headerRow(exc, excHeaderRow, ['Type', 'Date', 'Cardholder Name', 'Detail', 'Amount $', 'Action'],
     { A: 20, B: 12, C: 16, D: 60, E: 11, F: 34 })
   let er = excHeaderRow + 1
   const excCellStyle = { wrapText: true, vertical: 'top' }
@@ -308,7 +308,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
   titleBand(nxt, 5, `Receipts dated after ${meta.periodEndLabel || st.periodEnd} — NEXT statement period`,
     `Not part of statement ${st.number || ''}. Hold for the next card statement.`)
   const nxtHeaderRow = TITLE_ROW + 3
-  headerRow(nxt, nxtHeaderRow, ['Date', 'Cardholder', 'Merchant', 'Amount', 'Comment'],
+  headerRow(nxt, nxtHeaderRow, ['Date', 'Cardholder Name', 'Merchant', 'Amount', 'Comment'],
     { A: 10, B: 16, C: 28, D: 12, E: 30 })
   let nr = nxtHeaderRow + 1
   const nxtFirst = nr
