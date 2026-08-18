@@ -115,6 +115,16 @@ function cardsDiffer(a, b) {
 }
 function last4(card) { const d = String(card || '').replace(/\D/g, ''); return d ? d.slice(-4) : null; }
 
+// A debit card statement typically prints a card LABEL ("CARD 7216") rather than the
+// cardholder's actual name — real data confirmed this (Tony's real statement: "CARD 7216",
+// "CARD 6079", "12-3191-0047", never a person's name). A bare card reference has no letters
+// besides the word CARD itself, so nameMatch()'ing it against a receipt's real name is
+// comparing apples to a card number and will false-positive as a "mismatch" on almost every
+// row. Treat it as "no name to compare against" instead of a real disagreement.
+function looksLikeCardLabel(s) {
+  return /^\s*(card\s*)?[\d\- ]+\s*$/i.test(String(s || ''));
+}
+
 function bestReceiptDate(r) {
   if (r.photo_type === 'till_slip' && r.txn_date) return r.txn_date;
   return r.txn_date || r.cover_date || null;
@@ -249,17 +259,25 @@ function reconcile(statement, receipts, opts = {}) {
     const notes = [];
     let status, matchedReceiptId = null;
     let commentReceipts = [];
+    // Displayed cardholder: prefer the RECEIPT's cover-sheet name (an actual person,
+    // typed by the driver) over the statement's own cardholder field, which is usually
+    // just a card label — see looksLikeCardLabel(). Falls back to the statement's field
+    // only when there's no receipt to draw a real name from.
+    let cardholder = line.cardholder;
 
     if (match) {
       commentReceipts = [match.receipt].concat(match._mergedReceipts || []);
       status = 'Matched';
       matchedReceiptId = match.receipt._id;
+      if (match.receipt.cover_name) cardholder = match.receipt.cover_name;
       if (cardsDiffer(match.receipt.cover_card, line.card))
         notes.push(`card mismatch: cover ${match.receipt.cover_card} vs statement ${line.card}`);
       // Same as fuelEngine: with a single candidate, driver name is only a tiebreak when
       // several candidates existed, never a gate — flag a name disagreement rather than
-      // let a receipt book against the wrong cardholder silently.
-      if (match.receipt.cover_name && line.cardholder && !nameMatch(match.receipt.cover_name, line.cardholder))
+      // let a receipt book against the wrong cardholder silently. Skipped when the
+      // statement side is just a card label (no real name printed there to disagree with).
+      if (match.receipt.cover_name && line.cardholder && !looksLikeCardLabel(line.cardholder)
+        && !nameMatch(match.receipt.cover_name, line.cardholder))
         notes.push(`cardholder name mismatch: receipt says "${match.receipt.cover_name}", statement line is "${line.cardholder}" — verify manually`);
       const m = match.receipt.merchant || match.description;
       notes.push(`${m || 'receipt'}${match.receipt.page ? ' (batch scan p' + match.receipt.page + ')' : ''}`);
@@ -269,12 +287,13 @@ function reconcile(statement, receipts, opts = {}) {
       if (lost) {
         usedLostIds.add(lost._id);
         status = 'Lost receipt'; matchedReceiptId = lost._id; commentReceipts = [lost];
+        if (lost.cover_name) cardholder = lost.cover_name;
         notes.push('handwritten LOST RECEIPT note — unverifiable');
       } else { status = 'Missing receipt'; notes.push('No receipt supplied'); }
     }
 
     results.push({
-      line, status, matchedReceiptId,
+      line, status, matchedReceiptId, cardholder,
       receipt: match ? match.receipt : null,
       receiptAmount: match ? match.amount : null,
       notes,
@@ -291,7 +310,7 @@ function reconcile(statement, receipts, opts = {}) {
     const k = normName(r.line.cardholder) + '|' + String(r.receipt.cover_card).replace(/\D/g, '');
     if (seenCM.has(k)) continue;
     seenCM.add(k);
-    cardMismatches.push({ date: r.line.date, cardholder: r.line.cardholder, coverCard: r.receipt.cover_card,
+    cardMismatches.push({ date: r.line.date, cardholder: r.cardholder, coverCard: r.receipt.cover_card,
       statementCard: r.line.card, amount: r.line.amount });
   }
 

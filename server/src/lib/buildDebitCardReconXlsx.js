@@ -182,7 +182,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
     const l = res.line
     const variance = res.receiptAmount != null && l.amount != null ? round2(res.receiptAmount - l.amount) : null
     const cells = [
-      l.date, l.cardholder, l.card, l.merchant, l.amount,
+      l.date, res.cardholder, l.card, l.merchant, l.amount,
       res.status === 'Matched' ? 'Yes' : res.status === 'Lost receipt' ? 'Lost' : 'No',
       res.receiptAmount, variance, res.status, res.notes.join(' · '), res.comments,
     ]
@@ -288,7 +288,7 @@ function buildDebitCardReconXlsx(R, meta = {}) {
   for (const res of R.results.filter(r => r.status === 'Lost receipt')) {
     exc.getCell(er, 1).value = 'Lost receipt'
     exc.getCell(er, 2).value = res.line.date
-    exc.getCell(er, 3).value = res.line.cardholder
+    exc.getCell(er, 3).value = res.cardholder
     exc.getCell(er, 4).value = 'Handwritten LOST RECEIPT note — unverifiable against statement evidence.'
       + (res.comments ? ` Cardholder's note: "${res.comments}"` : '')
     exc.getCell(er, 5).value = safeNum(res.line.amount)
