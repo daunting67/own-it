@@ -140,7 +140,16 @@ function reconcile(statement, receipts, opts = {}) {
   const periodStartSerial = periodEndP.serial - 35;
 
   // 0) Coerce every numeric statement-line field once, up front — never NaN (see toNumber).
-  const lines = statement.lines.map((l) => ({ ...l, amount: toNumber(l.amount) }));
+  // Then drop any line with no readable amount: the extraction prompt tells the model to
+  // skip closing-balance/account-header rows, but real statements are messy and a stray
+  // non-transaction row (proven live: "Closing Balance", a bare account number like
+  // "12-3191-0047") can still slip through with no amount attached. A line with nothing
+  // to reconcile against can never be genuinely "matched" or "missing" — it's not a
+  // transaction at all — so it's excluded here rather than flowing through as a bogus,
+  // unfollowable "Missing receipt" row with a blank Amount column.
+  const lines = statement.lines
+    .map((l) => ({ ...l, amount: toNumber(l.amount) }))
+    .filter((l) => l.amount != null);
 
   // 1) Normalise receipts + explode into receipt-items (one per line item on the till slip)
   let rid = 0;

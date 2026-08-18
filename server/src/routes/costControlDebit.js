@@ -20,14 +20,22 @@ const PROCESS_NAME = 'Debit Card Receipt Reconciliation'
 // litres/product/fleet-discount concept: the strongest match key is the dollar amount
 // itself, since a debit card receipt should show the SAME figure as the statement line.
 const STATEMENT_PROMPT = `You are extracting the transaction detail from a bank or card-provider DEBIT
-CARD statement for P&I (North) Ltd's cost-control team. Read EVERY transaction line. Columns are
-typically: Date, Cardholder name, Card number (or last 4 digits), Merchant/description, Amount.
+CARD statement for P&I (North) Ltd's cost-control team. Read EVERY genuine purchase transaction line.
+Columns are typically: Date, Cardholder name (often just a card label like "CARD 7216", not a real
+person's name — read whatever is actually printed), Card number (or last 4 digits), Merchant/
+description, Amount.
+
+ONLY extract lines that are an actual purchase transaction with a real dollar amount. Do NOT extract:
+"Closing Balance", "Opening Balance", running-total or balance-brought-forward lines, account-number
+or reference-number lines that carry no amount, section/page headers, or any other non-transaction
+formatting row — these are not purchases and must be left out of "lines" entirely, not included with a
+null or zero amount.
 
 You may be given the WHOLE statement, or just an EXCERPT of a few pages (a long statement is split
-into page-range excerpts so no single response gets too large). Always list every transaction line
-visible in what you were given. The header (statement number, account number, statement date, total
-due) usually only appears on the FIRST page — if this excerpt doesn't show it, set those fields to
-null rather than guessing.
+into page-range excerpts so no single response gets too large). Always list every genuine transaction
+line visible in what you were given. The header (statement number, account number, statement date,
+total due) usually only appears on the FIRST page — if this excerpt doesn't show it, set those fields
+to null rather than guessing.
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
