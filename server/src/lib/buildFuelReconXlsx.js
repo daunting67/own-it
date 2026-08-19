@@ -14,9 +14,6 @@ const LT = 'D9E1F2'
 const ALT = 'F2F6FB'
 const WHITE = 'FFFFFF'
 const GREY = '555555'
-const GREEN = 'E2EFDA'
-const RED = 'FCE4E4'
-const AMBER = 'FFF2CC'
 
 const argb = (hex) => `FF${hex}`
 const thinSide = { style: 'thin', color: { argb: argb('AAAAAA') } }
@@ -80,13 +77,6 @@ function safeNum(v) {
 // there's nothing to sum.
 function sumOrZero(colLetter, firstRow, lastRow) {
   return lastRow >= firstRow ? { formula: `SUM(${colLetter}${firstRow}:${colLetter}${lastRow})` } : 0
-}
-
-function statusFill(status) {
-  if (status === 'Matched') return GREEN
-  if (status === 'Missing receipt') return RED
-  if (status === 'Lost receipt') return AMBER
-  return null
 }
 
 function titleBand(ws, cols, title, subtitle, startRow = TITLE_ROW) {
@@ -243,8 +233,10 @@ function buildFuelReconXlsx(R, meta = {}) {
       if (MONEY_COLS.has(col)) c.numFmt = MONEY
       c.border = allBorder
     })
-    const sf = statusFill(res.status)
-    if (sf) for (let col = 1; col <= 17; col++) rec.getCell(rr, col).fill = fill(sf)
+    // Tony asked to drop the full-row green/red/amber status colouring (it read as
+    // heavy/noisy across a 17-column sheet) — rows are now plain white with borders only,
+    // same as the Missing Receipts and Next Period tabs. Status is still fully readable
+    // from the Status column text itself, just without the block colour behind it.
     rr += 1
   }
   // totals row
