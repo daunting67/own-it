@@ -229,6 +229,15 @@ async function fetchAnthropic(anthropicKey, body) {
 const INVOICE_MODEL = 'claude-haiku-4-5-20251001'
 const RECEIPT_MODEL = 'claude-sonnet-5'
 
+// Sampling parameters (temperature/top_p/top_k) were REMOVED on the Claude 5 family — sending
+// temperature to claude-sonnet-5 returns a 400 ("`temperature` is deprecated for this model"),
+// which extract() turns into a thrown error and so FAILS THE WHOLE RUN. Haiku 4.5 still
+// accepts it. So temperature is sent per-model rather than unconditionally: pinning it at 0
+// stays exactly as it was for the invoice, and on Sonnet 5 there is no sampling dial to pin —
+// the determinism lever from 14 Aug 2026 simply does not exist on that model, so run-to-run
+// variance on the RECEIPT side is worth re-checking once a couple of real runs are in.
+const MODELS_ACCEPTING_TEMPERATURE = new Set([INVOICE_MODEL])
+
 async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
   const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
   for (const f of files) {
@@ -248,8 +257,9 @@ async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
     // classified three specific files differently ("not on invoice" in one run,
     // matched in the other). temperature:0 makes the model as deterministic as it can
     // be — it does not guarantee byte-identical output, but removes the single
-    // biggest unforced source of run-to-run disagreement.
-    temperature: 0,
+    // biggest unforced source of run-to-run disagreement. Only sent to models that still
+    // accept it — see MODELS_ACCEPTING_TEMPERATURE.
+    ...(MODELS_ACCEPTING_TEMPERATURE.has(model) ? { temperature: 0 } : {}),
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content }]
   })
