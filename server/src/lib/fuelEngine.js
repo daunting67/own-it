@@ -352,6 +352,12 @@ function reconcile(invoice, receipts, opts = {}) {
   // display). Only bridge this gap when driver + date corroborate AND the photo itself is
   // flagged low-confidence — never silently on a clean till slip. Always surfaced with a
   // review note (spec §4.4: low-confidence matches should still be flagged for a human).
+  //
+  // A bare pump-display photo with no cover sheet is a normal, expected case (server/src/
+  // routes/costControl.js) and has cover_name == null — nameMatch(null, driver) always
+  // returns false (tokenSim's empty-name guard), so this pass could never rescue exactly
+  // the receipts it exists for. Treat "no cover name to compare" as uncorroborated-but-not-
+  // disqualifying, same as the dedup clustering pass-through at line 272.
   lines.forEach((line, i) => {
     if (matchOf[i]) return;
     const product = normProduct(line.product);
@@ -361,7 +367,7 @@ function reconcile(invoice, receipts, opts = {}) {
       && (it.product === product || it.product == null)
       && it.litres != null && Math.abs(it.litres - line.litres) <= 0.15
       && dayDiff(it.receipt._date, line.date) <= 1
-      && nameMatch(it.receipt.cover_name, line.driver));
+      && (nameMatch(it.receipt.cover_name, line.driver) || !it.receipt.cover_name));
     if (near.length === 1) { near[0].used = true; near[0]._approx = true; matchOf[i] = near[0]; }
   });
 
