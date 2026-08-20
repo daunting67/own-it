@@ -238,6 +238,14 @@ const RECEIPT_MODEL = 'claude-sonnet-5'
 // variance on the RECEIPT side is worth re-checking once a couple of real runs are in.
 const MODELS_ACCEPTING_TEMPERATURE = new Set([INVOICE_MODEL])
 
+// Output budget per model. Sonnet 5 thinks by default (adaptive), and thinking tokens are
+// spent from the SAME max_tokens allowance as the JSON — at 8192 a receipt batch can burn
+// the budget reasoning about a blurry digit and get truncated mid-JSON, which extract()
+// reports as isMaxTokens and the caller answers by bisecting the batch. That's a real cost
+// (more calls) for a self-inflicted reason, so give the thinking model headroom. Haiku 4.5
+// stays at 8192 — that is its output ceiling, and asking for more is a 400.
+const MAX_TOKENS_BY_MODEL = { [INVOICE_MODEL]: 8192, [RECEIPT_MODEL]: 16000 }
+
 async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
   const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
   for (const f of files) {
@@ -250,7 +258,7 @@ async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
   }
   const response = await fetchAnthropic(anthropicKey, {
     model,
-    max_tokens: 8192,
+    max_tokens: MAX_TOKENS_BY_MODEL[model] || 8192,
     // This is financial-reconciliation extraction, not creative writing — variance
     // across runs is a defect here, not a feature. Confirmed live 14 Aug 2026: two
     // runs of the SAME invoice + SAME receipt files (default temperature, i.e. 1.0)
@@ -273,7 +281,13 @@ async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
     err.isMaxTokens = true
     throw err
   }
-  const raw = data.content?.[0]?.text || ''
+  // Collect EVERY text block, not content[0]. Sonnet 5 runs adaptive thinking by default,
+  // so content[0] is a thinking block (whose text is empty, since `display` defaults to
+  // "omitted") and the JSON body arrives in a LATER block — reading content[0].text gave ''
+  // and every batch died on "Unexpected end of JSON input". Filtering by type is correct on
+  // every model whether it thinks or not, and joining is safe because the prompt asks for a
+  // single JSON object.
+  const raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('')
   let parsed
   try {
     parsed = JSON.parse(stripFences(raw))
@@ -522,3 +536,13 @@ router.post('/run', async (req, res) => {
 })
 
 module.exports = router
+
+// Test-only surface. The golden-reference harness (server/test/fuel-golden.js) drives the
+// SAME functions the /run route uses, against the 38 real July source files, and checks the
+// result against the validated prototype's 37 matched / 8 missing. Exporting these is what
+// makes that possible without duplicating the pipeline — and a duplicated pipeline is not a
+// test of production, it's a test of the duplicate. Nothing here changes route behaviour.
+module.exports.__test = {
+  splitPdfIfNeeded, batchByPageCount, extractInvoiceBatch, extractReceiptsBatch,
+  mergeInvoiceParts, INVOICE_MODEL, RECEIPT_MODEL, MAX_PAGES_PER_BATCH,
+}

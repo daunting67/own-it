@@ -3,3 +3,6 @@ dist/
 .env
 *.env.local
 .DS_Store
+
+# Golden-test extraction cache — contains real fuel card numbers and driver names
+server/test/fixtures/
