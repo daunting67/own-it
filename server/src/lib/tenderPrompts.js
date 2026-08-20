@@ -360,5 +360,16 @@ module.exports = {
   unreadableReason,
   digestDocument,
   buildDebrief,
-  extractXlsxText
+  extractXlsxText,
+  // Exported so other modules that need the same Claude call (with the same
+  // refusal/JSON/error-body handling) don't reimplement it — see
+  // contractReviewPrompts.js.
+  callClaude,
+  pdfPageCount,
+  MAX_DOCUMENT_BYTES,
+  MAX_PDF_PAGES,
+  MAX_TEXT_CHARS,
+  PDF_RE: PDF,
+  DOCX_RE: DOCX,
+  XLSX_RE: XLSX
 }
