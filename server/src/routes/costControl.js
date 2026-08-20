@@ -48,27 +48,44 @@ Non-fuel items (Shop, Car Wash) have litres:null, pump_rate:null, your_rate:null
 invoice's own date. Use null (not 0 or "") for anything genuinely unreadable.`
 
 const RECEIPT_PROMPT = `You are extracting data from driver fuel-card receipts for P&I (North) Ltd's
-cost-control team. Each file is a "FUEL CARD RECEIPTS" cover sheet (with DATE/NAME/CARD/COMMENTS fields)
-wrapping a photo of a till slip, a bowser/pump display, or a handwritten "LOST RECEIPT" note — OR it may
-be a MULTI-PAGE BATCH SCAN containing many distinct slips (extract every distinct receipt you find, one
-JSON object per receipt, with its page number), OR a plain photo of a pump display.
+cost-control team. Most files are a "FUEL CARD RECEIPTS" cover sheet (with DATE/NAME/CARD/COMMENTS
+fields) wrapping a photo of a till slip, a bowser/pump display, or a handwritten "LOST RECEIPT" note —
+OR a MULTI-PAGE BATCH SCAN containing many distinct slips (extract every distinct receipt you find, one
+JSON object per receipt, with its page number).
+
+BUT some files are a BARE PHOTO OF THE PUMP/BOWSER DISPLAY WITH NO COVER SHEET AT ALL — this happens
+whenever the pump itself doesn't issue a paper receipt, so there is no DATE/NAME/CARD/COMMENTS to read,
+just the pump's own digital readout of litres and price. This is a completely normal, expected case, NOT
+a reason to skip the file: treat it exactly like any other receipt, just with cover_date, cover_name,
+cover_card and comments all set to null (there genuinely is nothing there to read), photo_type set to
+"pump_display", and every other field (txn_date, txn_time, litres, rate, total) read from whatever the
+pump's own display shows — many pump displays print their own date/time stamp alongside the litres and
+price; capture it into txn_date/txn_time if it's there. litres is the single most reliable field on a
+pump-display photo (product/grade may not be legible — set product to null rather than guessing).
 
 Each file is preceded by a text block "FILE: <filename>" — use that exact filename as source_file. For a
 multi-page batch scan, set page to the 1-indexed page the receipt appears on; otherwise page is null.
 
-For each receipt: read the cover-sheet DATE/NAME/CARD/COMMENTS; whether the photo is a clear till slip,
-a bowser/pump-display photo, or a "LOST RECEIPT" note; the station; the printed transaction date/time;
-litres (to 2-3dp — the single most important field, read carefully), rate, total; card last-4 if visible;
+CRITICAL: every single file you are given must produce AT LEAST ONE entry in "receipts" — never
+silently omit a file, whether it has a cover sheet or not, whether it's a clear till slip or a bare pump
+photo, and even if a photo is badly blurred, dark, or hard to read. If a file is genuinely too degraded
+to read anything useful from it at all, still include one entry for it with every field null except
+source_file, and ocr_confidence "low" — that is a completely different, honest outcome from silently
+leaving the file out, which would make it look to the cost-control team like the driver never submitted
+anything.
+
+For each receipt: read the cover-sheet DATE/NAME/CARD/COMMENTS (null if there is no cover sheet); whether
+the photo is a clear till slip, a bowser/pump-display photo, or a "LOST RECEIPT" note; the station; the
+printed transaction date/time; litres (to 2-3dp — read carefully), rate, total; card last-4 if visible;
 and a product per line item (a receipt can show multiple products, e.g. 91 + Diesel, or Diesel + Car
-Wash — list each as a separate item). If the fuel grade is not legible on a blurry bowser photo, set
-product to null rather than guessing — litres is the reliable field. Mark ocr_confidence "low" for
-blurry/glare-affected bowser photos, "high" for clear till slips.
+Wash — list each as a separate item). Mark ocr_confidence "low" for blurry/glare-affected bowser photos,
+"high" for clear till slips.
 
 The COMMENTS box matters and is easy to overlook: transcribe it VERBATIM into "comments". It is
 handwritten and is the driver's own explanation of the spend (e.g. "wrong pump", "jerry can for the
 genset", "customer vehicle", "took the truck to Whangarei"). Keep the driver's own wording — do not
-summarise, tidy or interpret it — and use null ONLY when the box is genuinely empty. If the
-handwriting is partly illegible, transcribe what you can read and append " [illegible]".
+summarise, tidy or interpret it — and use null ONLY when the box is genuinely empty or doesn't exist.
+If the handwriting is partly illegible, transcribe what you can read and append " [illegible]".
 
 Return ONLY valid JSON (no markdown fences, no explanation): an object with a "receipts" array:
 {
