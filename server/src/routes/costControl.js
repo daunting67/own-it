@@ -216,7 +216,20 @@ async function fetchAnthropic(anthropicKey, body) {
 // ORIGINAL scan's page number when the file was a split excerpt. Throws a clear error if
 // the model hit its output cap (truncated JSON) so the caller gets "too much in one batch"
 // rather than a cryptic JSON parse error.
-async function extract(anthropicKey, system, files) {
+// Model per task, not one model for both. The INVOICE is clean supplier-generated text and
+// Haiku reads it exactly (verified live 14 Aug 2026: 46 lines, 3027.35 L, $7,409.52 — exact
+// in every run), so it stays on the cheap model. RECEIPTS are the hardest vision task in the
+// portal — 7-segment bowser displays through glare and thumb-shadow, handwritten cover
+// sheets, multi-page phone scans — and running the CHEAPEST model on it was flagged as a
+// likely root cause of the under-matching on 14 Aug 2026 and never actually changed while
+// everything AROUND it was hardened (temperature:0, throw-on-bad-shape, retries, coverage
+// check, the 3-pass matcher). A photo whose litres are never read produces no receipt at
+// all, and the invoice line then reports "Missing receipt" — indistinguishable from a driver
+// who never handed one in.
+const INVOICE_MODEL = 'claude-haiku-4-5-20251001'
+const RECEIPT_MODEL = 'claude-sonnet-5'
+
+async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
   const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
   for (const f of files) {
     const { kind, media_type } = mediaTypeFor(f.filename)
@@ -227,7 +240,7 @@ async function extract(anthropicKey, system, files) {
     content.push({ type: kind, source: { type: 'base64', media_type, data: f.buffer.toString('base64') } })
   }
   const response = await fetchAnthropic(anthropicKey, {
-    model: 'claude-haiku-4-5-20251001',
+    model,
     max_tokens: 8192,
     // This is financial-reconciliation extraction, not creative writing — variance
     // across runs is a defect here, not a feature. Confirmed live 14 Aug 2026: two
@@ -275,7 +288,7 @@ async function extract(anthropicKey, system, files) {
 // batch that's still too big keeps halving itself down to individual files if it must.
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
   try {
-    const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files)
+    const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files, RECEIPT_MODEL)
     if (!Array.isArray(parsed?.receipts)) {
       // A response that parses as JSON but isn't {"receipts":[...]} used to silently
       // become an empty array here — the batch's files would vanish with NO error, NO
