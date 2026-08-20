@@ -21,8 +21,6 @@ const djrWebhookRouter = require('./routes/djrWebhook')
 const cronRouter = require('./routes/cron')
 const prestartRouter = require('./routes/prestart')
 const tendersRouter = require('./routes/tenders')
-const contractReviewRouter = require('./routes/contractReview')
-const jseaRouter = require('./routes/jsea')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -64,8 +62,6 @@ app.use('/api/djr-webhook', djrWebhookRouter)
 app.use('/api/cron', cronRouter)
 app.use('/api/prestart', prestartRouter)
 app.use('/api/tenders', tendersRouter)
-app.use('/api/contract-review', contractReviewRouter)
-app.use('/api/jsea', jseaRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-08-17-debit-card-recon-35' }))
 
