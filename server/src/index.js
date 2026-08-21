@@ -63,7 +63,7 @@ app.use('/api/cron', cronRouter)
 app.use('/api/prestart', prestartRouter)
 app.use('/api/tenders', tendersRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-08-17-debit-card-recon-35' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-08-21-fuel-recon-determinism-36' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
