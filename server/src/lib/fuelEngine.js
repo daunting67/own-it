@@ -33,6 +33,23 @@ function normProduct(p) {
 }
 function isFuel(p) { return p === 'Diesel' || p === '91 Unleaded' || p === 'Premium'; }
 
+// photo_type arrives from the extractor as free text, and every gate in this file tests it
+// with ===. Proven on the real July data: a handwritten LOST RECEIPT note came back as
+// "lost_receipt_note" while the lost-receipt path tests for 'lost_receipt', so that path
+// NEVER FIRED — the note was ignored, the receipt fell through to "Receipt not on invoice",
+// and the invoice line reported "Missing receipt" (a chase-up for a receipt the driver had
+// already declared lost, in writing). Normalise on the way in rather than trusting a model
+// to reproduce an exact enum; the prompt now states the allowed values too, but the engine
+// should not depend on that.
+function normPhotoType(t) {
+  const s = String(t || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!s) return null;
+  if (s.includes('lost')) return 'lost_receipt';
+  if (s.includes('pump') || s.includes('bowser')) return 'pump_display';
+  if (s.includes('till') || s.includes('slip')) return 'till_slip';
+  return t;
+}
+
 function round2(x) { return Math.round((x + Number.EPSILON) * 100) / 100; }
 
 // Robust numeric coercion for anything the extractor hands back. Model output can quote a
@@ -215,6 +232,7 @@ function reconcile(invoice, receipts, opts = {}) {
       // so its invoice line reported Missing while the very receipt that covers it sat
       // (correctly, but uselessly) in the Next Period tab.
       _nextPeriod: dp ? dp.serial > periodEndP.serial + 1 : false,
+      photo_type: normPhotoType(r.photo_type),
       items: (r.items || []).map((it) => ({ ...it, product: normProduct(it.product) })),
     };
   });
@@ -229,13 +247,38 @@ function reconcile(invoice, receipts, opts = {}) {
   for (const r of inPeriod) {
     for (const it of r.items) {
       const litresNum = toNumber(it.litres);
+      const rateNum = toNumber(it.rate);
+      const totalNum = toNumber(it.total);
+      // A receipt carries its own proof: litres × rate must equal total. When it doesn't,
+      // one of the three was misread — and total/rate recovers the litres, deterministically,
+      // with no model involved. Proven on the real July data: Logan Sainty 06/07 came back as
+      // 60.13 L at $2.649 for $183.13, and 183.13/2.649 = 69.13 — the invoice's exact figure
+      // (a 9 read as 0 on a very dark 7-segment display; the extractor's own note said
+      // "photo very dark"). A tens-digit misread like that is far outside the approx pass's
+      // 0.15 L tolerance, so nothing else could ever have rescued it.
+      //
+      // Held as an ALTERNATIVE key rather than overwriting the reading: the matcher tries
+      // both, so a derived value is only ever trusted when it agrees with an actual invoice
+      // line. That keeps the arithmetic self-validating — if `total` or `rate` was the field
+      // misread instead of litres, the derived figure matches nothing and is silently
+      // ignored. The 0.5 threshold is far above rounding noise (litres truncate to 2dp,
+      // rates run to 4dp) and far below a single-digit error, which lands tens of dollars
+      // out. Across all 61 real July receipts this fires exactly once — on the one that
+      // needed it.
+      let altLitres = null;
+      if (litresNum != null && rateNum != null && totalNum != null && rateNum > 0
+          && Math.abs(litresNum * rateNum - totalNum) > 0.5) {
+        const derived = truncate2(totalNum / rateNum);
+        if (litKey(derived) !== litKey(truncate2(litresNum))) altLitres = derived;
+      }
       items.push({
         _iid: 'I' + (++iid),
         receipt: r,
         product: it.product,
         litres: litresNum != null ? truncate2(litresNum) : null,
-        rate: toNumber(it.rate),
-        total: toNumber(it.total),
+        altLitres,
+        rate: rateNum,
+        total: totalNum,
         used: false,
         duplicate: false,
       });
@@ -316,7 +359,10 @@ function reconcile(invoice, receipts, opts = {}) {
       // matches on litres, the strongest key (spec §4.1/§4.4).
       let cands = activeItems.filter((it) => !it.used
         && (it.product === product || it.product == null)
-        && it.litres != null && litKey(it.litres) === litKey(line.litres)
+        && ((it.litres != null && litKey(it.litres) === litKey(line.litres))
+            // arithmetic-recovered litres (see altLitres above) count as an exact key —
+            // they are only ever accepted when they land on a real invoice line
+            || (it.altLitres != null && litKey(it.altLitres) === litKey(line.litres)))
         && dayDiff(it.receipt._date, line.date) <= 1);
       if (cands.length > 1) {
         // prefer driver/card corroboration, then exact date, then till slip
@@ -335,13 +381,43 @@ function reconcile(invoice, receipts, opts = {}) {
       const match = cands[0] || null;
       if (match) { match.used = true; matchOf[i] = match; }
     } else if (!fuel) {
-      // non-fuel: date(±1) + driver + amount (face value)
-      let cands = activeItems.filter((it) => !it.used && it.product === product
+      // Non-fuel: date(±1) + driver + amount. The PRODUCT NAME is deliberately not a key.
+      // The invoice bundles a till slip's itemised shop purchases into one "Shop" line while
+      // the receipt names the actual goods — proven on 09/07 Josh Broederlow, invoice Shop
+      // $7.20 against receipt items "H2go Pure 825ml" $3.00 and "Coke Zero Sugar 600ml"
+      // $4.20, summing to exactly $7.20. Requiring `it.product === 'Shop'` meant a fully
+      // corroborated shop receipt could never match, because real products are never called
+      // "Shop". Unlike fuel, the receipt total here IS directly comparable to the invoice:
+      // shop goods carry no pump-vs-discounted-rate gap, which is what makes amount a safe
+      // key. An exact product match still sorts first, so Car Wash prefers Car Wash.
+      const pool = activeItems.filter((it) => !it.used && !isFuel(it.product)
         && dayDiff(it.receipt._date, line.date) <= 1
         && nameMatch(it.receipt.cover_name, line.driver)
-        && it.total != null && Math.abs(it.total - line.amount_incl) <= 0.5);
-      const match = cands[0] || null;
-      if (match) { match.used = true; matchOf[i] = match; }
+        && it.total != null);
+      pool.sort((a, b) => (b.product === product ? 1 : 0) - (a.product === product ? 1 : 0));
+      let match = pool.find((it) => Math.abs(it.total - line.amount_incl) <= 0.5) || null;
+      if (!match) {
+        // One invoice line covering several itemised lines on the same slip.
+        const byReceipt = new Map();
+        for (const it of pool) {
+          if (!byReceipt.has(it.receipt._id)) byReceipt.set(it.receipt._id, []);
+          byReceipt.get(it.receipt._id).push(it);
+        }
+        for (const group of byReceipt.values()) {
+          if (group.length < 2) continue;
+          const sum = group.reduce((a, it) => a + it.total, 0);
+          if (Math.abs(sum - line.amount_incl) <= 0.5) {
+            match = group[0];
+            match._bundled = group.slice(1);
+            break;
+          }
+        }
+      }
+      if (match) {
+        match.used = true;
+        for (const extra of match._bundled || []) extra.used = true;   // don't let a second line claim them
+        matchOf[i] = match;
+      }
     }
   });
 
@@ -387,8 +463,25 @@ function reconcile(invoice, receipts, opts = {}) {
       commentReceipts = [match.receipt].concat(match._mergedReceipts || []);
       status = 'Matched';
       matchedReceiptId = match.receipt._id;
-      if (fuel && match.litres != null && line.litres != null) litreVar = round2(match.litres - line.litres);
-      if (match.total != null) saving = round2(match.total - line.amount_incl);
+      // Matched on the receipt's own arithmetic rather than its printed litres — surfaced
+      // explicitly, with the sum shown, so a reviewer can check the correction rather than
+      // take it on trust. Never silent: the printed figure and the derived one both appear.
+      const arithCorrected = fuel && match.altLitres != null && line.litres != null
+        && litKey(match.altLitres) === litKey(line.litres)
+        && litKey(match.litres) !== litKey(line.litres);
+      const effLitres = arithCorrected ? match.altLitres : match.litres;
+      if (fuel && effLitres != null && line.litres != null) litreVar = round2(effLitres - line.litres);
+      // For a bundled non-fuel match the comparable figure is the SUM of the itemised lines,
+      // not just the primary one, or "saving" reads as a large fake discount.
+      const matchTotal = [match].concat(match._bundled || [])
+        .reduce((a, x) => (x.total != null ? a + x.total : a), 0);
+      if (match.total != null) saving = round2(matchTotal - line.amount_incl);
+      if (arithCorrected)
+        notes.push(`ARITHMETIC CORRECTION — receipt printed ${match.litres} L but its own figures `
+          + `($${match.total} ÷ $${match.rate}) give ${match.altLitres} L, matching the invoice — verify manually`);
+      if (match._bundled && match._bundled.length)
+        notes.push(`bundled line — receipt itemises ${[match].concat(match._bundled)
+          .map((x) => `${x.product} $${x.total}`).join(' + ')} = $${round2(matchTotal)}`);
       if (match.receipt.photo_type === 'pump_display') notes.push('low-confidence photo (pump display)');
       if (match._approx) notes.push(`APPROX MATCH — receipt litres ${match.litres} vs invoice ${line.litres} (Δ${litreVar}) — verify manually`);
       if (cardsDiffer(match.receipt.cover_card, line.card))
@@ -419,7 +512,9 @@ function reconcile(invoice, receipts, opts = {}) {
     results.push({
       line, product, status, matchedReceiptId,
       receipt: match ? match.receipt : null,
-      receiptLitres: match ? match.litres : null,
+      receiptLitres: match ? (fuel && match.altLitres != null && line.litres != null
+        && litKey(match.altLitres) === litKey(line.litres)
+        && litKey(match.litres) !== litKey(line.litres) ? match.altLitres : match.litres) : null,
       litreVar, saving, notes,
       comments: commentText(commentReceipts),
     });

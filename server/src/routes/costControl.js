@@ -87,6 +87,13 @@ genset", "customer vehicle", "took the truck to Whangarei"). Keep the driver's o
 summarise, tidy or interpret it — and use null ONLY when the box is genuinely empty or doesn't exist.
 If the handwriting is partly illegible, transcribe what you can read and append " [illegible]".
 
+photo_type MUST be exactly one of these three strings — not a variation on them, and not a new
+value of your own: "till_slip", "pump_display", "lost_receipt". Use "lost_receipt" for a
+handwritten note saying the receipt was lost, mislaid, blew away or was never issued. The
+reconciliation engine compares this field exactly, so "lost_receipt_note" or "handwritten_note"
+means a driver's declared-lost receipt is silently treated as no receipt at all, and the invoice
+line goes out to the cost-control team as an unexplained missing receipt.
+
 Return ONLY valid JSON (no markdown fences, no explanation): an object with a "receipts" array:
 {
   "receipts": [

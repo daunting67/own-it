@@ -26,6 +26,8 @@
  *   node test/fuel-golden.js              # full run, all 38 files
  *   node test/fuel-golden.js --receipts 6 # smoke test on the first 6 receipts (cheap)
  *   node test/fuel-golden.js --twice      # run twice and diff, to measure reproducibility
+ *   node test/fuel-golden.js --cached     # matching only, off the saved extraction — free, offline
+ *   node test/fuel-golden.js --source DIR # read the source files from somewhere else
  *
  * Costs real API spend. A full run is well under a dollar.
  */
@@ -58,7 +60,16 @@ const {
   mergeInvoiceParts, INVOICE_MODEL, RECEIPT_MODEL,
 } = require('../src/routes/costControl').__test
 
-const SOURCE_DIR = path.join(os.homedir(), 'Documents', 'Claude', 'Projects', 'Fuel Recipts')
+// Overridable, because the default lives under ~/Documents, which macOS guards behind a
+// privacy permission that can be revoked at any time — a test that can only ever read one
+// protected folder stops being runnable for reasons unrelated to the code under test.
+// Precedence: --source <dir>, then FUEL_SOURCE_DIR, then the original location.
+const SOURCE_DIR = (() => {
+  const i = process.argv.indexOf('--source')
+  if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1]
+  if (process.env.FUEL_SOURCE_DIR) return process.env.FUEL_SOURCE_DIR
+  return path.join(os.homedir(), 'Documents', 'Claude', 'Projects', 'Fuel Recipts')
+})()
 const INVOICE_FILE = 'Z Energy 13346250.pdf'
 
 const REFERENCE = {
@@ -83,9 +94,19 @@ const CACHE = path.join(__dirname, 'fixtures', 'golden-extraction.json')
 
 function loadFiles() {
   if (!fs.existsSync(SOURCE_DIR)) {
-    throw new Error(`Source directory not found: ${SOURCE_DIR}`)
+    throw new Error(`Source directory not found: ${SOURCE_DIR}\n`
+      + `  Pass --source <dir> or set FUEL_SOURCE_DIR, or run --cached for matching only.`)
   }
-  const all = fs.readdirSync(SOURCE_DIR).filter(f => f.toLowerCase().endsWith('.pdf'))
+  let all
+  try {
+    all = fs.readdirSync(SOURCE_DIR).filter(f => f.toLowerCase().endsWith('.pdf'))
+  } catch (e) {
+    // macOS guards ~/Documents, ~/Desktop and ~/Downloads behind a privacy permission that
+    // can be revoked without warning. Say so plainly instead of surfacing a bare EPERM.
+    throw new Error(`Cannot read ${SOURCE_DIR} (${e.code}).\n`
+      + `  macOS may be blocking access to that folder. Either grant access, copy the files\n`
+      + `  somewhere else and pass --source <dir>, or run --cached for matching only.`)
+  }
   const invoiceName = all.find(f => f === INVOICE_FILE)
   if (!invoiceName) throw new Error(`Invoice PDF not found: ${INVOICE_FILE}`)
 
@@ -150,14 +171,18 @@ async function main() {
     process.exit(2)
   }
 
-  const files = loadFiles()
+  // In --cached mode the source PDFs are never touched: the extraction is already saved, and
+  // matching is pure. Loading them anyway made cached runs fail whenever the source directory
+  // was unreadable (macOS guards ~/Documents), for files the run had no need of.
+  const cacheReady = useCache && fs.existsSync(CACHE)
+  const files = cacheReady ? null : loadFiles()
   console.log('\n=== GOLDEN-REFERENCE TEST — Fuel Reconciliation ===\n')
-  console.log(`Source: ${SOURCE_DIR}`)
+  console.log(`Source: ${cacheReady ? 'cached extraction (matching only)' : SOURCE_DIR}`)
   if (limitReceipts) console.log(`SMOKE TEST — first ${limitReceipts} receipts only, not comparable to the reference`)
   console.log('')
 
   const runs = []
-  if (useCache && fs.existsSync(CACHE)) {
+  if (cacheReady) {
     const cached = JSON.parse(fs.readFileSync(CACHE, 'utf8'))
     console.log(`--- using CACHED extraction (${CACHE}) — matching only, no API spend ---\n`)
     runs.push({ ...cached, R: reconcile(cached.invoiceData, cached.receipts) })
@@ -170,7 +195,7 @@ async function main() {
       console.log(`  extraction completed in ${elapsed}s\n`)
       if (i === 0 && !limitReceipts) {
         fs.mkdirSync(path.dirname(CACHE), { recursive: true })
-        fs.writeFileSync(CACHE, JSON.stringify({ invoiceData, receipts, unaccounted, elapsed }, null, 2))
+        fs.writeFileSync(CACHE, JSON.stringify({ invoiceData, receipts, unaccounted, elapsed, filesIn: files.receipts.length }, null, 2))
         console.log(`  extraction cached -> ${path.relative(process.cwd(), CACHE)} (re-run with --cached)\n`)
       }
     }
@@ -191,7 +216,7 @@ async function main() {
 
   // ---- receipt side ----
   console.log('\nRECEIPT EXTRACTION')
-  console.log(`  files in         ${files.receipts.length}`)
+  console.log(`  files in         ${files ? files.receipts.length : (runs[0].filesIn ?? '(from cache)')}`)
   console.log(`  receipts out     ${receipts.length}`)
   const withLitres = receipts.filter(r => (r.items || []).some(i => i.litres != null)).length
   console.log(`  with litres read ${withLitres} / ${receipts.length}`)
