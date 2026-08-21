@@ -115,6 +115,33 @@ function cardsDiffer(a, b) {
 }
 function last4(card) { const d = String(card || '').replace(/\D/g, ''); return d ? d.slice(-4) : null; }
 
+// photo_type arrives from the extractor as free text and every gate here compares it with
+// ===. Proven on the fuel side (same prompt pattern, same engine shape): a handwritten LOST
+// RECEIPT note came back as "lost_receipt_note" while the lost-receipt path tests for
+// 'lost_receipt', so that path never fired and the cardholder was chased for a receipt they
+// had already declared lost in writing. Normalise on the way in rather than depending on a
+// model reproducing an exact enum.
+function normPhotoType(t) {
+  const s = String(t || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!s) return null;
+  if (s.includes('lost')) return 'lost_receipt';
+  if (s.includes('till') || s.includes('slip') || s.includes('receipt')) return 'till_slip';
+  return t;
+}
+
+// Non-transaction rows that DO carry a figure. Dropping lines with a null amount (below)
+// catches the common case, but a statement's closing balance is usually printed WITH its
+// balance — so it survives that filter, becomes a "transaction", and goes out as a missing
+// receipt that nobody can ever produce. Matched on the description, which is what actually
+// identifies these rows.
+const NON_TXN = /\b(closing|opening|brought\s*forward|carried\s*forward|balance\s*(b\/?f|c\/?f)|running\s*total|sub\s*total|statement\s*total|total\s*(due|payable)|previous\s*balance)\b/i;
+function looksNonTransaction(l) {
+  const s = `${l.merchant || ''} ${l.cardholder || ''}`.trim();
+  if (!s) return false;
+  if (NON_TXN.test(s)) return true;
+  return /^\s*(closing|opening)\s+balance\s*$/i.test(String(l.merchant || '').trim());
+}
+
 // A debit card statement typically prints a card LABEL ("CARD 7216") rather than the
 // cardholder's actual name — real data confirmed this (Tony's real statement: "CARD 7216",
 // "CARD 6079", "12-3191-0047", never a person's name). A bare card reference has no letters
@@ -147,9 +174,17 @@ function reconcile(statement, receipts, opts = {}) {
   // to reconcile against can never be genuinely "matched" or "missing" — it's not a
   // transaction at all — so it's excluded here rather than flowing through as a bogus,
   // unfollowable "Missing receipt" row with a blank Amount column.
+  const excludedRows = [];
   const lines = statement.lines
     .map((l) => ({ ...l, amount: toNumber(l.amount) }))
-    .filter((l) => l.amount != null);
+    .filter((l) => {
+      if (l.amount == null) { excludedRows.push({ ...l, why: 'no readable amount' }); return false; }
+      // A closing balance printed WITH its figure passes the amount test and would otherwise
+      // be reconciled as a purchase. Recorded, not silently dropped — an excluded row the
+      // reader can't see is indistinguishable from a row that was never extracted.
+      if (looksNonTransaction(l)) { excludedRows.push({ ...l, why: 'not a purchase (balance/total row)' }); return false; }
+      return true;
+    });
 
   // 1) Normalise receipts + explode into receipt-items (one per line item on the till slip)
   let rid = 0;
@@ -165,6 +200,7 @@ function reconcile(statement, receipts, opts = {}) {
       // after period end can still be considered for the statement's last line instead
       // of being quarantined into Next Period before matching ever runs.
       _nextPeriod: dp ? dp.serial > periodEndP.serial + 1 : false,
+      photo_type: normPhotoType(r.photo_type),
       items: (r.items || []).map((it) => ({ ...it })),
     };
   });
@@ -177,6 +213,22 @@ function reconcile(statement, receipts, opts = {}) {
   let iid = 0;
   let items = [];
   for (const r of inPeriod) {
+    // What the STATEMENT shows is the whole purchase; what a till slip lists is its line
+    // items. Those are only the same number on a single-item slip. A Woolworths slip of five
+    // items totalling $65.20 has no individual item equal to $65.20, so matching per item
+    // could never support that statement line — visible in the real July output as a $65.20
+    // row reading "No receipt" while every small single-item purchase matched. Capture the
+    // receipt's own printed total (the largest, most legible figure on a slip) and the sum
+    // of its items, so the matcher below has the comparable figure available.
+    const itemAmounts = (r.items || []).map((it) => toNumber(it.amount)).filter((v) => v != null);
+    const itemsSum = itemAmounts.length ? round2(itemAmounts.reduce((a, b) => a + b, 0)) : null;
+    r._printedTotal = toNumber(r.total);
+    r._itemsSum = itemsSum;
+    // A slip proves itself: its items must add up to its printed total. When they don't, one
+    // of the figures was misread, and the printed total is the one to trust — it's set in
+    // large type and it's the number the cardholder themselves checks at the counter.
+    r._itemsTieOut = (r._printedTotal != null && itemsSum != null)
+      ? Math.abs(itemsSum - r._printedTotal) <= 0.02 : null;
     for (const it of r.items) {
       items.push({
         _iid: 'I' + (++iid),
@@ -256,8 +308,44 @@ function reconcile(statement, receipts, opts = {}) {
         return sb - sa;
       });
     }
-    const match = cands[0] || null;
-    if (match) { match.used = true; matchOf[i] = match; }
+    let match = cands[0] || null;
+
+    // (b) The receipt's own PRINTED TOTAL equals the statement line. Covers every multi-item
+    // slip, where no single item can equal the statement figure. Corroboration is the same as
+    // above (date within 2 days) plus positive card-or-name agreement, because a total is a
+    // rounder, more collidable number than an itemised amount.
+    if (!match) {
+      const byReceipt = new Map();
+      for (const it of activeItems) {
+        if (it.used) continue;
+        if (!byReceipt.has(it.receipt._id)) byReceipt.set(it.receipt._id, []);
+        byReceipt.get(it.receipt._id).push(it);
+      }
+      for (const group of byReceipt.values()) {
+        const r = group[0].receipt;
+        if (dayDiff(r._date, line.date) > 2) continue;
+        const corroborated = (last4(r.cover_card) && last4(r.cover_card) === last4(line.card))
+          || (last4(r.card_last4) && last4(r.card_last4) === last4(line.card))
+          || nameMatch(r.cover_name, line.cardholder);
+        if (!corroborated) continue;
+        const viaPrinted = r._printedTotal != null && amtKey(r._printedTotal) === amtKey(line.amount);
+        // Fall back to the items' sum only when no printed total was read — never to
+        // override a printed total that disagrees, which is a discrepancy for a human.
+        const viaSum = !viaPrinted && r._printedTotal == null && group.length > 1
+          && amtKey(round2(group.reduce((a, it) => a + (it.amount || 0), 0))) === amtKey(line.amount);
+        if (!viaPrinted && !viaSum) continue;
+        match = group[0];
+        match._bundled = group.slice(1);
+        match._viaReceiptTotal = viaPrinted ? 'printed total' : 'sum of items';
+        break;
+      }
+    }
+
+    if (match) {
+      match.used = true;
+      for (const extra of match._bundled || []) extra.used = true;  // don't let a later line claim them
+      matchOf[i] = match;
+    }
   });
 
   // 5b) Build results in original statement-line order.
@@ -279,6 +367,16 @@ function reconcile(statement, receipts, opts = {}) {
       status = 'Matched';
       matchedReceiptId = match.receipt._id;
       if (match.receipt.cover_name) cardholder = match.receipt.cover_name;
+      if (match._viaReceiptTotal) {
+        const parts = [match].concat(match._bundled || [])
+          .map((x) => `${x.description || 'item'} $${x.amount}`).join(' + ');
+        notes.push(`matched on the receipt's ${match._viaReceiptTotal} — slip itemises ${parts}`);
+      }
+      // The slip's own items don't add up to its own printed total, so a figure on it was
+      // misread. Say so on the line it supports rather than leaving it to be noticed.
+      if (match.receipt._itemsTieOut === false)
+        notes.push(`receipt does not add up — items total $${match.receipt._itemsSum} `
+          + `but the slip's printed total is $${match.receipt._printedTotal} — verify manually`);
       if (cardsDiffer(match.receipt.cover_card, line.card))
         notes.push(`card mismatch: cover ${match.receipt.cover_card} vs statement ${line.card}`);
       // Same as fuelEngine: with a single candidate, driver name is only a tiebreak when
@@ -291,8 +389,20 @@ function reconcile(statement, receipts, opts = {}) {
       const m = match.receipt.merchant || match.description;
       notes.push(`${m || 'receipt'}${match.receipt.page ? ' (batch scan p' + match.receipt.page + ')' : ''}`);
     } else {
+      // Corroborate on the CARD as well as the name. A debit statement's cardholder field is
+      // usually a card label ("CARD 7216"), not a person — this file already knows that, and
+      // uses looksLikeCardLabel() below to suppress a bogus name-mismatch warning for exactly
+      // that reason. But this lookup required nameMatch(cover_name, line.cardholder), i.e.
+      // "Josh Broederlow" against "CARD 7216", which can never be true. On any statement that
+      // prints card labels — the normal case, per the extraction prompt — the lost-receipt
+      // path could therefore NEVER fire, and every handwritten LOST RECEIPT note was reported
+      // as "No receipt supplied": the cardholder gets chased for a receipt they already
+      // declared lost, in writing, and the note they wrote is nowhere in the workbook.
       const lost = inPeriod.find((r) => r.photo_type === 'lost_receipt' && !usedLostIds.has(r._id)
-        && nameMatch(r.cover_name, line.cardholder) && dayDiff(bestReceiptDate(r), line.date) <= 2);
+        && dayDiff(bestReceiptDate(r), line.date) <= 2
+        && (nameMatch(r.cover_name, line.cardholder)
+            || (last4(r.cover_card) && last4(r.cover_card) === last4(line.card))
+            || (last4(r.card_last4) && last4(r.card_last4) === last4(line.card))));
       if (lost) {
         usedLostIds.add(lost._id);
         status = 'Lost receipt'; matchedReceiptId = lost._id; commentReceipts = [lost];
@@ -369,7 +479,7 @@ function reconcile(statement, receipts, opts = {}) {
   return {
     statement: { number: statement.statement_number, account: statement.account,
       date: statement.statement_date, periodEnd, total: statement.total_due },
-    summary, validation, results, cardMismatches, notOnStatement,
+    summary, validation, results, cardMismatches, notOnStatement, excludedRows,
     nextPeriod: nextPeriod.map((r) => {
       const it = (r.items || []);
       return { date: bestReceiptDate(r), cardholder: r.cover_name, merchant: r.merchant || (it[0] && it[0].description) || null,

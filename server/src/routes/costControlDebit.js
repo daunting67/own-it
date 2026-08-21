@@ -68,13 +68,26 @@ starter", "customer meeting"). Keep the driver's own wording — do not summaris
 and use null ONLY when the box is genuinely empty. If the handwriting is partly illegible, transcribe
 what you can read and append " [illegible]".
 
+"total" is the slip's own printed TOTAL for the whole purchase — the large figure at the bottom,
+the one the cardholder checks at the counter. It is the single most important field on the receipt,
+because the bank statement shows the whole purchase as ONE amount while the slip itemises it: a
+five-item shop of $65.20 has no individual item equal to $65.20, so without the total there is
+nothing for that statement line to be matched against. Read it even when you have also itemised
+the goods, and use null only if it genuinely is not legible. Do not compute it — read it.
+
+photo_type MUST be exactly one of these two strings, not a variation and not a new value of your
+own: "till_slip", "lost_receipt". Use "lost_receipt" for a handwritten note saying the receipt was
+lost, mislaid or never issued. The reconciliation engine compares this field exactly, so
+"lost_receipt_note" or "handwritten_note" means a cardholder's declared-lost receipt is treated as
+no receipt at all and they get chased for it anyway.
+
 Return ONLY valid JSON (no markdown fences, no explanation): an object with a "receipts" array:
 {
   "receipts": [
     { "source_file": "...", "page": null, "cover_date": "DD/MM/YY", "cover_name": "...",
       "cover_card": "...", "comments": null, "photo_type": "till_slip",
       "merchant": "...", "txn_date": "DD/MM/YY", "txn_time": "HH:MM", "card_last4": null,
-      "ocr_confidence": "high",
+      "ocr_confidence": "high", "total": 0,
       "items": [ { "description": "...", "amount": 0 } ],
       "notes": null }
   ]
@@ -164,7 +177,21 @@ async function fetchAnthropic(anthropicKey, body) {
   return response
 }
 
-async function extract(anthropicKey, system, files) {
+// Model per task, same split and same reasoning as costControl.js. The STATEMENT is clean
+// bank-generated text that Haiku reads exactly. RECEIPTS are photographed till slips — glare,
+// thumb shadow, faded thermal paper — and running the cheapest model on the hardest vision task
+// was the proven cause of the fuel module under-matching by more than half.
+//
+// Switching the receipt model REQUIRES the two changes below it, both of which broke fuel recon
+// live today when they were missed: sampling params were REMOVED on the Claude 5 family (sending
+// temperature returns a 400 and fails the whole run), and Sonnet 5 runs adaptive thinking by
+// default so content[0] is a thinking block — the JSON arrives in a later block.
+const STATEMENT_MODEL = 'claude-haiku-4-5-20251001'
+const RECEIPT_MODEL = 'claude-sonnet-5'
+const MODELS_ACCEPTING_TEMPERATURE = new Set([STATEMENT_MODEL])
+const MAX_TOKENS_BY_MODEL = { [STATEMENT_MODEL]: 8192, [RECEIPT_MODEL]: 16000 }
+
+async function extract(anthropicKey, system, files, model = STATEMENT_MODEL) {
   const content = [{ type: 'text', text: 'Read the following file(s) and extract the JSON as specified.' }]
   for (const f of files) {
     const { kind, media_type } = mediaTypeFor(f.filename)
@@ -175,9 +202,9 @@ async function extract(anthropicKey, system, files) {
     content.push({ type: kind, source: { type: 'base64', media_type, data: f.buffer.toString('base64') } })
   }
   const response = await fetchAnthropic(anthropicKey, {
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 8192,
-    temperature: 0,
+    model,
+    max_tokens: MAX_TOKENS_BY_MODEL[model] || 8192,
+    ...(MODELS_ACCEPTING_TEMPERATURE.has(model) ? { temperature: 0 } : {}),
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content }]
   })
@@ -191,7 +218,9 @@ async function extract(anthropicKey, system, files) {
     err.isMaxTokens = true
     throw err
   }
-  const raw = data.content?.[0]?.text || ''
+  // Every text block, not content[0] — a thinking model puts an empty-text thinking block
+  // first and the JSON in a later one. Correct on any model, thinking or not.
+  const raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('')
   let parsed
   try {
     parsed = JSON.parse(stripFences(raw))
@@ -210,7 +239,7 @@ async function extract(anthropicKey, system, files) {
 
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
   try {
-    const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files)
+    const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files, RECEIPT_MODEL)
     if (!Array.isArray(parsed?.receipts)) {
       const shape = Array.isArray(parsed) ? 'a bare JSON array'
         : parsed && typeof parsed === 'object' ? `an object with keys [${Object.keys(parsed).join(', ')}]`
@@ -371,6 +400,13 @@ router.post('/run', async (req, res) => {
       `Matched ${stats.matched} · Missing ${R.summary.missingCount} · Lost ${stats.lost} · ${pctLabel} of statement value supported by a receipt.`,
       R.summary.cardMismatchCount ? `${R.summary.cardMismatchCount} card-number mismatch(es) flagged in Exceptions.` : null,
       R.summary.nextPeriodCount ? `${R.summary.nextPeriodCount} receipt(s) held for next period.` : null,
+      // Rows the engine judged not to be purchases (closing balances, running totals). Stated
+      // rather than silently dropped: a row that vanishes without explanation is
+      // indistinguishable from one that was never read off the statement at all.
+      R.excludedRows && R.excludedRows.length
+        ? `${R.excludedRows.length} non-transaction row(s) excluded from the reconciliation: `
+          + R.excludedRows.map(r => `"${r.merchant || r.cardholder || 'unlabelled'}" (${r.why})`).join(', ') + '.'
+        : null,
       receiptFilesMissing.length
         ? `⚠️ ${receiptFilesMissing.length} uploaded file(s) produced NO receipt data — check these were readable and re-upload if needed: ${receiptFilesMissing.join(', ')}.`
         : null,
@@ -393,3 +429,10 @@ router.post('/run', async (req, res) => {
 })
 
 module.exports = router
+
+// Test-only surface, same purpose and shape as costControl.js's. Lets test/debit-golden.js
+// drive the SAME functions the /run route uses instead of a copy of them. No behaviour change.
+module.exports.__test = {
+  splitPdfIfNeeded, batchByPageCount, extractStatementBatch, extractReceiptsBatch,
+  mergeStatementParts, STATEMENT_MODEL, RECEIPT_MODEL, MAX_TOKENS_BY_MODEL,
+}
