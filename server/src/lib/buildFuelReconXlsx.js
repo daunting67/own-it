@@ -182,7 +182,12 @@ function buildFuelReconXlsx(R, meta = {}) {
   section('INVOICE SELF-CHECK (§5)')
   row('Ties to Total due', R.validation.inclTiesOut ? 'PASS' : 'FAIL')
   row('Ties to Sub total', R.validation.exclTiesOut ? 'PASS' : 'FAIL')
-  row('Litres tie to Fuels total', R.validation.litresTiesOut ? 'PASS' : 'FAIL')
+  // null means the invoice's own Fuels-total figure couldn't be read (or was implausible),
+  // so nothing was compared — printing FAIL there reports a reconciliation failure that was
+  // never actually tested. Say which it is.
+  row('Litres tie to Fuels total', R.validation.litresTiesOut == null
+    ? 'NOT VERIFIABLE (invoice Fuels total not read)'
+    : R.validation.litresTiesOut ? 'PASS' : 'FAIL')
   row(`Fleet discount consistent (${(R.validation.expectedDiscount * 100).toFixed(1)}c/L)`,
     R.validation.discountConsistent ? 'PASS' : `${R.validation.discountExceptions.length} exception(s)`)
 

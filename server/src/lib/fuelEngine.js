@@ -334,6 +334,63 @@ function reconcile(invoice, receipts, opts = {}) {
       }
     }
   }
+  // 4b) SECOND-OPINION PASS — the same fill read twice, where the two reads DISAGREE on
+  // litres.
+  //
+  // Most receipts in a month are genuinely photographed twice: once as the driver's own
+  // cover-sheet PDF and again inside the multi-page batch scan. That is a free second
+  // reading of the same physical slip — but step 4 keys dedup on LITRES, so two reads that
+  // disagree never cluster, and both survive as if they were two separate fills. Whichever
+  // one happens to be read correctly then decides the outcome, which is precisely the
+  // run-to-run non-determinism measured on the real July data: Charl Heyneke 08/07 came back
+  // as 15.1 L from one copy and 19.1 L from the other (a 9 read as 5), the invoice says
+  // 19.1, and which one won varied between runs of identical inputs.
+  //
+  // TOTAL is the key that survives a litres misread: those two reads differed by 4 litres
+  // but agreed on the money to six cents ($57.29 vs $57.23). So: same driver (or card),
+  // date within a day, totals within a dollar, litres DISAGREE ⇒ same fill, two readings.
+  // Resolve it by ARITHMETIC rather than by preferring a photo type — the reading whose
+  // own litres × rate reproduces its own total is the one that survives. That is a
+  // deterministic test on a probabilistic input, and it needs no extra API call.
+  const secondOpinions = [];
+  const fuelActive = () => items.filter((it) => !it.duplicate && it.litres != null && it.total != null);
+  for (const a of fuelActive()) {
+    if (a.duplicate) continue;
+    for (const b of fuelActive()) {
+      if (a === b || a.duplicate || b.duplicate) continue;
+      if (litKey(a.litres) === litKey(b.litres)) continue;              // step 4 handles agreement
+      if (dayDiff(a.receipt._date, b.receipt._date) > 1) continue;
+      const sameDriver = nameMatch(a.receipt.cover_name, b.receipt.cover_name);
+      const sameCard = last4(a.receipt.cover_card) && last4(a.receipt.cover_card) === last4(b.receipt.cover_card);
+      if (!sameDriver && !sameCard) continue;
+      if (Math.abs(a.total - b.total) > 1) continue;                    // same money ⇒ same fill
+      // Which reading reproduces its own total? Prefer a verifiable one; if both verify or
+      // neither does, keep the existing photo-type/confidence ranking and flag it instead of
+      // silently guessing.
+      const ties = (it) => it.rate != null && Math.abs(it.litres * it.rate - it.total) <= 0.5;
+      let keep, drop;
+      if (ties(a) && !ties(b)) { keep = a; drop = b; }
+      else if (ties(b) && !ties(a)) { keep = b; drop = a; }
+      else {
+        const rank = (it) => (it.receipt.photo_type === 'till_slip' ? 2 : it.receipt.photo_type === 'pump_display' ? 1 : 0)
+          + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0) + (it.rate != null ? 0.25 : 0);
+        [keep, drop] = rank(a) >= rank(b) ? [a, b] : [b, a];
+        keep._unresolvedSecondOpinion = drop.litres;                    // neither verifies — say so
+      }
+      drop.duplicate = true; drop.used = true; duplicateCount++;
+      drop.keptReceiptId = keep.receipt._id;
+      keep._mergedReceipts = (keep._mergedReceipts || []).concat([drop.receipt]);
+      keep._secondOpinion = drop.litres;
+      secondOpinions.push({ kept: keep.litres, dropped: drop.litres, total: keep.total,
+        date: keep.receipt._date, driver: keep.receipt.cover_name,
+        resolvedBy: keep._unresolvedSecondOpinion != null ? 'photo quality (neither verifies)' : 'arithmetic',
+        source: drop.receipt.source_file, keptSource: keep.receipt.source_file });
+      duplicates.push({ product: drop.product, litres: drop.litres, date: drop.receipt._date,
+        source: drop.receipt.source_file, page: drop.receipt.page || null,
+        kept: keep.receipt.source_file });
+    }
+  }
+
   const activeItems = items.filter((it) => !it.duplicate);
 
   // 5) Match invoice lines.
@@ -357,13 +414,29 @@ function reconcile(invoice, receipts, opts = {}) {
       // candidates: litres equal to 0.01 + date within ±1. Product must match OR be
       // unread (null) — a pump-display photo where the grade wasn't legible still
       // matches on litres, the strongest key (spec §4.1/§4.4).
-      let cands = activeItems.filter((it) => !it.used
-        && (it.product === product || it.product == null)
-        && ((it.litres != null && litKey(it.litres) === litKey(line.litres))
-            // arithmetic-recovered litres (see altLitres above) count as an exact key —
-            // they are only ever accepted when they land on a real invoice line
-            || (it.altLitres != null && litKey(it.altLitres) === litKey(line.litres)))
+      const litOk = (it) => (it.litres != null && litKey(it.litres) === litKey(line.litres))
+        // arithmetic-recovered litres (see altLitres above) count as an exact key —
+        // they are only ever accepted when they land on a real invoice line
+        || (it.altLitres != null && litKey(it.altLitres) === litKey(line.litres));
+      const base = activeItems.filter((it) => !it.used && litOk(it)
         && dayDiff(it.receipt._date, line.date) <= 1);
+
+      let cands = base.filter((it) => it.product === product || it.product == null);
+      let viaProductFallback = false;
+      if (!cands.length) {
+        // The grade was misread, not just illegible. Real case: Charl Heyneke 08/07, invoice
+        // 19.10 L of 91 Unleaded, receipt read as "Diesel" at $2.999/L — a petrol rate, so
+        // the product is what's wrong, not the litres. Product was a hard veto, so a receipt
+        // agreeing on litres TO THE CENT, on date, and on the card number was thrown out over
+        // a misread grade on a bowser photo (which the prompt itself warns is often not
+        // legible). Fall back only with POSITIVE corroboration from the card or driver — never
+        // on litres alone — and always flag it, because a genuine grade discrepancy is a
+        // thing a human should look at rather than something to paper over.
+        cands = base.filter((it) =>
+          (last4(it.receipt.cover_card) && last4(it.receipt.cover_card) === last4(line.card))
+          || nameMatch(it.receipt.cover_name, line.driver));
+        viaProductFallback = cands.length > 0;
+      }
       if (cands.length > 1) {
         // prefer driver/card corroboration, then exact date, then till slip
         cands.sort((a, b) => {
@@ -379,7 +452,11 @@ function reconcile(invoice, receipts, opts = {}) {
         });
       }
       const match = cands[0] || null;
-      if (match) { match.used = true; matchOf[i] = match; }
+      if (match) {
+        match.used = true;
+        if (viaProductFallback) match._productMismatch = { receipt: match.product, invoice: product };
+        matchOf[i] = match;
+      }
     } else if (!fuel) {
       // Non-fuel: date(±1) + driver + amount. The PRODUCT NAME is deliberately not a key.
       // The invoice bundles a till slip's itemised shop purchases into one "Shop" line while
@@ -447,7 +524,43 @@ function reconcile(invoice, receipts, opts = {}) {
     if (near.length === 1) { near[0].used = true; near[0]._approx = true; matchOf[i] = near[0]; }
   });
 
-  // 5c) Build results in original invoice-line order.
+  // 5c) MONEY PASS — match on the receipt's total against the invoice's own expected pump
+  // total, for fuel lines still unmatched after litres has had every chance.
+  //
+  // Spec §4 rightly forbids matching on the invoice's BILLED amount: the receipt shows the
+  // pump price and the invoice bills a discounted "your rate", so those two figures never
+  // agree. But the invoice also carries pump_rate — so litres × pump_rate is the pump-price
+  // total the receipt should show, and THAT is directly comparable. The rule was "don't match
+  // on the billed amount", and it got implemented as "ignore money entirely", which threw
+  // away the single most legible field on a receipt: the dollar total is printed large, and
+  // it is the one number the driver themselves checks at the pump.
+  //
+  // Real case: Oliver Tyler 05/07, invoice 65.98 L at $2.4991 = $164.89 expected. The receipt
+  // came back with litres read as 55.88 and rate as $2.951 — BOTH misread — but its total was
+  // $164.89, exact to the cent, and 164.89 / 2.4991 = 65.98. No litres-based path could ever
+  // have found that, because the litres reading was wrong by ten litres.
+  //
+  // Gated hard: date within a day, positive card-or-driver corroboration, the total agreeing
+  // within 10c, and exactly ONE candidate. Two different fills on one card, on one day,
+  // agreeing to a dime is not a realistic coincidence.
+  lines.forEach((line, i) => {
+    if (matchOf[i]) return;
+    const product = normProduct(line.product);
+    if (!isFuel(product) || line.litres == null || line.pump_rate == null) return;
+    const expected = line.litres * line.pump_rate;
+    const near = activeItems.filter((it) => !it.used && it.total != null
+      && Math.abs(it.total - expected) <= 0.10
+      && dayDiff(it.receipt._date, line.date) <= 1
+      && ((last4(it.receipt.cover_card) && last4(it.receipt.cover_card) === last4(line.card))
+          || nameMatch(it.receipt.cover_name, line.driver)));
+    if (near.length === 1) {
+      near[0].used = true;
+      near[0]._viaTotal = { expected: round2(expected), total: near[0].total };
+      matchOf[i] = near[0];
+    }
+  });
+
+  // 5d) Build results in original invoice-line order.
   const results = [];
   const usedLostIds = new Set();
   lines.forEach((line, i) => {
@@ -482,6 +595,23 @@ function reconcile(invoice, receipts, opts = {}) {
       if (match._bundled && match._bundled.length)
         notes.push(`bundled line — receipt itemises ${[match].concat(match._bundled)
           .map((x) => `${x.product} $${x.total}`).join(' + ')} = $${round2(matchTotal)}`);
+      // Two readings of this same fill disagreed on litres. Never silent — whoever signs the
+      // reconciliation off needs to know a figure was contested and how it was settled.
+      if (match._secondOpinion != null) {
+        notes.push(match._unresolvedSecondOpinion != null
+          ? `TWO READINGS DISAGREE — this copy says ${match.litres} L, another copy of the same `
+            + `fill says ${match._secondOpinion} L, and NEITHER reproduces its own total ($${match.total}) `
+            + `— check the photo`
+          : `second reading of the same fill said ${match._secondOpinion} L; kept ${match.litres} L `
+            + `because its own figures reproduce the total ($${match.total})`);
+      }
+      if (match._viaTotal)
+        notes.push(`MATCHED ON AMOUNT, not litres — receipt total $${match._viaTotal.total} equals this `
+          + `line's pump-price total (${line.litres} L x $${line.pump_rate} = $${match._viaTotal.expected}); `
+          + `the receipt's own litres read as ${match.litres} — verify manually`);
+      if (match._productMismatch)
+        notes.push(`product mismatch — receipt reads "${match._productMismatch.receipt}", invoice bills `
+          + `"${match._productMismatch.invoice}"; matched on litres + date + card — verify the grade`);
       if (match.receipt.photo_type === 'pump_display') notes.push('low-confidence photo (pump display)');
       if (match._approx) notes.push(`APPROX MATCH — receipt litres ${match.litres} vs invoice ${line.litres} (Δ${litreVar}) — verify manually`);
       if (cardsDiffer(match.receipt.cover_card, line.card))
@@ -576,7 +706,33 @@ function reconcile(invoice, receipts, opts = {}) {
     // Guarded: invoice.summary (or its fuels_total) can genuinely be null — the extraction
     // prompt explicitly allows null for anything unreadable — so a direct
     // `invoice.summary.fuels_total.litres` throws and takes the whole run down with it.
-    litresTiesOut: invoiceFuelsLitres != null && Math.abs(sumLitres - invoiceFuelsLitres) < 0.005,
+    // Tri-state, NOT a boolean: true = ties out, false = a genuine discrepancy worth
+    // investigating, null = the invoice's own figure could not be read, so there was nothing
+    // to check against. Those last two are completely different things and the Summary tab
+    // used to print FAIL for both — telling the cost-control team the litres don't reconcile
+    // when in fact nothing had been compared.
+    //
+    // The stated figure is sanity-checked against the money before it's trusted as the
+    // authority. Real case: the extractor returned fuels_total.litres = 7383.32 for an
+    // invoice totalling $7,409.52 — that implies $1.00/L, which is not a fuel price, so it's
+    // a dollar figure read out of the wrong column. The 46 individually-extracted lines sum
+    // to 3027.35 L, which implies $2.45/L and is right. One mis-read summary cell should not
+    // be able to cast doubt on 46 lines that agree with the money.
+    litresTiesOut: (() => {
+      if (invoiceFuelsLitres == null) return null;
+      if (Math.abs(sumLitres - invoiceFuelsLitres) < 0.005) return true;
+      // Not equal — so which figure is wrong? If the lines' own dollar totals tie EXACTLY to
+      // the invoice's Total due and Sub total, the line set is complete, and a stated litres
+      // figure wildly different from their sum has to be the mis-read one. A small difference
+      // is left as a genuine discrepancy (false), because that is what a real reconciliation
+      // problem looks like — this only rescues the case where the stated figure cannot
+      // possibly be a litres quantity for this invoice.
+      const moneyTies = Math.abs(sumIncl - (invoice.total_due || 0)) < 0.005
+        && Math.abs(sumExcl - (invoice.sub_total || 0)) < 0.005;
+      const wildlyOff = sumLitres > 0
+        && Math.abs(invoiceFuelsLitres - sumLitres) / sumLitres > 0.25;
+      return (moneyTies && wildlyOff) ? null : false;
+    })(),
     gstTiesOut: Math.abs(round2((invoice.total_due || 0) - (invoice.sub_total || 0)) - (invoice.gst || 0)) < 0.005,
     sumIncl, sumExcl, sumLitres,
     discountConsistent: discountBad.length === 0,
