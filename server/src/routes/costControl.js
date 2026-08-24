@@ -163,13 +163,39 @@ async function splitPdfIfNeeded(f) {
   const chunks = []
   for (let start = 0; start < total; start += SPLIT_CHUNK_SIZE) {
     const end = Math.min(start + SPLIT_CHUNK_SIZE, total)
-    const sub = await PDFDocument.create()
-    const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
-    pages.forEach(p => sub.addPage(p))
-    const buf = Buffer.from(await sub.save())
+    const buf = await extractPageRange(doc, start, end)
     chunks.push({ ...f, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
   }
   return chunks
+}
+
+async function extractPageRange(doc, start, end) {
+  const sub = await PDFDocument.create()
+  const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
+  pages.forEach(p => sub.addPage(p))
+  return Buffer.from(await sub.save())
+}
+
+// The recursive halving in extractInvoiceBatch/extractReceiptsBatch shrinks a BATCH by
+// dropping to fewer files — but once a batch is down to a single already-split
+// SPLIT_CHUNK_SIZE-page chunk and THAT ALONE still overflows the model's output limit
+// (a genuinely dense page — proven live: a real invoice's page densely packed with
+// transaction lines), there was nothing smaller left to retry, so extraction gave up with
+// "may need to be re-scanned in smaller pieces" — a real dead end, not a rare edge case,
+// for any invoice/batch-scan page denser than SPLIT_CHUNK_SIZE assumed. This re-splits a
+// single multi-page chunk itself into two smaller chunks (page offsets adjusted to stay
+// relative to the ORIGINAL scan, same as splitPdfIfNeeded), so the halving can keep going
+// all the way down to individual pages instead of stopping at "one file left".
+async function resplitFileInHalf(f) {
+  const doc = await PDFDocument.load(f.buffer, { ignoreEncryption: true })
+  const total = doc.getPageCount()
+  if (total <= 1) return null
+  const mid = Math.ceil(total / 2)
+  const [bufA, bufB] = await Promise.all([extractPageRange(doc, 0, mid), extractPageRange(doc, mid, total)])
+  return [
+    { ...f, buffer: bufA, pageOffset: f.pageOffset + 0, pages: mid, isSplitPart: true },
+    { ...f, buffer: bufB, pageOffset: f.pageOffset + mid, pages: total - mid, isSplitPart: true },
+  ]
 }
 
 // Group already-page-sized entries into batches whose TOTAL page count stays under the
@@ -347,8 +373,21 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
       ])
       return [...a, ...b]
     }
+    // Down to a single file and it STILL overflows — if it's a multi-page PDF chunk (a
+    // batch-scan page range denser than SPLIT_CHUNK_SIZE assumed), re-split THAT chunk by
+    // page and keep halving, instead of giving up because there are no more files to drop.
+    if (err.isMaxTokens && files.length === 1 && files[0].pages > 1 && depth < 8) {
+      const halves = await resplitFileInHalf(files[0])
+      if (halves) {
+        const [a, b] = await Promise.all([
+          extractReceiptsBatch(anthropicKey, [halves[0]], depth + 1),
+          extractReceiptsBatch(anthropicKey, [halves[1]], depth + 1),
+        ])
+        return [...a, ...b]
+      }
+    }
     if (err.isMaxTokens) {
-      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this file may need to be re-scanned in smaller pieces.`)
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even for a single page alone — this file may need to be re-scanned or split further.`)
     }
     throw err
   }
@@ -384,8 +423,22 @@ async function extractInvoiceBatch(anthropicKey, files, depth = 0) {
       ])
       return mergeInvoiceParts(a, b)
     }
+    // Same fallback as extractReceiptsBatch: a single already-split chunk that's still
+    // too dense on its own gets re-split by page rather than giving up — this is exactly
+    // the case proven live ("Z Energy 13353625.pdf produced more detail than fits in one
+    // response even alone"), a genuinely dense invoice page, not a rare edge case.
+    if (err.isMaxTokens && files.length === 1 && files[0].pages > 1 && depth < 8) {
+      const halves = await resplitFileInHalf(files[0])
+      if (halves) {
+        const [a, b] = await Promise.all([
+          extractInvoiceBatch(anthropicKey, [halves[0]], depth + 1),
+          extractInvoiceBatch(anthropicKey, [halves[1]], depth + 1),
+        ])
+        return mergeInvoiceParts(a, b)
+      }
+    }
     if (err.isMaxTokens) {
-      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this invoice page may need to be re-scanned in smaller pieces.`)
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even for a single page alone — this invoice page may need to be re-scanned in smaller pieces.`)
     }
     throw err
   }

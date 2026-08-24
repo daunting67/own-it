@@ -132,13 +132,34 @@ async function splitPdfIfNeeded(f) {
   const chunks = []
   for (let start = 0; start < total; start += SPLIT_CHUNK_SIZE) {
     const end = Math.min(start + SPLIT_CHUNK_SIZE, total)
-    const sub = await PDFDocument.create()
-    const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
-    pages.forEach(p => sub.addPage(p))
-    const buf = Buffer.from(await sub.save())
+    const buf = await extractPageRange(doc, start, end)
     chunks.push({ ...f, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
   }
   return chunks
+}
+
+async function extractPageRange(doc, start, end) {
+  const sub = await PDFDocument.create()
+  const pages = await sub.copyPages(doc, Array.from({ length: end - start }, (_, i) => start + i))
+  pages.forEach(p => sub.addPage(p))
+  return Buffer.from(await sub.save())
+}
+
+// Mirrors costControl.js's fix for the same failure mode: once a batch is down to a
+// single already-split SPLIT_CHUNK_SIZE-page chunk and THAT ALONE still overflows the
+// model's output limit, there's nothing smaller left to retry by dropping files — so
+// re-split the chunk itself by page (offsets kept relative to the ORIGINAL scan) and let
+// the halving keep going down to individual pages.
+async function resplitFileInHalf(f) {
+  const doc = await PDFDocument.load(f.buffer, { ignoreEncryption: true })
+  const total = doc.getPageCount()
+  if (total <= 1) return null
+  const mid = Math.ceil(total / 2)
+  const [bufA, bufB] = await Promise.all([extractPageRange(doc, 0, mid), extractPageRange(doc, mid, total)])
+  return [
+    { ...f, buffer: bufA, pageOffset: f.pageOffset + 0, pages: mid, isSplitPart: true },
+    { ...f, buffer: bufB, pageOffset: f.pageOffset + mid, pages: total - mid, isSplitPart: true },
+  ]
 }
 
 function batchByPageCount(entries) {
@@ -258,8 +279,18 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
       ])
       return [...a, ...b]
     }
+    if (err.isMaxTokens && files.length === 1 && files[0].pages > 1 && depth < 8) {
+      const halves = await resplitFileInHalf(files[0])
+      if (halves) {
+        const [a, b] = await Promise.all([
+          extractReceiptsBatch(anthropicKey, [halves[0]], depth + 1),
+          extractReceiptsBatch(anthropicKey, [halves[1]], depth + 1),
+        ])
+        return [...a, ...b]
+      }
+    }
     if (err.isMaxTokens) {
-      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this file may need to be re-scanned in smaller pieces.`)
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even for a single page alone — this file may need to be re-scanned or split further.`)
     }
     throw err
   }
@@ -288,8 +319,18 @@ async function extractStatementBatch(anthropicKey, files, depth = 0) {
       ])
       return mergeStatementParts(a, b)
     }
+    if (err.isMaxTokens && files.length === 1 && files[0].pages > 1 && depth < 8) {
+      const halves = await resplitFileInHalf(files[0])
+      if (halves) {
+        const [a, b] = await Promise.all([
+          extractStatementBatch(anthropicKey, [halves[0]], depth + 1),
+          extractStatementBatch(anthropicKey, [halves[1]], depth + 1),
+        ])
+        return mergeStatementParts(a, b)
+      }
+    }
     if (err.isMaxTokens) {
-      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even alone — this statement page may need to be re-scanned in smaller pieces.`)
+      throw new Error(`"${files[0]?.filename}" produced more detail than fits in one response even for a single page alone — this statement page may need to be re-scanned in smaller pieces.`)
     }
     throw err
   }
