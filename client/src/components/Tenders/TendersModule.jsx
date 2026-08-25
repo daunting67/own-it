@@ -3,6 +3,7 @@ import { api, uploadToSignedUrl } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import ScheduleOfQuantities from './ScheduleOfQuantities'
 import TagLibrary from './TagLibrary'
+import ContractReview from './ContractReview'
 
 const money = (n) =>
   typeof n === 'number' && Number.isFinite(n)
@@ -787,7 +788,8 @@ function TenderList() {
 const TABS = [
   { id: 'tenders', label: 'Tenders' },
   { id: 'soq', label: 'Schedule of Quantities' },
-  { id: 'tags', label: 'TAG Library' }
+  { id: 'tags', label: 'TAG Library' },
+  { id: 'contract-review', label: 'Contract Review' }
 ]
 
 export default function TendersModule() {
@@ -838,6 +840,7 @@ export default function TendersModule() {
           <TagLibrary canEdit={!!user?.admin} />
         </div>
       )}
+      {tab === 'contract-review' && <ContractReview />}
     </div>
   )
 }

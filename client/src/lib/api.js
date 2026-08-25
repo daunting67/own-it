@@ -122,6 +122,13 @@ export const api = {
   updateTender: (id, data) => request(`/api/tenders/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getTagRegister: () => request('/api/tenders/tags'),
   saveTagRegister: (payload) => request('/api/tenders/tags', { method: 'PUT', body: JSON.stringify(payload) }),
+
+  // Contract Review (Tenders module) — pre-sign adversarial review of a draft subcontract
+  getContractReviews: () => request('/api/contract-review'),
+  getContractReview: (id) => request(`/api/contract-review/${id}`),
+  getContractReviewUploadUrl: (filename) => request('/api/contract-review/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  readContractDocument: (path) => request('/api/contract-review/read', { method: 'POST', body: JSON.stringify({ path }) }),
+  buildContractReview: (payload) => request('/api/contract-review/review', { method: 'POST', body: JSON.stringify(payload) }),
 }
 
 // Upload a File straight to Supabase Storage via a signed upload URL (bypasses the
