@@ -368,28 +368,6 @@ tbody tr:hover td { background: rgba(232,91,26,.06); }
 .tab-btn.active { color: var(--pi-ink); border-bottom-color: var(--pi-orange); }
 .tab-btn:hover:not(.active) { color: var(--pi-ink); }
 
-/* ── ID Card ─────────────────────────────────────────────── */
-.id-card {
-  width: 240px; background: #fff; border-radius: 6px;
-  overflow: hidden; box-shadow: var(--shadow-md);
-  font-size: 12px; flex-shrink: 0;
-}
-.id-card-header { background: var(--pi-black); color: #fff; padding: 8px 10px; text-align: center; border-bottom: 3px solid var(--pi-orange); }
-.id-card-title { font-size: 10px; font-weight: 800; letter-spacing: .12em; color: var(--pi-orange); text-transform: uppercase; }
-.id-card-site  { font-size: 13px; font-weight: 700; margin-top: 2px; text-transform: uppercase; }
-.id-card-body  { padding: 10px; display: flex; gap: 10px; align-items: flex-start; }
-.id-card-photo {
-  width: 70px; height: 56px; border-radius: 4px; background: var(--pi-neutral-tint);
-  border: 1px solid rgba(0,0,0,.1); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; overflow: hidden;
-}
-.id-card-photo svg { opacity: .3; }
-.id-card-details { flex: 1; }
-.id-card-name { font-weight: 800; font-size: 13px; text-transform: uppercase; }
-.id-card-role { color: var(--pi-muted); font-size: 11px; margin-top: 2px; }
-.id-card-hire { color: var(--pi-muted); font-size: 10px; margin-top: 2px; }
-.id-card-mobile { color: var(--pi-muted); font-size: 10px; margin-top: 2px; }
-
 /* ── Coming soon ─────────────────────────────────────────── */
 .coming-soon-page {
   display: flex; flex-direction: column; align-items: center; justify-content: center;

@@ -9,30 +9,6 @@ function fmtDate(d) {
   return dt.toLocaleDateString('en-NZ', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function IDCard({ member }) {
-  return (
-    <div className="id-card">
-      <div className="id-card-header">
-        <div className="id-card-title">OWN IT · SITE ID</div>
-        <div className="id-card-site">{member.site?.name || 'No site assigned'}</div>
-      </div>
-      <div className="id-card-body">
-        <div className="id-card-photo">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-          </svg>
-        </div>
-        <div className="id-card-details">
-          <div className="id-card-name">{member.name}</div>
-          <div className="id-card-role">{member.position || '—'}</div>
-          <div className="id-card-hire">{canonicalHireType(member.hireType)}</div>
-          <div className="id-card-mobile">{member.mobile || '—'}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function TeammatePanel({ member }) {
   const [copied, setCopied] = useState(false)
   const rateInfo = (() => {
@@ -222,9 +198,9 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
 
           {/* Tabs */}
           <div className="tabs" style={{ marginBottom: 0 }}>
-            {['checklist', 'details', 'teammate', 'id-card'].map(t => (
+            {['checklist', 'details', 'teammate'].map(t => (
               <button key={t} className={`tab-btn${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-                {t === 'checklist' ? 'Checklist' : t === 'details' ? 'Details' : t === 'teammate' ? 'Teammate' : 'ID card'}
+                {t === 'checklist' ? 'Checklist' : t === 'details' ? 'Details' : 'Teammate'}
               </button>
             ))}
           </div>
@@ -309,11 +285,6 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
           )}
 
           {tab === 'teammate' && <TeammatePanel member={member} />}
-          {tab === 'id-card' && (
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <IDCard member={member} />
-            </div>
-          )}
 
           {/* Delete */}
           <div style={{ marginTop: 8 }}>
