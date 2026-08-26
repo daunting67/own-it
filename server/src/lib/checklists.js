@@ -9,6 +9,26 @@ const COMPANY_VEHICLE_ITEMS = [
   { label: 'Fuel card issued', done: false },
 ]
 
+// Renaming an item in TEMPLATES is not just a label edit: stored checklists keep
+// the OLD label, and mergeMissingChecklistItems matches by label, so the person
+// would end up carrying BOTH the retired item and its replacement. Mapping old
+// label -> new label here rewrites stored rows as they're read, carrying the done
+// state across, which keeps this file's deliberate no-bulk-migration approach.
+const RENAMED_ITEMS = {
+  'Drug & alcohol policy signed': 'Drug test completed',
+}
+
+// Sections retired from TEMPLATES. Listing one here strips it from checklists
+// already stored against existing staff — without this, dropping a section from
+// the templates above only affects new hires and everyone already on the portal
+// keeps being asked for it. 'ID card' was dropped from the templates in c0dd63c
+// but kept showing on every staff member onboarded before that.
+// Matched case-insensitively for the same reason buildChecklist is: section and
+// hire-type spellings have drifted across imports, and a miss here would leave
+// the retired section on the very rows it's meant to clear.
+const RETIRED_SECTIONS = new Set(['id card'])
+const isRetiredSection = name => RETIRED_SECTIONS.has(String(name || '').trim().toLowerCase())
+
 const TEMPLATES = {
   'Direct Hire': [
     { section: 'Pre-start', items: [
@@ -39,7 +59,7 @@ const TEMPLATES = {
     { section: 'Inductions', items: [
       { label: 'Company induction completed', done: false },
       { label: 'Health & safety induction completed', done: false },
-      { label: 'Drug & alcohol policy signed', done: false },
+      { label: 'Drug test completed', done: false },
     ]},
     { section: 'Teammate', items: [
       { label: 'Profile created in Teammate', done: false },
@@ -64,7 +84,7 @@ const TEMPLATES = {
     ]},
     { section: 'Inductions', items: [
       { label: 'Health & safety induction completed', done: false },
-      { label: 'Drug & alcohol policy signed', done: false },
+      { label: 'Drug test completed', done: false },
     ]},
     { section: 'Teammate', items: [
       { label: 'Profile created in Teammate', done: false },
@@ -86,7 +106,7 @@ const TEMPLATES = {
     ]},
     { section: 'Inductions', items: [
       { label: 'Health & safety induction completed', done: false },
-      { label: 'Drug & alcohol policy signed', done: false },
+      { label: 'Drug test completed', done: false },
     ]},
     { section: 'Teammate', items: [
       { label: 'Profile created in Teammate', done: false },
@@ -119,7 +139,7 @@ const TEMPLATES = {
     ]},
     { section: 'Inductions', items: [
       { label: 'Health & safety induction completed', done: false },
-      { label: 'Drug & alcohol policy signed', done: false },
+      { label: 'Drug test completed', done: false },
     ]},
     { section: 'Teammate', items: [
       { label: 'Profile created in Teammate', done: false },
@@ -194,8 +214,39 @@ function mergeMissingChecklistItems(checklist, hireType) {
   const template = buildChecklist(hireType)
   if (!template.length) return checklist || []
   const existing = checklist || []
-  const wasComplete = existing.length > 0 && existing.every(s => s.items.every(i => i.done))
-  const merged = existing.map(s => ({ ...s, items: s.items.map(i => ({ ...i })) }))
+  let merged = existing.map(s => ({ ...s, items: s.items.map(i => ({ ...i })) }))
+  // Drop retired sections first. Removing one from TEMPLATES only stops NEW
+  // hires getting it; every stored row keeps it forever, because filling in
+  // missing items never deletes anything. Stripping here is what actually
+  // retires it for existing staff.
+  merged = merged.filter(s => !isRetiredSection(s.section))
+  // Apply renames BEFORE filling in missing items, so a renamed item isn't seen
+  // as absent and re-added alongside the one it replaced. Only rename targets are
+  // de-duplicated, leaving every other item's handling untouched.
+  const renameTargets = new Set(Object.values(RENAMED_ITEMS))
+  for (const section of merged) {
+    for (const item of section.items) {
+      if (RENAMED_ITEMS[item.label]) item.label = RENAMED_ITEMS[item.label]
+    }
+    if (section.items.some(i => renameTargets.has(i.label))) {
+      const kept = new Map()
+      for (const item of section.items) {
+        if (!renameTargets.has(item.label)) continue
+        const prev = kept.get(item.label)
+        // Keep the ticked one, so nobody loses credit for a step already done.
+        if (!prev || (item.done && !prev.done)) kept.set(item.label, item)
+      }
+      // kept holds exactly one object per label, so identity keeps one copy.
+      section.items = section.items.filter(item =>
+        !renameTargets.has(item.label) || kept.get(item.label) === item
+      )
+    }
+  }
+  // Judged AFTER the cleanup above: if the only thing left outstanding was a
+  // retired section, that person really is finished, and any item the template
+  // later gains should land as done rather than dragging them back to
+  // "in progress".
+  const wasComplete = merged.length > 0 && merged.every(s => s.items.every(i => i.done))
   for (const templateSection of template) {
     let section = merged.find(s => s.section === templateSection.section)
     if (!section) {
