@@ -70,6 +70,38 @@ Never leave a section blank — if a topic was not discussed, write "Not discuss
 Write in plain English. Be factual and neutral. Do not assign blame.`
   },
   {
+    id: 'meeting-notes',
+    name: 'Meeting Notes',
+    icon: '✅',
+    description: 'Any work meeting → a plain-English summary and your action points, as a Word doc. Nothing is submitted to Teammate — this one is just for you.',
+    inputLabel: 'Meeting transcript',
+    inputPlaceholder: 'Pull from Otter or paste the transcript of the meeting...',
+    inputRequired: true,
+    structured: true,
+    dept: 'meetings',
+    systemPrompt: `You are an assistant for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive a raw Otter.ai transcript of a work meeting — this could be a 1:1 with a manager, a catch-up with a colleague, a client call, a site meeting, or any other meeting where someone ends up with tasks to follow up on. Staff use this to get a quick summary plus a clear list of their action points.
+
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
+
+{
+  "title": "Short title for the meeting, e.g. Catch-up with Dan — 26 August 2026",
+  "date": "YYYY-MM-DD or null if not determinable (use the [Recording date: ...] line if present)",
+  "attendees": "everyone who spoke or was named as present, comma-separated",
+  "summary": "A clear, plain-English summary of what was discussed and any decisions or direction given, in the order it came up. A few short paragraphs — enough that someone who missed the meeting understands what was said, without needing the full transcript.",
+  "action_points": [
+    { "action": "the task or action agreed", "owner": "who owns it — use their name if known from the transcript, otherwise the main person being spoken to", "due": "YYYY-MM-DD if a date was given, a plain description like 'end of week' if a timeframe was given, otherwise null" }
+  ]
+}
+
+Rules:
+- Capture every task or action raised — do not invent or skip any.
+- action_points: empty array if none were agreed.
+- Plain English, factual, short sentences.
+- Never leave "summary" blank — if the transcript is very short, summarise what little there was.`
+  },
+  {
     id: 'toolbox-talk',
     name: 'Toolbox Talk',
     icon: '🦺',

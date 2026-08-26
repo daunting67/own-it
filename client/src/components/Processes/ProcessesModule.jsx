@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 
+// Processes that produce a downloadable .docx (the run response's `document` field).
+// History rows don't carry that info from the API, so this list gates the
+// "Download .docx" button shown against past runs.
+const DOCX_PROCESSES = ['performance-review', 'meeting-notes']
+
 // `only` embeds a single process (e.g. inside HR & People); `include` limits the
 // full module to a set of ids (e.g. the Meetings module); `exclude` hides ids.
 export default function ProcessesModule({ only = null, include = null, exclude = [], title = 'Processes' }) {
@@ -190,7 +195,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
                   <span className={`badge history-status-${r.status}`}>
                     {r.status}
                   </span>
-                  {r.processId === 'performance-review' && r.status === 'completed' && (
+                  {DOCX_PROCESSES.includes(r.processId) && r.status === 'completed' && (
                     <button
                       className="btn btn-secondary btn-sm"
                       style={{ marginTop: 6 }}
@@ -315,7 +320,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
                   <div style={{ display: 'flex', gap: 8 }}>
                     {doc && (
                       <button className="btn btn-primary btn-sm" onClick={downloadDoc}>
-                        📄 Download Outcome Form (.docx)
+                        📄 Download Word Doc (.docx)
                       </button>
                     )}
                     <button className="btn btn-secondary btn-sm" onClick={copyResult}>

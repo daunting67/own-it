@@ -4,6 +4,7 @@ import ProcessesModule from '../Processes/ProcessesModule'
 const MEETING_PROCESSES = [
   { id: 'office-minutes', label: 'Office Minutes' },
   { id: 'debrief', label: 'Debrief' },
+  { id: 'meeting-notes', label: 'Meeting Notes' },
 ]
 
 export default function MeetingsModule() {
@@ -14,7 +15,7 @@ export default function MeetingsModule() {
       <div className="page-header">
         <div>
           <div className="page-title">Meetings</div>
-          <div className="page-subtitle">Office minutes and job debriefs — run from a transcript</div>
+          <div className="page-subtitle">Office minutes, job debriefs, and personal meeting notes — run from a transcript</div>
         </div>
       </div>
 

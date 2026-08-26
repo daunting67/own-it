@@ -16,7 +16,7 @@ const { nzLocalToUtc, nzDateOf, nzDateString } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
-const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk', 'hse-committee'])
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk', 'hse-committee', 'meeting-notes'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -131,6 +131,26 @@ function renderHseCommitteeText(d) {
     d.other_items,
     '',
     'ACTIONS',
+    actions
+  ].join('\n')
+}
+
+function renderMeetingNotesText(d) {
+  const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const actionItems = (d.action_points || []).filter(Boolean)
+  const actions = actionItems.length
+    ? actionItems.map((a, i) => `${i + 1}. ${a.action || 'Not captured'} — Owner: ${a.owner || 'Not set'} — Due: ${a.due || 'Not set'}`).join('\n')
+    : 'No action points agreed.'
+  return [
+    (d.title || 'MEETING NOTES').toUpperCase(),
+    `${nz}`,
+    '',
+    `ATTENDEES: ${d.attendees || ''}`,
+    '',
+    'SUMMARY',
+    d.summary,
+    '',
+    'ACTION POINTS',
     actions
   ].join('\n')
 }
@@ -488,6 +508,27 @@ router.post('/run/:id', async (req, res) => {
         output += teammateBanner(tm, 'debrief')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe debrief text above is still valid — copy it into Teammate manually.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'meeting-notes') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      output = renderMeetingNotesText(parsed)
+      try {
+        const { buildMeetingNotesDocx, meetingNotesFilename } = require('../lib/buildMeetingNotesDocx')
+        const buf = await buildMeetingNotesDocx(parsed)
+        document = buf.toString('base64')
+        filename = meetingNotesFilename(parsed)
+        output += `\n\n📄 Word doc ready — use the Download button below.`
+        try {
+          await saveReviewDoc(runId, filename, buf)
+          output += ` It's also kept with this run in history for later download.`
+        } catch (storeErr) {
+          output += ` (Could not store the document for later download: ${storeErr.message} — download it now.)`
+        }
+      } catch (docErr) {
+        output += `\n\n⚠️ Could not build the Word document: ${docErr.message}\nThe summary above is still valid — copy it manually.`
       }
     }
 
