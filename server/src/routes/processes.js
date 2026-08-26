@@ -7,6 +7,7 @@ const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { submitToolboxTalk } = require('../lib/teammateToolboxTalk')
 const { submitHseCommittee } = require('../lib/teammateHseCommittee')
+const { submitPostIncidentInvestigation } = require('../lib/teammatePostIncidentInvestigation')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
@@ -16,7 +17,7 @@ const { nzLocalToUtc, nzDateOf, nzDateString } = require('../lib/nzDay')
 
 // Processes whose input is an Otter transcript benefit from the staff roster
 // (name correction). Keyed by process id.
-const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk', 'hse-committee', 'meeting-notes'])
+const ROSTER_PROCESSES = new Set(['office-minutes', 'debrief', 'performance-review', 'pre-start', 'toolbox-talk', 'hse-committee', 'meeting-notes', 'post-incident-investigation'])
 
 function renderDebriefText(d) {
   const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
@@ -131,6 +132,55 @@ function renderHseCommitteeText(d) {
     d.other_items,
     '',
     'ACTIONS',
+    actions
+  ].join('\n')
+}
+
+function renderPostIncidentInvestigationText(d) {
+  const nz = d.date ? new Date(`${d.date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Date not specified'
+  const actionItems = (d.corrective_actions || []).filter(Boolean)
+  const actions = actionItems.length
+    ? actionItems.map((a, i) => `${i + 1}. ${a.action || 'Not captured'} — Owner: ${a.owner || 'Not set'} — Due: ${a.due || 'Not set'}`).join('\n')
+    : 'No corrective actions agreed.'
+  const investigators = Array.isArray(d.investigators) ? d.investigators.join(', ') : (d.investigators || 'Not specified')
+  const interviews = (d.interviews || []).filter(Boolean)
+  const statements = interviews.length
+    ? interviews.map(i => `${i.name || 'Unnamed'}: ${i.statement || 'No account recorded'}`).join('\n\n')
+    : 'No witness accounts recorded.'
+  return [
+    'POST INCIDENT INVESTIGATION',
+    'P&I (North) Ltd',
+    `${d.fs_number || 'FS number not stated'} | ${nz}`,
+    '',
+    `INCIDENT: ${d.incident_summary || 'Not specified'}`,
+    `CATEGORY: ${d.category || 'Not determined'}`,
+    `INVESTIGATED BY: ${investigators}`,
+    '',
+    'SEQUENCE OF EVENTS',
+    d.sequence_of_events,
+    '',
+    'WITNESS ACCOUNTS',
+    statements,
+    '',
+    'IMMEDIATE CAUSE',
+    d.immediate_cause,
+    '',
+    'CONTRIBUTING FACTORS',
+    d.contributing_factors,
+    '',
+    'ROOT CAUSE',
+    d.root_cause,
+    '',
+    'RISK INVOLVED',
+    d.risk_involved,
+    '',
+    'RISK RATING',
+    d.risk_rating_comments,
+    '',
+    'FINDINGS',
+    d.findings,
+    '',
+    'CORRECTIVE ACTIONS',
     actions
   ].join('\n')
 }
@@ -578,6 +628,39 @@ router.post('/run/:id', async (req, res) => {
         output += teammateBanner(tm, 'HSE committee meeting minutes')
       } catch (tmErr) {
         output += `\n\n⚠️ Could not submit to Teammate: ${tmErr.message}\nThe minutes above are still valid — copy them into Teammate manually.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'post-incident-investigation') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+      output = renderPostIncidentInvestigationText(parsed)
+      try {
+        const tm = await submitPostIncidentInvestigation(parsed, coordinatorName)
+        const p = tm.populated
+        output += `\n\n✅ Investigation section updated on ${tm.form.formNumber} in Teammate — ${p.matched} field${p.matched === 1 ? '' : 's'} populated. The Details section already on the form was left untouched. Open it in Teammate to review and Submit.`
+        if (!tm.categorySet) {
+          output += `\n\n📋 Category wasn't set — the transcript didn't clearly indicate one. Pick it on the form.`
+        }
+        output += `\n\n📋 "Risk Involved" is a live Risk Register pick-list, so it isn't set automatically. In Teammate, tick the register entries matching: ${tm.riskInvolved || 'Not discussed'}`
+        if (tm.correctiveActions.length) {
+          const t = tm.tasks
+          if (t.error) {
+            output += `\n\n⚠️ The corrective actions are in the "Corrective & Preventive Actions" field, but adding them to the Task List failed (${t.error}). Add these ${tm.correctiveActions.length} manually:\n` +
+              tm.correctiveActions.map(a => `• ${a.action} — ${a.owner || 'owner not set'}${a.due ? ` — due ${a.due}` : ''}`).join('\n')
+          } else {
+            output += `\n\n✅ ${t.added} corrective action${t.added === 1 ? '' : 's'} added to the form's Task List.`
+            if (t.skipped) output += ` ${t.skipped} skipped — already on the form.`
+            if (t.unmatchedOwners.length) {
+              output += `\n Note: these owners weren't on the staff list, so their tasks are unassigned (the name is in the task notes): ${t.unmatchedOwners.join(', ')}.`
+            }
+          }
+        }
+      } catch (tmErr) {
+        const why = tmErr.code === 'creds-unset'
+          ? 'automatic updating is not configured'
+          : tmErr.message
+        output += `\n\n⚠️ Could not update Teammate: ${why}\nThe investigation above is still valid — open ${parsed.fs_number || 'the incident form'} in Teammate and fill Section 2 from it.`
       }
     }
 
