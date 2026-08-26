@@ -321,6 +321,29 @@ router.get('/runs/:id/document', async (req, res) => {
   res.json(doc)
 })
 
+// Email a document the client already holds (the base64 bytes from a run
+// response) — no server-side lookup, so this works for any process that
+// produced one, straight after running it.
+router.post('/email', async (req, res) => {
+  const { to, filename, document, subject } = req.body
+  if (!to || !String(to).includes('@')) return res.status(400).json({ error: 'A valid email address is required' })
+  if (!document || !filename) return res.status(400).json({ error: 'No document to send' })
+
+  try {
+    const { sendDocx } = require('../lib/mailer')
+    await sendDocx({
+      to: String(to).trim(),
+      subject: subject || filename,
+      text: `Attached: ${filename}, from the Own It portal.`,
+      filename,
+      buffer: Buffer.from(document, 'base64')
+    })
+    res.json({ sent: true, to: String(to).trim() })
+  } catch (mailErr) {
+    res.status(502).json({ error: mailErr.message })
+  }
+})
+
 // Run a process
 router.post('/run/:id', async (req, res) => {
   const proc = PROCESSES.find(p => p.id === req.params.id)

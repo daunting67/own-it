@@ -30,6 +30,11 @@ export default function ProcessesModule({ only = null, include = null, exclude =
   const [otterFetching, setOtterFetching] = useState(null)
   const [historyDocFetching, setHistoryDocFetching] = useState(null)
   const [historyDocError, setHistoryDocError] = useState(null)
+  const [emailOpen, setEmailOpen] = useState(false)
+  const [emailTo, setEmailTo] = useState('')
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailError, setEmailError] = useState(null)
+  const [emailSent, setEmailSent] = useState(null)
 
   useEffect(() => {
     api.getProcesses().then(setProcesses).catch(console.error)
@@ -62,6 +67,9 @@ export default function ProcessesModule({ only = null, include = null, exclude =
     setCopied(false)
     setOtterOpen(false)
     setOtterError(null)
+    setEmailOpen(false)
+    setEmailError(null)
+    setEmailSent(null)
   }
 
   async function openOtterPicker() {
@@ -99,6 +107,9 @@ export default function ProcessesModule({ only = null, include = null, exclude =
     setDoc(null)
     setError(null)
     setCopied(false)
+    setEmailOpen(false)
+    setEmailError(null)
+    setEmailSent(null)
     try {
       const res = await api.runProcess(selected.id, input, selected.pickCoordinator ? coordinator : undefined)
       setResult(res.output)
@@ -135,6 +146,29 @@ export default function ProcessesModule({ only = null, include = null, exclude =
 
   function downloadDoc() {
     if (doc) saveDocFile(doc)
+  }
+
+  function openEmail() {
+    setEmailTo(user?.email || '')
+    setEmailError(null)
+    setEmailSent(null)
+    setEmailOpen(true)
+  }
+
+  async function sendEmail() {
+    if (!doc || !emailTo.trim()) return
+    setEmailSending(true)
+    setEmailError(null)
+    setEmailSent(null)
+    try {
+      await api.emailDocument({ to: emailTo.trim(), filename: doc.filename, document: doc.document, subject: `${selected?.name || 'Own It'} — ${doc.filename}` })
+      setEmailSent(emailTo.trim())
+      setEmailOpen(false)
+    } catch (err) {
+      setEmailError(err.message)
+    } finally {
+      setEmailSending(false)
+    }
   }
 
   async function downloadRunDoc(runId) {
@@ -323,12 +357,42 @@ export default function ProcessesModule({ only = null, include = null, exclude =
                         📄 Download Word Doc (.docx)
                       </button>
                     )}
+                    {doc && (
+                      <button className="btn btn-secondary btn-sm" onClick={openEmail}>
+                        ✉️ Email
+                      </button>
+                    )}
                     <button className="btn btn-secondary btn-sm" onClick={copyResult}>
                       {copied ? '✓ Copied' : 'Copy'}
                     </button>
                   </div>
                 </div>
                 <pre className="process-result-body">{result}</pre>
+                {emailOpen && (
+                  <div className="process-input-section" style={{ marginTop: 12 }}>
+                    <label className="form-label">Email this document to</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        className="form-input"
+                        type="email"
+                        value={emailTo}
+                        onChange={e => setEmailTo(e.target.value)}
+                        placeholder="name@pipelines.nz"
+                        autoFocus
+                      />
+                      <button className="btn btn-primary btn-sm" onClick={sendEmail} disabled={emailSending || !emailTo.trim()}>
+                        {emailSending ? '⏳ Sending…' : 'Send'}
+                      </button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setEmailOpen(false)} disabled={emailSending}>
+                        Cancel
+                      </button>
+                    </div>
+                    {emailError && <div className="banner banner-danger" style={{ marginTop: 8 }}>{emailError}</div>}
+                  </div>
+                )}
+                {emailSent && (
+                  <div className="banner banner-success" style={{ marginTop: 12 }}>✅ Emailed to {emailSent}</div>
+                )}
               </div>
             )}
           </div>
