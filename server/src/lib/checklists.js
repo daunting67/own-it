@@ -67,6 +67,10 @@ const TEMPLATES = {
       { label: 'Emergency contacts entered', done: false },
       { label: 'Licences/certs uploaded', done: false },
     ]},
+    { section: 'Apps', items: [
+      { label: 'Added to FastField', done: false },
+      { label: 'Added to Workforce', done: false },
+    ]},
   ],
   'Labour Hire': [
     { section: 'Pre-start', items: [
@@ -91,6 +95,10 @@ const TEMPLATES = {
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
     ]},
+    { section: 'Apps', items: [
+      { label: 'Added to FastField', done: false },
+      { label: 'Added to Workforce', done: false },
+    ]},
   ],
   'Contractor': [
     { section: 'Pre-start', items: [
@@ -112,6 +120,10 @@ const TEMPLATES = {
       { label: 'Profile created in Teammate', done: false },
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Certs/licences uploaded', done: false },
+    ]},
+    { section: 'Apps', items: [
+      { label: 'Added to FastField', done: false },
+      { label: 'Added to Workforce', done: false },
     ]},
   ],
   'Casual': [
@@ -145,6 +157,10 @@ const TEMPLATES = {
       { label: 'Profile created in Teammate', done: false },
       { label: 'Photo uploaded to Teammate', done: false },
       { label: 'Emergency contacts entered', done: false },
+    ]},
+    { section: 'Apps', items: [
+      { label: 'Added to FastField', done: false },
+      { label: 'Added to Workforce', done: false },
     ]},
   ],
 }
