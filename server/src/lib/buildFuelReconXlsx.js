@@ -59,8 +59,6 @@ function placeLogo(worksheet, imageId, h = 64) {
   worksheet.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: w, height: h } })
 }
 
-function round2(x) { return Math.round((x + Number.EPSILON) * 100) / 100 }
-
 // Defensive net for cell values: NaN/Infinity are not valid numbers in the OOXML sheet
 // XML, and Excel responds by flagging the whole file as needing repair on open. The
 // engine (fuelEngine.js) coerces every numeric field it emits to a real number or null,
@@ -198,48 +196,49 @@ function buildFuelReconXlsx(R, meta = {}) {
   })
   reserveLogoRows(rec)
   placeLogo(rec, logoId, 50)
-  titleBand(rec, 17, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
+  titleBand(rec, 13, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
     `Period ending ${meta.periodEndLabel || inv.periodEnd}  ·  Account ${inv.account}  ·  Total invoice ${invoiceTotalLabel} (incl GST)`)
 
   const recHeaderRow = TITLE_ROW + 3  // title + subtitle + 1 blank spacer row (matches the original layout)
+  // Receipt litres / Litre var. / Receipt $ (pump) / Discount saving dropped per Tony's
+  // request — the underlying figures still live in fuelEngine.js's output and surface via
+  // Notes/Comments prose and the Summary tab; they're just not their own raw columns here.
   const recHeaders = ['Date', 'Driver', 'Card (invoice)', 'Product', 'Txn', 'Inv. litres',
-    'Pump rate', 'Your rate', 'Invoice $ (incl GST)', 'Receipt', 'Receipt litres', 'Litre var.',
-    'Receipt $ (pump)', 'Discount saving', 'Status', 'Notes', 'Comments']
-  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 11, L: 9, M: 11, N: 11, O: 14, P: 46, Q: 40 }
+    'Pump rate', 'Your rate', 'Invoice $ (incl GST)', 'Receipt', 'Status', 'Notes', 'Comments']
+  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 14, L: 46, M: 40 }
   headerRow(rec, recHeaderRow, recHeaders, recWidths)
   rec.pageSetup.printTitlesRow = `${recHeaderRow}:${recHeaderRow}`
-  rec.autoFilter = { from: { row: recHeaderRow, column: 1 }, to: { row: recHeaderRow, column: 17 } }
+  rec.autoFilter = { from: { row: recHeaderRow, column: 1 }, to: { row: recHeaderRow, column: 13 } }
   rec.views = [{ showGridLines: false, state: 'frozen', xSplit: 2, ySplit: recHeaderRow }]
   let rr = recHeaderRow + 1
   const firstDataRow = rr
-  const LITRES_COLS = new Set([6, 11, 12])   // Inv. litres, Receipt litres, Litre var.
-  const MONEY_COLS = new Set([9, 13, 14])    // Invoice $, Receipt $ (pump), Discount saving
+  const LITRES_COLS = new Set([6])   // Inv. litres
+  const MONEY_COLS = new Set([9])    // Invoice $
   for (const res of R.results) {
     const l = res.line
     const cells = [
       l.date, l.driver, l.card, res.product, l.txn_number, l.litres,
       l.pump_rate, l.your_rate, l.amount_incl,
       res.status === 'Matched' ? 'Yes' : res.status === 'Lost receipt' ? 'Lost' : 'No',
-      res.receiptLitres, res.litreVar, res.saving != null ? round2(res.saving + l.amount_incl) : null,
-      res.saving, res.status, res.notes.join(' · '), res.comments,
+      res.status, res.notes.join(' · '), res.comments,
     ]
     cells.forEach((v, i) => {
       const col = i + 1
       const c = rec.getCell(rr, col)
-      // Notes (P) and Comments (Q) are long free text, so wrap both. An absent one must be
+      // Notes (L) and Comments (M) are long free text, so wrap both. An absent one must be
       // left GENUINELY empty: an empty string still counts as a neighbouring value and stops
       // Excel spilling the text beside it, which clipped Notes to the column width.
-      const isText = col === 16 || col === 17
+      const isText = col === 12 || col === 13
       c.value = isText ? (v || null) : safeNum(v ?? null)
       c.font = font(9)
-      if ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(col)) c.alignment = { horizontal: 'right' }
+      if ([5, 6, 7, 8, 9, 10].includes(col)) c.alignment = { horizontal: 'right' }
       if (isText) c.alignment = { vertical: 'top', wrapText: true }
       if (LITRES_COLS.has(col)) c.numFmt = LITRES_FMT
       if (MONEY_COLS.has(col)) c.numFmt = MONEY
       c.border = allBorder
     })
     // Tony asked to drop the full-row green/red/amber status colouring (it read as
-    // heavy/noisy across a 17-column sheet) — rows are now plain white with borders only,
+    // heavy/noisy across a 13-column sheet) — rows are now plain white with borders only,
     // same as the Missing Receipts and Next Period tabs. Status is still fully readable
     // from the Status column text itself, just without the block colour behind it.
     rr += 1
@@ -250,12 +249,9 @@ function buildFuelReconXlsx(R, meta = {}) {
   rec.getCell(rr, 2).font = font(10, true, NAVY)
   rec.getCell(rr, 6).value = sumOrZero('F', firstDataRow, recLast)
   rec.getCell(rr, 9).value = sumOrZero('I', firstDataRow, recLast)
-  rec.getCell(rr, 11).value = sumOrZero('K', firstDataRow, recLast)
-  rec.getCell(rr, 13).value = sumOrZero('M', firstDataRow, recLast)
-  rec.getCell(rr, 14).value = sumOrZero('N', firstDataRow, recLast)
-  for (const col of [6, 11]) { const c = rec.getCell(rr, col); c.numFmt = LITRES_FMT; c.font = font(10, true, NAVY) }
-  for (const col of [9, 13, 14]) { const c = rec.getCell(rr, col); c.numFmt = MONEY; c.font = font(10, true, NAVY) }
-  for (let col = 1; col <= 17; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
+  for (const col of [6]) { const c = rec.getCell(rr, col); c.numFmt = LITRES_FMT; c.font = font(10, true, NAVY) }
+  for (const col of [9]) { const c = rec.getCell(rr, col); c.numFmt = MONEY; c.font = font(10, true, NAVY) }
+  for (let col = 1; col <= 13; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
 
   // ================= Missing Receipts =================
   const missing = wb.addWorksheet('Missing Receipts', { views: [{ showGridLines: false }] })
