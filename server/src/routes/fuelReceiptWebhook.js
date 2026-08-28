@@ -1,6 +1,6 @@
 const { Router } = require('express')
 const multer = require('multer')
-const { requireAdmin } = require('../middleware/auth')
+const { requireAuth, requireAdmin } = require('../middleware/auth')
 const db = require('../lib/supabase')
 const {
   storeSubmission, storeMultipartSubmission, getPdfSignedUrl,
@@ -46,7 +46,7 @@ router.post('/', upload.any(), async (req, res) => {
 // distinguishable from "it landed but got filtered out somewhere". A signed URL is generated
 // for any row that has a pdfPath, so the actual stored file can be opened and looked at
 // directly rather than just trusting a path string exists.
-router.get('/_recent', requireAdmin, async (req, res) => {
+router.get('/_recent', requireAuth, requireAdmin, async (req, res) => {
   try {
     const hours = Math.min(Number(req.query.hours) || 48, 24 * 14)
     const since = new Date(Date.now() - hours * 3600000).toISOString()
