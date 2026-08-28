@@ -12,16 +12,17 @@ const { nzDayRange } = require('./nzDay')
 // form's field names blind.
 const FUEL_RECEIPTS_FORM_ID = 679065
 
-// Tony configured TWO separate FastField delivery actions on this form (JSON + PDF), which
-// arrive as two INDEPENDENT HTTP requests — not one request carrying both. There is no known
-// shared identifier between them yet (unconfirmed whether FastField exposes one via a header,
-// a query-string merge field, or nothing at all) — that can only be learned from a real test
-// submission, not guessed. Until then, each delivery is stored as its own row and correlation
-// (matching a PDF row to its JSON row) is a later pass once we've SEEN what actually arrives.
+// Tony's delivery action has BOTH "JSON" and "PDF" checked as Format — confirmed from FastField's
+// own config screen, which states outright: "Formats other than JSON and XML are posted as
+// multipart/form-data." So both the structured fields and the rendered PDF arrive together in
+// ONE request, as separate multipart parts — not two independent requests (an earlier,
+// incorrect assumption). storeMultipartSubmission below handles that combined shape; the plain
+// storeSubmission(body) above remains correct for a hypothetical JSON-only delivery (that format
+// alone is NOT multipart, per the same FastField note).
 
-// Temporary holding area for PDF deliveries before they're matched to a specific
-// reconciliation run — separate from cost-docs (which holds only per-run FINAL output),
-// mirroring the temp-vs-persistent bucket split already used by costUploads.js/costDocs.js.
+// Temporary holding area for the PDF part before it's matched to a specific reconciliation run —
+// separate from cost-docs (which holds only per-run FINAL output), mirroring the
+// temp-vs-persistent bucket split already used by costUploads.js/costDocs.js.
 const PDF_BUCKET = 'fuel-receipt-inbox'
 
 async function ensurePdfBucket() {
@@ -29,30 +30,57 @@ async function ensurePdfBucket() {
   if (error && !/already exists/i.test(error.message)) throw error
 }
 
-// A PDF delivery has no JSON fields at all — just raw bytes and whatever the request's own
-// metadata (headers, query string) happens to carry. Store the file, then a bare row so it
-// shows up in the same table/timeline as JSON deliveries; leave the JSON-only columns null
-// rather than invent values for them.
-async function storePdfDelivery(buffer, { contentType } = {}) {
+async function uploadPdfPart(buffer, contentType) {
   const path = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}.pdf`
-  let { error: uploadErr } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
+  let { error } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
     contentType: contentType || 'application/pdf',
   })
-  if (uploadErr && /bucket not found/i.test(uploadErr.message)) {
+  if (error && /bucket not found/i.test(error.message)) {
     await ensurePdfBucket()
-    ;({ error: uploadErr } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
+    ;({ error } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
       contentType: contentType || 'application/pdf',
     }))
   }
-  if (uploadErr) throw new Error(uploadErr.message)
+  if (error) throw new Error(error.message)
+  return path
+}
 
-  const { data, error } = await db
+// One multipart request = one submission. `fields` is whatever multer parsed from the non-file
+// parts (a plain object — could be one field holding a JSON blob, or the form's own fields
+// spread across many parts; either way it's already JSON-storable as-is, same as a plain JSON
+// body would be). `files` is multer's array of uploaded parts; the field NAME FastField gives
+// the PDF part is unknown until a real submission is seen, so this is matched by mimetype/
+// filename rather than an assumed field name — deliberately permissive, same reasoning as the
+// rest of this file.
+function findPdfFile(files) {
+  return (files || []).find(f => f.mimetype === 'application/pdf')
+    || (files || []).find(f => /\.pdf$/i.test(f.originalname || ''))
+    || null
+}
+
+async function storeMultipartSubmission({ fields, files }) {
+  const pdfFile = findPdfFile(files)
+  const pdfPath = pdfFile ? await uploadPdfPart(pdfFile.buffer, pdfFile.mimetype) : null
+
+  const row = {
+    formId: fields?.formId ?? FUEL_RECEIPTS_FORM_ID,
+    submissionId: fields?.submissionId || fields?.submitId || null,
+    submitterName: fields?.userName || null,
+    contentType: 'multipart/form-data',
+    pdfPath,
+    rawPayload: fields && Object.keys(fields).length ? fields : null,
+  }
+  const { data, error } = await db.from('FuelReceiptSubmission').insert(row).select().single()
+  if (!error) return data
+
+  console.error('FuelReceiptSubmission multipart insert failed, retrying minimal row:', error.message)
+  const { data: minimal, error: minimalErr } = await db
     .from('FuelReceiptSubmission')
-    .insert({ formId: FUEL_RECEIPTS_FORM_ID, contentType: contentType || 'application/pdf', pdfPath: path })
+    .insert({ contentType: 'multipart/form-data', pdfPath, rawPayload: row.rawPayload })
     .select()
     .single()
-  if (error) throw new Error(error.message)
-  return data
+  if (minimalErr) throw new Error(`${error.message} (minimal retry also failed: ${minimalErr.message})`)
+  return minimal
 }
 
 async function storeSubmission(body) {
@@ -97,5 +125,5 @@ async function getTodaysSubmissions() {
 }
 
 module.exports = {
-  storeSubmission, storePdfDelivery, getSubmissionsInRange, getTodaysSubmissions, FUEL_RECEIPTS_FORM_ID,
+  storeSubmission, storeMultipartSubmission, getSubmissionsInRange, getTodaysSubmissions, FUEL_RECEIPTS_FORM_ID,
 }
