@@ -1,4 +1,5 @@
 const db = require('./supabase')
+const { randomUUID } = require('crypto')
 const { nzDayRange } = require('./nzDay')
 
 // FastField's "Fuel Receipts" form (id 679065) has never been wired into this app before.
@@ -11,11 +12,55 @@ const { nzDayRange } = require('./nzDay')
 // form's field names blind.
 const FUEL_RECEIPTS_FORM_ID = 679065
 
+// Tony configured TWO separate FastField delivery actions on this form (JSON + PDF), which
+// arrive as two INDEPENDENT HTTP requests — not one request carrying both. There is no known
+// shared identifier between them yet (unconfirmed whether FastField exposes one via a header,
+// a query-string merge field, or nothing at all) — that can only be learned from a real test
+// submission, not guessed. Until then, each delivery is stored as its own row and correlation
+// (matching a PDF row to its JSON row) is a later pass once we've SEEN what actually arrives.
+
+// Temporary holding area for PDF deliveries before they're matched to a specific
+// reconciliation run — separate from cost-docs (which holds only per-run FINAL output),
+// mirroring the temp-vs-persistent bucket split already used by costUploads.js/costDocs.js.
+const PDF_BUCKET = 'fuel-receipt-inbox'
+
+async function ensurePdfBucket() {
+  const { error } = await db.storage.createBucket(PDF_BUCKET, { public: false })
+  if (error && !/already exists/i.test(error.message)) throw error
+}
+
+// A PDF delivery has no JSON fields at all — just raw bytes and whatever the request's own
+// metadata (headers, query string) happens to carry. Store the file, then a bare row so it
+// shows up in the same table/timeline as JSON deliveries; leave the JSON-only columns null
+// rather than invent values for them.
+async function storePdfDelivery(buffer, { contentType } = {}) {
+  const path = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}.pdf`
+  let { error: uploadErr } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
+    contentType: contentType || 'application/pdf',
+  })
+  if (uploadErr && /bucket not found/i.test(uploadErr.message)) {
+    await ensurePdfBucket()
+    ;({ error: uploadErr } = await db.storage.from(PDF_BUCKET).upload(path, buffer, {
+      contentType: contentType || 'application/pdf',
+    }))
+  }
+  if (uploadErr) throw new Error(uploadErr.message)
+
+  const { data, error } = await db
+    .from('FuelReceiptSubmission')
+    .insert({ formId: FUEL_RECEIPTS_FORM_ID, contentType: contentType || 'application/pdf', pdfPath: path })
+    .select()
+    .single()
+  if (error) throw new Error(error.message)
+  return data
+}
+
 async function storeSubmission(body) {
   const row = {
     formId: body?.formId ?? FUEL_RECEIPTS_FORM_ID,
     submissionId: body?.submissionId || body?.submitId || null,
     submitterName: body?.userName || null,
+    contentType: 'application/json',
     rawPayload: body,
   }
   const { data, error } = await db.from('FuelReceiptSubmission').insert(row).select().single()
@@ -51,4 +96,6 @@ async function getTodaysSubmissions() {
   return getSubmissionsInRange(startUtc, endUtc)
 }
 
-module.exports = { storeSubmission, getSubmissionsInRange, getTodaysSubmissions, FUEL_RECEIPTS_FORM_ID }
+module.exports = {
+  storeSubmission, storePdfDelivery, getSubmissionsInRange, getTodaysSubmissions, FUEL_RECEIPTS_FORM_ID,
+}
