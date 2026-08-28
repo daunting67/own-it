@@ -1,6 +1,10 @@
 const { Router } = require('express')
 const multer = require('multer')
-const { storeSubmission, storeMultipartSubmission } = require('../lib/fuelReceiptSubmissions')
+const { requireAdmin } = require('../middleware/auth')
+const db = require('../lib/supabase')
+const {
+  storeSubmission, storeMultipartSubmission, getPdfSignedUrl,
+} = require('../lib/fuelReceiptSubmissions')
 
 const router = Router()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })
@@ -34,6 +38,32 @@ router.post('/', upload.any(), async (req, res) => {
   } catch (err) {
     console.error('Fuel receipt webhook failed to store submission:', err)
     res.status(500).json({ error: err.message || 'Failed to store submission' })
+  }
+})
+
+// Admin-only diagnostic (mirrors plant.js's /_recent): every row from the last N hours
+// (default 48), regardless of day-windowing, so "the webhook never received it" is
+// distinguishable from "it landed but got filtered out somewhere". A signed URL is generated
+// for any row that has a pdfPath, so the actual stored file can be opened and looked at
+// directly rather than just trusting a path string exists.
+router.get('/_recent', requireAdmin, async (req, res) => {
+  try {
+    const hours = Math.min(Number(req.query.hours) || 48, 24 * 14)
+    const since = new Date(Date.now() - hours * 3600000).toISOString()
+    const { data, error } = await db
+      .from('FuelReceiptSubmission')
+      .select('id, receivedAt, formId, submissionId, submitterName, contentType, pdfPath, rawPayload')
+      .gte('receivedAt', since)
+      .order('receivedAt', { ascending: false })
+    if (error) throw new Error(error.message)
+
+    const rows = await Promise.all((data || []).map(async row => ({
+      ...row,
+      pdfUrl: row.pdfPath ? await getPdfSignedUrl(row.pdfPath).catch(err => `ERROR: ${err.message}`) : null,
+    })))
+    res.json({ since, hours, count: rows.length, rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 

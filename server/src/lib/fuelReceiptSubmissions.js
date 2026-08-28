@@ -108,6 +108,14 @@ async function storeSubmission(body) {
   return rawOnly
 }
 
+// Short-lived read link for a stored PDF part — for diagnostics/manual inspection only;
+// the eventual hyperlink-in-the-workbook feature will need its own long-lived version of this.
+async function getPdfSignedUrl(path, expiresInSeconds = 3600) {
+  const { data, error } = await db.storage.from(PDF_BUCKET).createSignedUrl(path, expiresInSeconds)
+  if (error) throw new Error(error.message)
+  return data.signedUrl
+}
+
 async function getSubmissionsInRange(startUtc, endUtc) {
   const { data, error } = await db
     .from('FuelReceiptSubmission')
@@ -125,5 +133,6 @@ async function getTodaysSubmissions() {
 }
 
 module.exports = {
-  storeSubmission, storeMultipartSubmission, getSubmissionsInRange, getTodaysSubmissions, FUEL_RECEIPTS_FORM_ID,
+  storeSubmission, storeMultipartSubmission, getSubmissionsInRange, getTodaysSubmissions,
+  getPdfSignedUrl, FUEL_RECEIPTS_FORM_ID,
 }
