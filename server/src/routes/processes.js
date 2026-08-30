@@ -7,7 +7,7 @@ const { submitDebrief } = require('../lib/teammateDebrief')
 const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { submitToolboxTalk } = require('../lib/teammateToolboxTalk')
 const { submitHseCommittee } = require('../lib/teammateHseCommittee')
-const { submitPostIncidentInvestigation } = require('../lib/teammatePostIncidentInvestigation')
+const { submitPostIncidentInvestigation, formNumberDigits } = require('../lib/teammatePostIncidentInvestigation')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
@@ -403,10 +403,12 @@ router.post('/run/:id', async (req, res) => {
     return res.status(403).json({ error: 'You do not have permission to run this process' })
   }
 
-  const { input, coordinator } = req.body
+  const { input, coordinator, formNumber } = req.body
   // Coordinator the form lands under: whoever the submitter picked in the UI,
   // else the logged-in user. resolves to a Teammate employee downstream.
   const coordinatorName = (coordinator && String(coordinator).trim()) || resolveTeammateName(req.user)
+  // Optional FS number typed in the UI, for processes that target an existing form.
+  const typedFormNumber = (formNumber && String(formNumber).trim()) || ''
   if (proc.inputRequired && !input?.trim()) {
     return res.status(400).json({ error: 'Input is required for this process' })
   }
@@ -634,7 +636,27 @@ router.post('/run/:id', async (req, res) => {
     if (proc.structured && proc.id === 'post-incident-investigation') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
+
+      // An FS number typed in the UI beats one transcribed from audio. Otter
+      // mis-hears digits, and a wrong number would write this investigation onto
+      // a different incident's form — so when the user has stated one explicitly,
+      // that is the one we trust. Flag a disagreement rather than hiding it.
+      let fsNote = ''
+      if (typedFormNumber) {
+        const heard = formNumberDigits(parsed.fs_number)
+        const typed = formNumberDigits(typedFormNumber)
+        // Tidy "717" / "fs 717" into the house FS00717 form for the record. Lookup
+        // compares digits either way, so this is purely so the rendered
+        // investigation carries a form number that reads like a form number.
+        const tidy = typed ? `FS${typed.padStart(5, '0')}` : typedFormNumber
+        if (heard && typed && heard !== typed) {
+          fsNote = `\n\n📋 The recording sounded like ${parsed.fs_number}, but you entered ${tidy}. Used ${tidy} — check that is the right incident before you Submit in Teammate.`
+        }
+        parsed.fs_number = tidy
+      }
+
       output = renderPostIncidentInvestigationText(parsed)
+      if (fsNote) output += fsNote
       try {
         const tm = await submitPostIncidentInvestigation(parsed, coordinatorName)
         const p = tm.populated

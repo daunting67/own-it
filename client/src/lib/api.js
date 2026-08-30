@@ -84,7 +84,7 @@ export const api = {
   // Processes
   getProcesses: () => request('/api/processes'),
   getProcessRuns: () => request('/api/processes/runs'),
-  runProcess: (id, input, coordinator) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input, coordinator }) }),
+  runProcess: (id, input, coordinator, formNumber) => request(`/api/processes/run/${id}`, { method: 'POST', body: JSON.stringify({ input, coordinator, formNumber }) }),
   getProcessPeople: () => request('/api/processes/people'),
   getRunDocument: (id) => request(`/api/processes/runs/${id}/document`),
   emailDocument: (payload) => request('/api/processes/email', { method: 'POST', body: JSON.stringify(payload) }),

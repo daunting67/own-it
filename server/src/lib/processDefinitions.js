@@ -185,9 +185,9 @@ Plain English, factual, the committee's own words lightly tidied.`
     id: 'post-incident-investigation',
     name: 'Post Incident Investigation',
     icon: '🔍',
-    description: 'Investigation transcript → fills Section 2 (Investigation) of an existing Teammate Accident & Incident form. Say the FS number in the recording so we know which form to update.',
+    description: 'Investigation transcript → fills Section 2 (Investigation) of an existing Teammate Accident & Incident form. Say the FS number in the recording, or type it in below.',
     inputLabel: 'Post incident investigation transcript',
-    inputPlaceholder: 'Pull from Otter or paste the full post incident investigation transcript. Make sure the FS number of the incident form is spoken in the recording...',
+    inputPlaceholder: 'Pull from Otter or paste the full post incident investigation transcript. If the FS number of the incident form is not spoken in the recording, type it into the box below...',
     inputRequired: true,
     structured: true,
     maxTokens: 8192,
@@ -195,6 +195,13 @@ Plain English, factual, the committee's own words lightly tidied.`
     // No coordinator picker: this process updates a form that already exists and
     // already has a coordinator. The submitter only decides which Teammate login
     // writes the update, which should be whoever is signed in.
+    //
+    // FS number box: people do not naturally say "FS zero zero seven one seven"
+    // mid-conversation, so relying on it being spoken made the process unusable on
+    // most real recordings. Typed here it wins over anything heard in the audio —
+    // a mis-heard number would write this investigation onto somebody else's
+    // incident, which is far worse than being asked to type six characters.
+    pickFormNumber: true,
     systemPrompt: `You are a health and safety administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
 
 You receive a raw Otter.ai transcript of a POST INCIDENT INVESTIGATION — the follow-up meeting or interview held after an accident or incident has already been reported. The incident itself was recorded earlier in Teammate on an "Accident & Incident" form, and the details of what happened are already filled in there. Your job is to extract only the INVESTIGATION content, which goes into Section 2 of that existing form.
@@ -227,6 +234,7 @@ Respond with ONLY a JSON object — no markdown fences, no commentary — in exa
 Rules:
 - fs_number is the single most important field. Listen hard for it and reconstruct it from spoken digits. Never invent one — if it truly was not said, use null and the portal will ask the user for it.
 - category must match one of the listed options character-for-character, because it maps onto a fixed choice on the form. If the incident spans two, pick the one the investigation treated as primary.
+- Choose the category from what ACTUALLY happened, never from what could have happened — the potential outcome belongs in the risk fields, not here. Injury, Cuts, Hit / Crush / Bruises and Manual Handling all require somebody to have actually been hurt. Property Damage/Theft requires something to have actually been damaged or stolen. If nobody was hurt and nothing was damaged, it is a Near Miss, however serious it could have been. Safety Observation is for a hazard someone noticed and raised, where no event occurred at all.
 - Report only what the investigation actually established. Never invent a cause, a factor, or a witness account. An investigation record can end up in front of a regulator, so accuracy matters far more than completeness.
 - Distinguish the three cause fields properly: immediate_cause is what happened at the sharp end, contributing_factors are the conditions around it, root_cause is the system that let it happen. If the transcript only establishes one of them, fill that one and write "Not established in this investigation" in the others rather than padding them by restating the same thing.
 - interviews and corrective_actions: empty array [] if none. Do not create a witness account for someone who merely attended the meeting.

@@ -288,4 +288,4 @@ async function submitPostIncidentInvestigation(d, recordedByName) {
   }
 }
 
-module.exports = { submitPostIncidentInvestigation, findIncidentForm }
+module.exports = { submitPostIncidentInvestigation, findIncidentForm, formNumberDigits }

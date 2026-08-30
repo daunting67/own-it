@@ -16,6 +16,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
   const [input, setInput] = useState('')
   const [people, setPeople] = useState([])
   const [coordinator, setCoordinator] = useState('')
+  const [formNumber, setFormNumber] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [doc, setDoc] = useState(null) // { document: base64, filename }
@@ -60,6 +61,7 @@ export default function ProcessesModule({ only = null, include = null, exclude =
   function selectProcess(p) {
     setSelected(p)
     setCoordinator(p.id === 'office-minutes' ? 'Sandra Grace' : (user?.name || ''))
+    setFormNumber('')
     setInput('')
     setResult(null)
     setDoc(null)
@@ -111,7 +113,12 @@ export default function ProcessesModule({ only = null, include = null, exclude =
     setEmailError(null)
     setEmailSent(null)
     try {
-      const res = await api.runProcess(selected.id, input, selected.pickCoordinator ? coordinator : undefined)
+      const res = await api.runProcess(
+        selected.id,
+        input,
+        selected.pickCoordinator ? coordinator : undefined,
+        selected.pickFormNumber ? formNumber : undefined
+      )
       setResult(res.output)
       if (res.document && res.filename) setDoc({ document: res.document, filename: res.filename })
       api.getProcessRuns().then(setHistory).catch(console.error)
@@ -315,6 +322,19 @@ export default function ProcessesModule({ only = null, include = null, exclude =
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   rows={10}
+                />
+              </div>
+            )}
+
+            {selected.pickFormNumber && (
+              <div className="process-input-section">
+                <label className="form-label">FS number of the incident form (optional — only needed if it isn't said in the recording)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. FS00717"
+                  value={formNumber}
+                  onChange={e => setFormNumber(e.target.value)}
                 />
               </div>
             )}
