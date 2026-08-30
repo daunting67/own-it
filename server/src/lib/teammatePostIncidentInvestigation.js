@@ -262,6 +262,33 @@ async function submitPostIncidentInvestigation(d, recordedByName) {
   if (categoryId) values[CATEGORY_FIELD] = { value: categoryId }
 
   const session = await signIn(recordedByName)
+
+  // Refuse to overwrite an investigation that has already been written.
+  //
+  // "Closed" above is too narrow a test on its own: a form can be filled in and
+  // submitted while still open, and populateSubmission REPLACES a field value
+  // rather than appending to it (fv.value = v.value), so a second run over a
+  // completed form silently destroys the original investigation wording on a
+  // controlled H&S record. Read Section 2 first and stop if anything is there.
+  // Clearing those fields in Teammate is a deliberate human act; overwriting
+  // them from here must never be an accident.
+  const before = await getSubmission(form.id, session)
+  const beforeById = new Map((before.formValue || []).map(fv => [fv.relatedFormId, fv]))
+  const filledText = id => String(beforeById.get(id)?.value || '').trim()
+  const alreadyFilled = []
+  if (filledText(ROOT_CAUSE_FIELD)) alreadyFilled.push('Root Cause')
+  if (filledText(CORRECTIVE_ACTIONS_FIELD)) alreadyFilled.push('Corrective & Preventive Actions')
+  if (alreadyFilled.length) {
+    const sample = (filledText(ROOT_CAUSE_FIELD) || filledText(CORRECTIVE_ACTIONS_FIELD)).replace(/\s+/g, ' ').slice(0, 120)
+    const err = new Error(
+      `${form.formNumber} already has its Investigation section filled in (${alreadyFilled.join(' and ')}), so it was left untouched. ` +
+      `It currently starts: "${sample}${sample.length >= 120 ? '…' : ''}". ` +
+      `That is an existing record — if this investigation really does belong on that form, clear those fields in Teammate first, or run against the right FS number.`
+    )
+    err.code = 'already-populated'
+    throw err
+  }
+
   const populated = await populateSubmission(form.id, values, session)
 
   // Tasks are a separate call, so a failure there must not make a successful
