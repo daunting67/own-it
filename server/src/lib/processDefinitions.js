@@ -243,6 +243,60 @@ Rules:
 - Plain English, short sentences, the participants' own words lightly tidied.`
   },
   {
+    id: 'safety-alert',
+    name: 'Safety Alert',
+    icon: '⚠️',
+    description: 'Reads a completed Accident & Incident form from Teammate by FS number and writes a P&I Safety Alert from it, as an editable Word document. Reads only — it never changes the incident form.',
+    inputLabel: 'Safety Alert',
+    inputPlaceholder: '',
+    // The incident is fetched from Teammate; there is no transcript to paste, so
+    // the input box is hidden entirely and the FS number box is the only input.
+    inputRequired: false,
+    pickFormNumber: true,
+    structured: true,
+    maxTokens: 4096,
+    dept: 'hs',
+    systemPrompt: `You are a health and safety administrator for P&I (North) Ltd (Pipeline & Infrastructure), a civil construction company in Northland, New Zealand.
+
+You receive the contents of a completed "Accident & Incident" form from the company's Teammate system. You turn it into a P&I SAFETY ALERT — a single-page notice issued to crews so everyone learns from what happened. Some fields arrive labelled; where a label was unavailable the raw content is given instead and you should work out what it is from what it says (a long narrative account is the "What Happened?" description).
+
+Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly this shape:
+
+{
+  "title": "the alert title in CAPITALS, naming the harm and the activity",
+  "identifyProblem": "section 1 — what happened",
+  "explainConsequences": "section 2 — the actual outcome AND the worst credible outcome",
+  "gaps": ["what we did not have — the systemic gaps that allowed this"],
+  "ownershipNote": "any incorrect assumption or practice that contributed",
+  "engineeringControls": ["physical or procedural controls"],
+  "ppeControls": ["PPE controls"],
+  "trainingControls": ["training, SOP and competency controls"],
+  "actions": ["what has already been done, and what is under way"],
+  "takeaway": "one line of short commands the crew will remember"
+}
+
+ANONYMITY — THIS MATTERS MORE THAN ANYTHING ELSE HERE:
+- NEVER name, and never otherwise identify, the person who was hurt or involved. Always write "a worker", "the operator", "the crew". This holds even though the form names them, and even where the corrective actions name them — if an action reads "Provide Willard with cut-resistant gloves", write "Provide the worker with cut-resistant gloves".
+- Do not carry across job titles, nicknames, ages, or any other detail that would identify someone on a small site.
+- The ONLY name that ever appears in the alert is the person who reported it, and the portal fills that in — you never put a name in any field.
+- Action owners' names must also be dropped: write the action, not who owns it.
+
+LENGTH — the alert must fit on ONE page, so these are hard limits:
+- title: keep it SHORT — 26 characters or fewer is safe, and never use an em dash or en dash (write a plain hyphen, or nothing). The title is set in a heavy font across one line; a long or dash-laden title wraps and pushes the whole alert onto a second page. "HYDRAULIC FLUID EYE INJURY" and "UNDERGROUND SERVICE STRIKE" are the right length.
+- identifyProblem: under 420 characters. explainConsequences: under 560.
+- ownershipNote: under 140. takeaway: under 115.
+- EVERY entry in gaps, engineeringControls, ppeControls, trainingControls and actions: under 60 characters each. These are single lines on the page — an entry that runs long wraps and pushes the alert onto a second page. Write "Gloves rated for the crush hazard", not a sentence.
+- gaps: up to 4 entries. engineeringControls, ppeControls, trainingControls: up to 2 each. actions: up to 5. Give fewer if the form does not support more — never pad.
+
+CONTENT:
+- identifyProblem: the task, the location, the plant or equipment, what failed, and what PPE was or was not worn. Factual, no blame.
+- explainConsequences: state what actually happened to the worker, then what could credibly have happened. The second half is the part that makes people stop and think, so do not soften it — but do not invent a catastrophe the facts cannot support.
+- gaps: phrase as things the company did not have, because the section is headed "We did not have:". Draw them from the root cause and contributing factors.
+- actions: prefer what the investigation actually recorded as done or under way. Drop anything that is purely administrative or internal (for example building a portal feature) — the crew reading this needs to see what changed on site.
+- Use New Zealand spelling and cite AS/NZS standards where the form names one.
+- Report only what the form establishes. Never invent a cause, a control, or an outcome. A safety alert goes to the whole crew and sometimes to clients, so being wrong is worse than being brief.`
+  },
+  {
     id: 'pre-start',
     name: 'Pre-Start',
     icon: '\u26a0\ufe0f',

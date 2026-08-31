@@ -90,6 +90,7 @@ const TABS = [
   { id: 'toolbox-talk', label: 'Toolbox Talk' },
   { id: 'hse-committee', label: 'HSE Committee' },
   { id: 'post-incident-investigation', label: 'Post Incident Investigation' },
+  { id: 'safety-alert', label: 'Safety Alert' },
 ]
 
 export default function HealthSafetyModule() {
@@ -100,7 +101,7 @@ export default function HealthSafetyModule() {
       <div className="page-header">
         <div>
           <div className="page-title">Health & Safety</div>
-          <div className="page-subtitle">Incident reports from Teammate, safety meetings, and post incident investigations</div>
+          <div className="page-subtitle">Incident reports from Teammate, safety meetings, post incident investigations, and safety alerts</div>
         </div>
       </div>
 
@@ -120,6 +121,7 @@ export default function HealthSafetyModule() {
       {tab === 'toolbox-talk' && <ProcessesModule key="toolbox-talk" only="toolbox-talk" />}
       {tab === 'hse-committee' && <ProcessesModule key="hse-committee" only="hse-committee" />}
       {tab === 'post-incident-investigation' && <ProcessesModule key="post-incident-investigation" only="post-incident-investigation" />}
+      {tab === 'safety-alert' && <ProcessesModule key="safety-alert" only="safety-alert" />}
     </div>
   )
 }

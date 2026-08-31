@@ -8,6 +8,7 @@ const { submitOfficeMinutes } = require('../lib/teammateOfficeMinutes')
 const { submitToolboxTalk } = require('../lib/teammateToolboxTalk')
 const { submitHseCommittee } = require('../lib/teammateHseCommittee')
 const { submitPostIncidentInvestigation, formNumberDigits } = require('../lib/teammatePostIncidentInvestigation')
+const { readIncidentForAlert, incidentAsText, fieldReport } = require('../lib/teammateSafetyAlert')
 const { resolveTeammateName } = require('../lib/teammateEmployeeMap')
 const { saveReviewDoc, getReviewDoc } = require('../lib/reviewDocs')
 const { rosterPromptBlock, STAFF } = require('../lib/staffRoster')
@@ -182,6 +183,56 @@ function renderPostIncidentInvestigationText(d) {
     '',
     'CORRECTIVE ACTIONS',
     actions
+  ].join('\n')
+}
+
+// Safety Alerts carry the date in NZ short form, matching every alert issued so far.
+function nzDateShort(value) {
+  if (!value) return ''
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? `${value}T12:00:00` : value)
+  if (isNaN(d.getTime())) return String(value)
+  const p = n => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`
+}
+
+function renderSafetyAlertText(a, incident) {
+  const list = (arr, empty) => {
+    const items = (Array.isArray(arr) ? arr : []).map(s => String(s).trim()).filter(Boolean)
+    return items.length ? items.map(s => `- ${s.replace(/^-\s*/, '')}`).join('\n') : empty
+  }
+  return [
+    'SAFETY ALERT',
+    'P&I (North) Ltd',
+    `${a.reference} | ${a.date || 'Date not recorded'} | Alert by: ${a.reportedBy}`,
+    '',
+    (a.title || 'UNTITLED ALERT').toUpperCase(),
+    '',
+    '1. IDENTIFY THE PROBLEM',
+    a.identifyProblem || 'Not established from the incident form.',
+    '',
+    '2. EXPLAIN THE CONSEQUENCES',
+    a.explainConsequences || 'Not established from the incident form.',
+    '',
+    '3. TAKE OWNERSHIP OF THE PROBLEM',
+    'We did not have:',
+    list(a.gaps, '- Not established from the incident form.'),
+    '',
+    a.ownershipNote || '',
+    '',
+    '4. PROPOSE YOUR SOLUTION',
+    'Engineering Controls:',
+    list(a.engineeringControls, '- None recorded.'),
+    'PPE Controls:',
+    list(a.ppeControls, '- None recorded.'),
+    'Training Controls:',
+    list(a.trainingControls, '- None recorded.'),
+    '',
+    '5. FACILITATE IMPLEMENTATION OF THE SOLUTION',
+    list(a.actions, '- None recorded.'),
+    '',
+    a.takeaway || '',
+    '',
+    `Source: Teammate incident ${incident.formNumber}${incident.category ? ` (${incident.category})` : ''}. Read-only — the incident form was not changed.`
   ].join('\n')
 }
 
@@ -412,6 +463,9 @@ router.post('/run/:id', async (req, res) => {
   if (proc.inputRequired && !input?.trim()) {
     return res.status(400).json({ error: 'Input is required for this process' })
   }
+  if (proc.id === 'safety-alert' && !typedFormNumber) {
+    return res.status(400).json({ error: 'Enter the FS number of the incident to write the alert from.' })
+  }
 
   // Create a run record immediately (so we have a record even if it fails)
   const runId = randomUUID()
@@ -435,6 +489,24 @@ router.post('/run/:id', async (req, res) => {
       ? `${proc.systemPrompt}\n\n${rosterPromptBlock()}`
       : proc.systemPrompt
 
+    // The Safety Alert has no transcript: its source is a completed incident form
+    // read out of Teammate. This read is the ONLY Teammate call the process makes
+    // — it never writes, so re-running it cannot disturb the incident record.
+    let modelInput = input || 'Run this process.'
+    let incident = null
+    if (proc.id === 'safety-alert') {
+      try {
+        incident = await readIncidentForAlert(typedFormNumber, coordinatorName)
+      } catch (readErr) {
+        const why = readErr.code === 'creds-unset'
+          ? 'Teammate credentials are not configured for this user, so the incident could not be read.'
+          : readErr.message
+        await db.from('ProcessRun').update({ status: 'failed', output: why }).eq('id', runId)
+        return res.status(400).json({ error: why })
+      }
+      modelInput = incidentAsText(incident)
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -446,7 +518,7 @@ router.post('/run/:id', async (req, res) => {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: proc.maxTokens || 4096,
         system: systemPrompt,
-        messages: [{ role: 'user', content: input || 'Run this process.' }]
+        messages: [{ role: 'user', content: modelInput }]
       })
     })
 
@@ -683,6 +755,88 @@ router.post('/run/:id', async (req, res) => {
           ? 'automatic updating is not configured'
           : tmErr.message
         output += `\n\n⚠️ Could not update Teammate: ${why}\nThe investigation above is still valid — open ${parsed.fs_number || 'the incident form'} in Teammate and fill Section 2 from it.`
+      }
+    }
+
+    if (proc.structured && proc.id === 'safety-alert') {
+      const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+      const parsed = JSON.parse(cleaned)
+
+      // The three identity fields come from the incident record, never from the
+      // model — that is what keeps the injured party out of the alert and puts
+      // only the reporter in the thank-you box.
+      let alert = {
+        ...parsed,
+        date: nzDateShort(incident.date),
+        reference: incident.formNumber,
+        reportedBy: incident.recordedBy || 'Not recorded'
+      }
+
+      // Length is the one rule the model keeps missing — it will happily write a
+      // 37-character title or 80-character control lines despite the limits being
+      // stated, and either overflows the alert onto a second page. Unlike the
+      // anonymity rules (which hold reliably), this is mechanically checkable, so
+      // check it and send it back to be shortened rather than shipping a broken
+      // layout or truncating mid-sentence. One repair pass, then accept what we get.
+      const { checkFit: fitCheck } = require('../lib/buildSafetyAlertDocx')
+      let fit = fitCheck(alert)
+      if (fit.length) {
+        try {
+          const repair = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: proc.maxTokens || 4096,
+              system: systemPrompt,
+              messages: [
+                { role: 'user', content: modelInput },
+                { role: 'assistant', content: cleaned },
+                { role: 'user', content: `That alert will not fit on one page:\n\n${fit.map(w => `- ${w}`).join('\n')}\n\nReturn the SAME alert with only those parts shortened. Keep every other field exactly as it was, keep the meaning, and do not drop any list entry — tighten the wording instead. Respond with ONLY the corrected JSON object.` }
+              ]
+            })
+          })
+          if (repair.ok) {
+            const rtext = (await repair.json()).content?.[0]?.text || ''
+            const rclean = rtext.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
+            const rparsed = JSON.parse(rclean)
+            const candidate = { ...rparsed, date: alert.date, reference: alert.reference, reportedBy: alert.reportedBy }
+            // Only accept the repair if it actually improved the fit.
+            if (fitCheck(candidate).length < fit.length) {
+              alert = candidate
+              fit = fitCheck(alert)
+            }
+          }
+        } catch { /* keep the original alert; the fit warnings are still reported */ }
+      }
+
+      output = renderSafetyAlertText(alert, incident)
+      try {
+        const { buildSafetyAlertDocx, safetyAlertFilename } = require('../lib/buildSafetyAlertDocx')
+        const buf = await buildSafetyAlertDocx(alert)
+        document = buf.toString('base64')
+        filename = safetyAlertFilename(alert)
+        output += `\n\n📄 Word doc ready — use the Download button below, then check it over before issuing.`
+        if (buf.fitWarnings) {
+          output += `\n\n⚠️ This may run onto a second page:\n` + buf.fitWarnings.map(w => `• ${w}`).join('\n')
+        }
+        if (buf.templateWarnings) {
+          output += `\n\n⚠️ The template did not match on: ${buf.templateWarnings.join(', ')} — the alert may still show placeholder text.`
+        }
+        try {
+          await saveReviewDoc(runId, filename, buf)
+          output += `\n\nIt's kept with this run in history for later download.`
+        } catch (storeErr) {
+          output += `\n\n(Could not store the document for later download: ${storeErr.message} — download it now.)`
+        }
+      } catch (docErr) {
+        output += `\n\n⚠️ Could not build the Word document: ${docErr.message}\nThe alert text above is still valid — paste it into the template manually.`
+      }
+      output += `\n\n🔎 ${fieldReport(incident)}`
+      if (incident.attachments.length) {
+        output += `\n\n📷 ${incident.attachments.length} photo(s) are on the incident form (${incident.attachments.map(a => a.name).join(', ')}). They are NOT placed automatically — open the alert and use right-click › Change Picture on each frame, and check anyone identifiable has consented before it goes out.`
+      } else {
+        output += `\n\n📷 No photos found on the incident form. The alert's photo frames are left as placeholders — right-click › Change Picture to add your own.`
       }
     }
 

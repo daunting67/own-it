@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 // Processes that produce a downloadable .docx (the run response's `document` field).
 // History rows don't carry that info from the API, so this list gates the
 // "Download .docx" button shown against past runs.
-const DOCX_PROCESSES = ['performance-review', 'meeting-notes']
+const DOCX_PROCESSES = ['performance-review', 'meeting-notes', 'safety-alert']
 
 // `only` embeds a single process (e.g. inside HR & People); `include` limits the
 // full module to a set of ids (e.g. the Meetings module); `exclude` hides ids.
@@ -328,7 +328,11 @@ export default function ProcessesModule({ only = null, include = null, exclude =
 
             {selected.pickFormNumber && (
               <div className="process-input-section">
-                <label className="form-label">FS number of the incident form (optional — only needed if it isn't said in the recording)</label>
+                <label className="form-label">
+                  {selected.inputRequired
+                    ? "FS number of the incident form (optional — only needed if it isn't said in the recording)"
+                    : 'FS number of the incident to write the alert from'}
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -356,7 +360,12 @@ export default function ProcessesModule({ only = null, include = null, exclude =
             <button
               className="btn btn-primary process-run-btn"
               onClick={runProcess}
-              disabled={running || (selected.inputRequired && !input.trim())}
+              disabled={
+                running ||
+                (selected.inputRequired && !input.trim()) ||
+                // When there is no transcript box, the FS number IS the input.
+                (selected.pickFormNumber && !selected.inputRequired && !formNumber.trim())
+              }
             >
               {running ? '⏳ Running…' : `▶  Run — ${selected.name}`}
             </button>

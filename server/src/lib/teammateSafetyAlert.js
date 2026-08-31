@@ -1,0 +1,179 @@
+// Read a completed "Accident & Incident" form out of Teammate so a Safety Alert
+// can be written from it.
+//
+// READ-ONLY BY DESIGN. This module never writes to Teammate. The Post Incident
+// Investigation process owns the write path; keeping alert generation entirely
+// separate means no amount of re-running it can disturb an incident record.
+//
+// Field ids: only the Investigation section's ids are known (captured 26 Aug 2026
+// and shared with teammatePostIncidentInvestigation.js). The Details section ids
+// — including "What Happened?", which matters most — have never been captured, so
+// rather than guess we hand every unrecognised field to the model as raw content
+// and let it identify them. `fieldReport()` prints what was seen so the ids can be
+// pinned properly after a real run.
+const { signIn, getSubmission, haveCreds } = require('./teammateSession')
+const { findIncidentForm } = require('./teammatePostIncidentInvestigation')
+
+// Investigation section (same ids as the investigation writer).
+const KNOWN_FIELDS = {
+  '633de7343b85f3c2fed7f519': 'Root Cause / Immediate Cause / Contributing Factors',
+  '633de7343b85f3c2fed7f51a': 'Corrective & Preventive Actions',
+  '633de7343b85f3c2fed7f518': 'Category'
+}
+
+// Category radio: option id -> label, inverted from the investigation writer's map
+// so a stored option id can be read back as text.
+const CATEGORY_BY_ID = {
+  '633de7343b85f3c2fed7f50e': 'Manual Handling',
+  '633de7343b85f3c2fed7f50f': 'Property Damage/Theft',
+  '633de7343b85f3c2fed7f512': 'Chemical / Hazardous Substances',
+  '633de7343b85f3c2fed7f513': 'Hit / Crush / Bruises',
+  '633de7343b85f3c2fed7f514': 'Injury',
+  '633de7343b85f3c2fed7f515': 'Cuts',
+  '66566005888be2fbc56c3414': 'Environmental Observations',
+  '66566005888be2fbc56c3415': 'Service Strike',
+  '6789b21ff3ec833d83715907': 'Near Miss',
+  '6789b21ff3ec833d83715908': 'Safety Observation',
+  '6789b21ff3ec833d83715909': 'Other'
+}
+
+const CATEGORY_FIELD = '633de7343b85f3c2fed7f518'
+
+function pick(obj, paths) {
+  for (const path of paths) {
+    const val = path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj)
+    if (val != null && val !== '') return val
+  }
+  return undefined
+}
+
+// A formValue entry may expose its own label under any of several keys depending
+// on how Teammate populated it — take whichever is there.
+function labelOf(fv) {
+  return pick(fv, ['name', 'label', 'fieldName', 'title', 'relatedForm.name', 'relatedForm.label'])
+}
+
+function textOf(fv) {
+  const v = fv.value
+  if (v == null) return ''
+  if (typeof v === 'string') return v.trim()
+  if (Array.isArray(v)) return v.filter(Boolean).join(', ')
+  return String(v)
+}
+
+// Anything that looks like an uploaded file on the submission, wherever it hangs.
+function collectAttachments(doc) {
+  const out = []
+  const seen = new Set()
+  const walk = (node, depth) => {
+    if (!node || depth > 6 || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(n => walk(n, depth + 1)); return }
+    const name = pick(node, ['fileName', 'filename', 'originalName', 'name'])
+    const url = pick(node, ['url', 'fileUrl', 'path', 'location', 'signedUrl', 'src'])
+    if (name && /\.(jpe?g|png|gif|webp|heic|pdf)$/i.test(String(name))) {
+      const key = `${name}|${url || ''}`
+      if (!seen.has(key)) { seen.add(key); out.push({ name: String(name), url: url ? String(url) : null }) }
+    }
+    for (const v of Object.values(node)) walk(v, depth + 1)
+  }
+  walk(doc, 0)
+  return out
+}
+
+// Read everything an alert could need. Returns plain data — no Teammate objects,
+// no side effects.
+async function readIncidentForAlert(fsNumber, recordedByName) {
+  if (!fsNumber) throw new Error('No FS number given, so there is no incident to read.')
+  if (!haveCreds(recordedByName)) {
+    const err = new Error('creds-unset')
+    err.code = 'creds-unset'
+    throw err
+  }
+
+  const form = await findIncidentForm(fsNumber)
+  if (!form) {
+    throw new Error(`Could not find an Accident & Incident form numbered ${fsNumber} in Teammate — check the number.`)
+  }
+
+  const session = await signIn(recordedByName)
+  const doc = await getSubmission(form.id, session)
+
+  const known = {}
+  const unlabelled = []
+  let category = ''
+
+  for (const fv of doc.formValue || []) {
+    const id = fv.relatedFormId
+    const text = textOf(fv)
+
+    if (id === CATEGORY_FIELD) {
+      // Radio: the CHOSEN option id lives in `value` (optionVal holds the whole
+      // option list) — the reverse of a Toolbox Talk select.
+      category = CATEGORY_BY_ID[text] || (text ? `(unrecognised option ${text})` : '')
+      continue
+    }
+    if (!text) continue
+
+    const label = KNOWN_FIELDS[id] || labelOf(fv)
+    if (label) known[label] = text
+    else unlabelled.push({ id, text })
+  }
+
+  return {
+    formNumber: form.formNumber,
+    formId: form.id,
+    date: pick(doc, ['formDate', 'date']) || form.date || '',
+    description: pick(doc, ['formDescription', 'description']) || form.description || '',
+    recordedBy: pick(doc, ['recordedBy.name', 'recordedBy', 'createdBy.name', 'createdBy']) || '',
+    workplace: pick(doc, ['workplace.name', 'workplace']) || '',
+    branch: pick(doc, ['branch.name', 'branch']) || '',
+    status: form.status || '',
+    isClosed: form.isClosed,
+    category,
+    known,
+    unlabelled,
+    attachments: collectAttachments(doc),
+    taskNames: (doc.taskData || []).filter(t => t && t.isDelete !== 'yes').map(t => t.name || '').filter(Boolean)
+  }
+}
+
+// The incident rendered as labelled text for the model. Unlabelled fields are
+// included verbatim — a long narrative is self-identifying even without its label.
+function incidentAsText(inc) {
+  const lines = [
+    `FORM NUMBER: ${inc.formNumber}`,
+    `DATE: ${inc.date || 'not recorded'}`,
+    `DESCRIPTION: ${inc.description || 'not recorded'}`,
+    `RECORDED BY: ${inc.recordedBy || 'not recorded'}`,
+    `WORKPLACE: ${inc.workplace || 'not recorded'}${inc.branch ? ` / ${inc.branch}` : ''}`,
+    `CATEGORY: ${inc.category || 'not set'}`,
+    ''
+  ]
+  for (const [label, text] of Object.entries(inc.known)) {
+    lines.push(`--- ${label.toUpperCase()} ---`, text, '')
+  }
+  if (inc.unlabelled.length) {
+    lines.push('--- FURTHER FORM CONTENT (labels not available; identify these from their content) ---')
+    for (const f of inc.unlabelled) lines.push(`[field ${f.id}]`, f.text, '')
+  }
+  if (inc.taskNames.length) {
+    lines.push('--- TASKS RAISED ON THIS INCIDENT ---', ...inc.taskNames.map(t => `- ${t}`), '')
+  }
+  if (inc.attachments.length) {
+    lines.push('--- ATTACHMENTS ON THE FORM ---', ...inc.attachments.map(a => `- ${a.name}`), '')
+  }
+  return lines.join('\n')
+}
+
+// Short diagnostic so the Details-section field ids can be pinned after a real
+// run, instead of staying guesswork forever.
+function fieldReport(inc) {
+  const bits = [`Read ${inc.formNumber}: ${Object.keys(inc.known).length} labelled field(s)`]
+  if (inc.unlabelled.length) {
+    bits.push(`${inc.unlabelled.length} unlabelled: ${inc.unlabelled.map(f => `${f.id} (${f.text.length} chars)`).join(', ')}`)
+  }
+  bits.push(inc.attachments.length ? `${inc.attachments.length} attachment(s): ${inc.attachments.map(a => a.name).join(', ')}` : 'no attachments found')
+  return bits.join(' · ')
+}
+
+module.exports = { readIncidentForAlert, incidentAsText, fieldReport, CATEGORY_BY_ID }
