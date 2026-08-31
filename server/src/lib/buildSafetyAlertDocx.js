@@ -125,6 +125,42 @@ function checkFit(alert) {
   return warn
 }
 
+// Well-formedness guard. Filling the template means hand-editing XML, and a
+// mis-cut element produces a .docx that Word simply refuses to open — which is
+// far worse than a wrong-looking alert, because there is nothing to salvage. So
+// verify the nesting before we ship it and fail loudly instead.
+function assertWellFormed(xml) {
+  const stack = []
+  let i = 0
+  while (i < xml.length) {
+    const lt = xml.indexOf('<', i)
+    if (lt === -1) break
+    if (xml.startsWith('<?', lt) || xml.startsWith('<!', lt)) {
+      const gt = xml.indexOf('>', lt); i = gt === -1 ? xml.length : gt + 1; continue
+    }
+    // Find the end of the tag, skipping any '>' inside quoted attribute values.
+    let j = lt + 1, quote = null
+    while (j < xml.length) {
+      const ch = xml[j]
+      if (quote) { if (ch === quote) quote = null }
+      else if (ch === '"' || ch === "'") quote = ch
+      else if (ch === '>') break
+      j++
+    }
+    if (j >= xml.length) throw new Error('unterminated tag')
+    const body = xml.slice(lt + 1, j)
+    if (body.startsWith('/')) {
+      const name = body.slice(1).trim()
+      const top = stack.pop()
+      if (top !== name) throw new Error(`XML nesting broken: </${name}> closed <${top || 'nothing'}>`)
+    } else if (!body.endsWith('/')) {
+      stack.push(body.split(/[\s/>]/)[0])
+    }
+    i = j + 1
+  }
+  if (stack.length) throw new Error(`XML nesting broken: ${stack.length} unclosed element(s), innermost <${stack[stack.length - 1]}>`)
+}
+
 function escapeXml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -147,30 +183,48 @@ function replaceRunText(xml, needle, replacement) {
 // These delete the whole enclosing element instead.
 
 // Delete the enclosing <w:X ...>…</w:X> that contains `needle`.
+//
+// Tag matching MUST respect the tag boundary. Searching for the prefix "<w:r"
+// also matches "<w:rPr", and "<w:p" matches "<w:pPr" — get that wrong and the
+// depth count drifts, the wrong span is cut, and Word refuses to open the file
+// with "Word experienced an error trying to open the file". So only treat a
+// match as a tag when the next character ends the name.
+function tagAt(xml, i, tag) {
+  if (!xml.startsWith(`<${tag}`, i)) return null
+  const c = xml[i + tag.length + 1]
+  if (c !== '>' && c !== ' ' && c !== '\t' && c !== '\n' && c !== '/') return null
+  const close = xml.indexOf('>', i)
+  if (close === -1) return null
+  return { end: close + 1, selfClosing: xml[close - 1] === '/' }
+}
+
 function removeEnclosing(xml, needle, tag) {
   const escNeedle = escapeXml(needle)
   const at = xml.indexOf(`>${escNeedle}<`)
   if (at === -1) return [xml, false]
-  const open = xml.lastIndexOf(`<${tag}`, at)
-  if (open === -1) return [xml, false]
-  // Walk forward balancing nested tags of the same name.
-  let depth = 0
-  let i = open
-  for (;;) {
-    const nextOpen = xml.indexOf(`<${tag}`, i + 1)
-    const nextClose = xml.indexOf(`</${tag}>`, i + 1)
-    if (nextClose === -1) return [xml, false]
-    if (nextOpen !== -1 && nextOpen < nextClose) {
-      // Ignore self-closing occurrences, which are not containers.
-      const tagEnd = xml.indexOf('>', nextOpen)
-      if (tagEnd !== -1 && xml[tagEnd - 1] !== '/') depth++
-      i = nextOpen
-    } else if (depth > 0) {
-      depth--; i = nextClose
-    } else {
-      return [xml.slice(0, open) + xml.slice(nextClose + `</${tag}>`.length), true]
-    }
+
+  // Nearest real opening tag of `tag` at or before the match.
+  let open = -1
+  for (let i = at; i >= 0; i--) {
+    if (xml[i] !== '<') continue
+    const t = tagAt(xml, i, tag)
+    if (t && !t.selfClosing) { open = i; break }
   }
+  if (open === -1) return [xml, false]
+
+  // Walk forward with a depth counter over real tags only.
+  let depth = 0
+  for (let i = open; i < xml.length; i++) {
+    if (xml[i] !== '<') continue
+    if (xml.startsWith(`</${tag}>`, i)) {
+      depth--
+      if (depth === 0) return [xml.slice(0, open) + xml.slice(i + tag.length + 3), true]
+      continue
+    }
+    const t = tagAt(xml, i, tag)
+    if (t && !t.selfClosing) depth++
+  }
+  return [xml, false]
 }
 
 const removeRun = (xml, needle) => removeEnclosing(xml, needle, 'w:r')
@@ -268,6 +322,9 @@ async function buildSafetyAlertDocx(alert) {
     if (!n) missing.push(slot.prefix + '…')
   }
 
+  // Never ship a document Word cannot open.
+  assertWellFormed(xml)
+
   zip.file('word/document.xml', xml)
   const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 
@@ -288,4 +345,4 @@ function safetyAlertFilename(alert) {
   return `SA-${ref} ${title}.docx`.replace(/\s+/g, ' ')
 }
 
-module.exports = { buildSafetyAlertDocx, safetyAlertFilename, checkFit, FIT, TEMPLATE }
+module.exports = { buildSafetyAlertDocx, safetyAlertFilename, checkFit, assertWellFormed, FIT, TEMPLATE }
