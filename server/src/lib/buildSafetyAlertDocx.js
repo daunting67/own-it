@@ -263,6 +263,70 @@ function asList(v, max) {
   return max ? list.slice(0, max) : list
 }
 
+// The photo frames and the thank-you box are floating anchors, each in its own
+// run, so any of them can be lifted out cleanly. Which matters because the
+// placeholder artwork reads "right-click > Change Picture" — fine on a draft you
+// are going to fill in, but not something to issue to crews with. Same for the
+// thank-you box: with no reporter it would read "Thank you to Not recorded for
+// their contribution to keeping us safe."
+const PHOTO_FRAME_LABELS = ['PHOTO 1', 'PHOTO 2', 'PHOTO 3']
+const HEADSHOT_LABEL = 'HEADSHOT'
+
+// Frames carry their label in the image's docPr name/descr, not in a w:t, so
+// match the anchor by its relationship id instead.
+const FRAME_RELS = { 'PHOTO 1': 'rId7', 'PHOTO 2': 'rId8', 'PHOTO 3': 'rId11', HEADSHOT: 'rId10' }
+
+// Remove the whole <w:r> holding the floating anchor that embeds `relId`.
+function removeAnchorByRel(xml, relId) {
+  const marker = `r:embed="${relId}"`
+  const at = xml.indexOf(marker)
+  if (at === -1) return [xml, false]
+  let open = -1
+  for (let i = at; i >= 0; i--) {
+    if (xml[i] !== '<') continue
+    const t = tagAt(xml, i, 'w:r')
+    if (t && !t.selfClosing) { open = i; break }
+  }
+  if (open === -1) return [xml, false]
+  let depth = 0
+  for (let i = open; i < xml.length; i++) {
+    if (xml[i] !== '<') continue
+    if (xml.startsWith('</w:r>', i)) {
+      depth--
+      if (depth === 0) return [xml.slice(0, open) + xml.slice(i + 6), true]
+      continue
+    }
+    const t = tagAt(xml, i, 'w:r')
+    if (t && !t.selfClosing) depth++
+  }
+  return [xml, false]
+}
+
+// Remove the run holding the thank-you text box (it has no r:embed to match on).
+function removeThankYouBox(xml) {
+  const at = xml.indexOf('wps:txbx')
+  if (at === -1) return [xml, false]
+  let open = -1
+  for (let i = at; i >= 0; i--) {
+    if (xml[i] !== '<') continue
+    const t = tagAt(xml, i, 'w:r')
+    if (t && !t.selfClosing) { open = i; break }
+  }
+  if (open === -1) return [xml, false]
+  let depth = 0
+  for (let i = open; i < xml.length; i++) {
+    if (xml[i] !== '<') continue
+    if (xml.startsWith('</w:r>', i)) {
+      depth--
+      if (depth === 0) return [xml.slice(0, open) + xml.slice(i + 6), true]
+      continue
+    }
+    const t = tagAt(xml, i, 'w:r')
+    if (t && !t.selfClosing) depth++
+  }
+  return [xml, false]
+}
+
 // alert = { date, reference, reportedBy, title, identifyProblem, explainConsequences,
 //           gaps[], ownershipNote, engineeringControls[], ppeControls[],
 //           trainingControls[], actions[], takeaway }
@@ -283,7 +347,7 @@ async function buildSafetyAlertDocx(alert) {
       // Two occurrences (ALERT BY, thank-you box) — fill both.
       let replaced = true, count = 0
       while (replaced) {
-        ;[xml, replaced] = replaceRunText(xml, needle, value || 'Not recorded')
+        ;[xml, replaced] = replaceRunText(xml, needle, value || '')
         if (replaced) count++
       }
       if (!count) missing.push(needle)
@@ -322,6 +386,32 @@ async function buildSafetyAlertDocx(alert) {
     if (!n) missing.push(slot.prefix + '…')
   }
 
+  // With no photos on the incident, take the three frames out rather than issuing
+  // an alert with "right-click > Change Picture" boxes on it. The reporter's
+  // headshot is separate — it belongs to the thank-you box, not the incident.
+  const removed = []
+  if (alert.hasPhotos === false) {
+    for (const label of PHOTO_FRAME_LABELS) {
+      let ok
+      ;[xml, ok] = removeAnchorByRel(xml, FRAME_RELS[label])
+      if (ok) removed.push(label)
+    }
+  }
+
+  // With no reporter, the thank-you box and headshot have nothing to say, and
+  // "ALERT BY:" would dangle. Take all three out together.
+  if (!String(alert.reportedBy || '').trim()) {
+    let ok
+    ;[xml, ok] = removeThankYouBox(xml)
+    if (ok) removed.push('thank-you box')
+    ;[xml, ok] = removeAnchorByRel(xml, FRAME_RELS[HEADSHOT_LABEL])
+    if (ok) removed.push(HEADSHOT_LABEL)
+    // "ALERT BY" is three runs in one paragraph (label, ": ", name) — remove the
+    // paragraph, or the name run survives on its own with no label.
+    ;[xml, ok] = removeParagraph(xml, 'ALERT BY')
+    if (ok) removed.push('ALERT BY line')
+  }
+
   // Never ship a document Word cannot open.
   assertWellFormed(xml)
 
@@ -335,6 +425,7 @@ async function buildSafetyAlertDocx(alert) {
   }
   const fitWarnings = checkFit(alert)
   if (fitWarnings.length) buf.fitWarnings = fitWarnings
+  if (removed.length) buf.removed = removed
   return buf
 }
 

@@ -769,7 +769,9 @@ router.post('/run/:id', async (req, res) => {
         ...parsed,
         date: nzDateShort(incident.date),
         reference: incident.formNumber,
-        reportedBy: incident.recordedBy || 'Not recorded'
+        reportedBy: incident.recordedBy || '',
+        // Drives whether the photo frames are kept or lifted out of the document.
+        hasPhotos: incident.attachments.length > 0
       }
 
       // Length is the one rule the model keeps missing — it will happily write a

@@ -76,13 +76,23 @@ async function internal(method, path, session, body) {
 
 // Fetch the full submission document (contains formValue[] with each field's
 // _id + relatedFormId). Tries the known payload shapes for formSubmissionDetails.
-async function getSubmission(formId, session) {
+// Some of what a caller needs sits BESIDE the document rather than on it —
+// `recordedBy` (who reported the incident) is a sibling of formSubmission, so
+// anything reading only the doc can never see it. Callers that need it take the
+// envelope; getSubmission keeps returning just the doc, because populateSubmission
+// writes that object straight back to Teammate and must not carry extras into it.
+async function getSubmissionEnvelope(formId, session) {
   const companyId = typeof session === 'object' ? session.companyId : undefined
   const d = await internal('POST', '/formSubmission/formSubmissionDetails', session, { formSubmissionId: formId, companyId })
   // response_data = { typeObservation, formSubmission: [ <doc> ], recordedBy }
-  const doc = d?.response_data?.formSubmission?.[0]
+  const rd = d?.response_data
+  const doc = rd?.formSubmission?.[0]
   if (!doc || !Array.isArray(doc.formValue)) throw new Error('Submission detail had no formValue array')
-  return doc
+  return { doc, recordedBy: rd?.recordedBy, typeObservation: rd?.typeObservation }
+}
+
+async function getSubmission(formId, session) {
+  return (await getSubmissionEnvelope(formId, session)).doc
 }
 
 // values: { [relatedFormId]: { value?: string, optionVal?: array } }
@@ -135,4 +145,4 @@ async function shareSubmission(formId, employeeIds, message, session) {
   return { notifiedCount: res?.response_data?.notifiedCount ?? null }
 }
 
-module.exports = { haveCreds, signIn, getSubmission, populateSubmission, shareSubmission, internal }
+module.exports = { haveCreds, signIn, getSubmission, getSubmissionEnvelope, populateSubmission, shareSubmission, internal }

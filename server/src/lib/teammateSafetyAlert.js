@@ -11,7 +11,8 @@
 // rather than guess we hand every unrecognised field to the model as raw content
 // and let it identify them. `fieldReport()` prints what was seen so the ids can be
 // pinned properly after a real run.
-const { signIn, getSubmission, haveCreds } = require('./teammateSession')
+const { signIn, getSubmissionEnvelope, haveCreds } = require('./teammateSession')
+const { tmGet } = require('./teammate')
 const { findIncidentForm } = require('./teammatePostIncidentInvestigation')
 
 // Investigation section (same ids as the investigation writer).
@@ -47,6 +48,20 @@ function pick(obj, paths) {
   return undefined
 }
 
+// `recordedBy` may arrive as a plain string, an employee object, or an array of
+// them, depending on how Teammate populated it — reduce whatever turns up to a
+// display name.
+function personName(v) {
+  if (!v) return ''
+  if (typeof v === 'string') return v.trim()
+  if (Array.isArray(v)) return v.map(personName).filter(Boolean).join(', ')
+  const direct = pick(v, ['name', 'fullName', 'displayName', 'employeeName', 'userName'])
+  if (direct) return String(direct).trim()
+  const first = pick(v, ['firstName', 'first_name', 'givenName'])
+  const last = pick(v, ['lastName', 'last_name', 'surname', 'familyName'])
+  return [first, last].filter(Boolean).join(' ').trim()
+}
+
 // A formValue entry may expose its own label under any of several keys depending
 // on how Teammate populated it — take whichever is there.
 function labelOf(fv) {
@@ -80,6 +95,39 @@ function collectAttachments(doc) {
   return out
 }
 
+
+// The thank-you box wants the reporter's headshot, and Teammate holds staff photos
+// under Human Resources. Nothing in this codebase has ever read one, so rather
+// than guess at the shape, find the employee record and report what it actually
+// carries — any URL that looks like an image, plus the field names available.
+// Read-only, and a failure here must never sink an alert.
+function imageUrlsIn(node, depth = 0, out = []) {
+  if (!node || depth > 4 || typeof node !== 'object') return out
+  if (Array.isArray(node)) { node.forEach(n => imageUrlsIn(n, depth + 1, out)); return out }
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === 'string' && /^https?:\/\//.test(v) && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(v)) {
+      out.push({ key: k, url: v })
+    } else if (v && typeof v === 'object') imageUrlsIn(v, depth + 1, out)
+  }
+  return out
+}
+
+async function findEmployeePhoto(name) {
+  const wanted = String(name || '').trim().toLowerCase()
+  if (!wanted) return null
+  try {
+    const fd = (await tmGet('/form/data')).response_data
+    const list = fd?.listEmployee || []
+    const emp = list.find(e => String(e.name || '').trim().toLowerCase() === wanted)
+      || list.find(e => String(e.name || '').trim().toLowerCase().startsWith(wanted.split(' ')[0]))
+    if (!emp) return { matched: false, candidates: list.length }
+    const urls = imageUrlsIn(emp)
+    return { matched: true, name: emp.name, fields: Object.keys(emp), urls }
+  } catch (e) {
+    return { error: e.message.slice(0, 120) }
+  }
+}
+
 // Read everything an alert could need. Returns plain data — no Teammate objects,
 // no side effects.
 async function readIncidentForAlert(fsNumber, recordedByName) {
@@ -96,7 +144,9 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
   }
 
   const session = await signIn(recordedByName)
-  const doc = await getSubmission(form.id, session)
+  // The envelope, not just the doc: whoever reported the incident lives beside
+  // formSubmission, so reading only the document loses them.
+  const { doc, recordedBy } = await getSubmissionEnvelope(form.id, session)
 
   const known = {}
   const unlabelled = []
@@ -124,7 +174,7 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     formId: form.id,
     date: pick(doc, ['formDate', 'date']) || form.date || '',
     description: pick(doc, ['formDescription', 'description']) || form.description || '',
-    recordedBy: pick(doc, ['recordedBy.name', 'recordedBy', 'createdBy.name', 'createdBy']) || '',
+    recordedBy: personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy'])) || '',
     workplace: pick(doc, ['workplace.name', 'workplace']) || '',
     branch: pick(doc, ['branch.name', 'branch']) || '',
     status: form.status || '',
@@ -133,6 +183,7 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     known,
     unlabelled,
     attachments: collectAttachments(doc),
+    reporterPhoto: await findEmployeePhoto(personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy']))),
     taskNames: (doc.taskData || []).filter(t => t && t.isDelete !== 'yes').map(t => t.name || '').filter(Boolean)
   }
 }
@@ -173,6 +224,11 @@ function fieldReport(inc) {
     bits.push(`${inc.unlabelled.length} unlabelled: ${inc.unlabelled.map(f => `${f.id} (${f.text.length} chars)`).join(', ')}`)
   }
   bits.push(inc.attachments.length ? `${inc.attachments.length} attachment(s): ${inc.attachments.map(a => a.name).join(', ')}` : 'no attachments found')
+  const rp = inc.reporterPhoto
+  if (!rp) bits.push('no reporter to look up')
+  else if (rp.error) bits.push(`employee lookup failed: ${rp.error}`)
+  else if (!rp.matched) bits.push(`reporter not found among ${rp.candidates} employees`)
+  else bits.push(`employee "${rp.name}" record has [${rp.fields.join(', ')}]; image urls: ${rp.urls.length ? rp.urls.map(u => u.key).join(', ') : 'none'}`)
   return bits.join(' · ')
 }
 
