@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken')
 const db = require('../lib/supabase')
 const { requireAuth, requireAdmin, JWT_SECRET } = require('../middleware/auth')
 const { parseAccess, serializeAccess, publicUser } = require('../lib/access')
+const { getOtterLogin, setOtterLogin, loadAll: loadOtterLogins } = require('../lib/otterUserLogins')
 
 const router = Router()
 
@@ -49,12 +50,20 @@ router.get('/me', requireAuth, async (req, res) => {
 
 router.get('/users', requireAuth, requireAdmin, async (req, res) => {
   const { data } = await db.from('User').select('id,email,name,role,createdAt').order('name')
-  res.json((data || []).map(publicUser))
+  const otterLogins = await loadOtterLogins()
+  const users = (data || []).map(u => ({
+    ...publicUser(u),
+    otterEmail: otterLogins[u.name.toLowerCase().trim()]?.email || null,
+  }))
+  res.json(users)
 })
 
 router.post('/users', requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, password, admin, departments } = req.body
+  const { name, email, password, admin, departments, otterEmail, otterPassword } = req.body
   if (!name || !password) return res.status(400).json({ error: 'Name and password required' })
+  if (otterEmail && otterEmail.trim() && !otterPassword) {
+    return res.status(400).json({ error: 'Otter password is required to connect an Otter login' })
+  }
   const { data: existing } = await db.from('User').select('id').ilike('name', name.trim()).single()
   if (existing) return res.status(409).json({ error: 'That name is already in use' })
   // Email is optional — used for records and as an alternate login. Blank = a
@@ -69,20 +78,28 @@ router.post('/users', requireAuth, requireAdmin, async (req, res) => {
   }
   const hash = await bcrypt.hash(password, 10)
   const role = serializeAccess({ admin, departments })
+  const trimmedName = name.trim()
   const { data } = await db.from('User')
-    .insert({ id: require('crypto').randomUUID(), email: finalEmail, name: name.trim(), password: hash, role })
+    .insert({ id: require('crypto').randomUUID(), email: finalEmail, name: trimmedName, password: hash, role })
     .select('id,email,name,role,createdAt').single()
-  res.status(201).json(publicUser(data))
+  if (otterEmail && otterEmail.trim() && otterPassword) {
+    await setOtterLogin(trimmedName, { email: otterEmail.trim(), password: otterPassword })
+  }
+  res.status(201).json({ ...publicUser(data), otterEmail: otterEmail && otterEmail.trim() ? otterEmail.trim() : null })
 })
 
 router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, password, admin, departments } = req.body
+  const { name, email, password, admin, departments, otterEmail, otterPassword, removeOtterAccess } = req.body
+  const { data: current } = await db.from('User').select('name').eq('id', req.params.id).single()
+  if (!current) return res.status(404).json({ error: 'User not found' })
   const updates = {}
+  let finalName = current.name
   if (name) {
     const trimmed = name.trim()
     const { data: clash } = await db.from('User').select('id').ilike('name', trimmed).neq('id', req.params.id).single()
     if (clash) return res.status(409).json({ error: 'That name is already in use' })
     updates.name = trimmed
+    finalName = trimmed
   }
   if (email !== undefined && email.trim()) {
     const addr = email.trim().toLowerCase()
@@ -97,11 +114,43 @@ router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   }
   if (password) updates.password = await bcrypt.hash(password, 10)
   const { data } = await db.from('User').update(updates).eq('id', req.params.id).select('id,email,name,role,createdAt').single()
-  res.json(publicUser(data))
+
+  // Otter login: explicit remove wins; a new email+password pair replaces the
+  // entry outright; an email-only change (password left blank, "keep current")
+  // keeps the existing password; a bare rename with no Otter edits still moves
+  // the entry so it isn't orphaned under the old name.
+  let finalOtterEmail = null
+  if (removeOtterAccess) {
+    await setOtterLogin(finalName, null, current.name)
+  } else if (otterEmail !== undefined && otterEmail.trim()) {
+    const trimmedOtterEmail = otterEmail.trim()
+    if (otterPassword) {
+      await setOtterLogin(finalName, { email: trimmedOtterEmail, password: otterPassword }, current.name)
+      finalOtterEmail = trimmedOtterEmail
+    } else {
+      const existingLogin = await getOtterLogin(current.name)
+      if (existingLogin) {
+        await setOtterLogin(finalName, { email: trimmedOtterEmail, password: existingLogin.password }, current.name)
+        finalOtterEmail = trimmedOtterEmail
+      }
+    }
+  } else if (finalName !== current.name) {
+    const existingLogin = await getOtterLogin(current.name)
+    if (existingLogin) {
+      await setOtterLogin(finalName, existingLogin, current.name)
+      finalOtterEmail = existingLogin.email
+    }
+  } else {
+    finalOtterEmail = (await getOtterLogin(current.name))?.email || null
+  }
+
+  res.json({ ...publicUser(data), otterEmail: finalOtterEmail })
 })
 
 router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { data: current } = await db.from('User').select('name').eq('id', req.params.id).single()
   await db.from('User').delete().eq('id', req.params.id)
+  if (current) await setOtterLogin(current.name, null)
   res.status(204).end()
 })
 

@@ -1,30 +1,20 @@
 const { Router } = require('express')
 const { requireAuth } = require('../middleware/auth')
+const { getOtterLogin } = require('../lib/otterUserLogins')
 
 const router = Router()
 router.use(requireAuth)
 
 const OTTER_BASE = 'https://otter.ai/forward/api/v1'
 
-// Resolve the Otter login to use for a given portal user name.
-//
-// Per-user logins live in the OTTER_USER_LOGINS env var — a JSON object
-// keyed by the portal user's name (lowercased), each value being
-// { "email": "<their Otter email>", "password": "<their Otter password>" }.
-// e.g. {"sandra grace":{"email":"sandra@pipelines.nz","password":"..."}}
-// Mirrors TEAMMATE_USER_LOGINS (server/src/lib/teammateSession.js). If a user
-// has no entry, we fall back to the default account (OTTER_EMAIL /
-// OTTER_PASSWORD) so the feature still works — just under Tony's account
-// rather than the individual's, until their creds are added.
-function loginFor(userName) {
-  const def = { email: process.env.OTTER_EMAIL, password: process.env.OTTER_PASSWORD }
+// Resolve the Otter login to use for a given portal user name. Set per-user
+// in the Users module (Add/Edit user), stored via otterUserLogins.js. There
+// is deliberately NO fallback account — a user with no Otter login saved has
+// no Otter access at all, rather than silently pulling from someone else's.
+async function loginFor(userName) {
   const key = String(userName || '').toLowerCase().trim()
-  if (!key) return def
-  let map = {}
-  try { map = JSON.parse(process.env.OTTER_USER_LOGINS || '{}') } catch { map = {} }
-  const entry = map[key]
-  if (entry && entry.email && entry.password) return { email: entry.email, password: entry.password }
-  return def
+  if (!key) return null
+  return getOtterLogin(key)
 }
 
 // Session cache keyed by Otter email — several portal users can be logged in
@@ -33,8 +23,9 @@ function loginFor(userName) {
 const sessions = new Map() // email -> { cookie, userid, expires }
 
 async function otterLogin(userName) {
-  const { email, password } = loginFor(userName)
-  if (!email || !password) throw new Error('Otter credentials not configured for this user (set OTTER_EMAIL / OTTER_PASSWORD, or add them to OTTER_USER_LOGINS)')
+  const login = await loginFor(userName)
+  if (!login) throw new Error('Otter is not connected for your account — ask an admin to add your Otter login in Users → Edit.')
+  const { email, password } = login
 
   const cached = sessions.get(email)
   if (cached && cached.expires > Date.now()) return cached
@@ -76,7 +67,8 @@ router.get('/speeches', async (req, res) => {
     }))
     res.json(speeches)
   } catch (err) {
-    sessions.delete(loginFor(req.user.name).email)
+    const failedLogin = await loginFor(req.user.name)
+    if (failedLogin) sessions.delete(failedLogin.email)
     res.status(502).json({ error: err.message })
   }
 })
@@ -114,7 +106,8 @@ router.get('/transcript/:id', async (req, res) => {
       text: dateLine + lines.join('\n')
     })
   } catch (err) {
-    sessions.delete(loginFor(req.user.name).email)
+    const failedLogin = await loginFor(req.user.name)
+    if (failedLogin) sessions.delete(failedLogin.email)
     res.status(502).json({ error: err.message })
   }
 })

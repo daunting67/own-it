@@ -16,7 +16,7 @@ const DEPARTMENTS = [
   { id: 'operations', label: 'Operations' },
 ]
 
-const EMPTY = { name: '', email: '', password: '', admin: false, departments: [] }
+const EMPTY = { name: '', email: '', password: '', admin: false, departments: [], otterEmail: '', otterPassword: '', removeOtterAccess: false }
 
 function accessSummary(u) {
   if (u.admin) return 'Administrator — full access'
@@ -49,7 +49,7 @@ export default function UsersModule() {
   }
 
   function openEdit(u) {
-    setForm({ name: u.name, email: u.email || '', password: '', admin: !!u.admin, departments: [...(u.departments || [])] })
+    setForm({ name: u.name, email: u.email || '', password: '', admin: !!u.admin, departments: [...(u.departments || [])], otterEmail: u.otterEmail || '', otterPassword: '', removeOtterAccess: false })
     setModalError('')
     setModal({ mode: 'edit', user: u })
   }
@@ -64,12 +64,15 @@ export default function UsersModule() {
         email: form.email.trim(),
         admin: form.admin,
         departments: form.admin ? [] : form.departments,
+        otterEmail: form.otterEmail.trim(),
       }
+      if (form.otterPassword) payload.otterPassword = form.otterPassword
       if (modal.mode === 'add') {
         payload.password = form.password
         await api.createUser(payload)
       } else {
         if (form.password) payload.password = form.password
+        if (form.removeOtterAccess) payload.removeOtterAccess = true
         await api.updateUser(modal.user.id, payload)
       }
       setModal(null)
@@ -118,12 +121,13 @@ export default function UsersModule() {
               <tr>
                 <th>Name</th>
                 <th>Access</th>
+                <th>Otter</th>
                 <th style={{ width: 160 }}></th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={3} style={{ color: 'var(--text-muted)' }}>Loading...</td></tr>}
-              {!loading && users.length === 0 && <tr><td colSpan={3} style={{ color: 'var(--text-muted)' }}>No users yet</td></tr>}
+              {loading && <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>Loading...</td></tr>}
+              {!loading && users.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--text-muted)' }}>No users yet</td></tr>}
               {users.map(u => (
                 <tr key={u.id}>
                   <td style={{ fontWeight: 600 }}>{u.name}{u.id === me?.id && <span className="badge badge-muted" style={{ marginLeft: 8 }}>you</span>}</td>
@@ -131,6 +135,11 @@ export default function UsersModule() {
                     {u.admin
                       ? <span className="badge badge-danger">Administrator</span>
                       : <span style={{ color: 'var(--text-muted)' }}>{accessSummary(u)}</span>}
+                  </td>
+                  <td>
+                    {u.otterEmail
+                      ? <span className="badge badge-success" title={u.otterEmail}>Connected</span>
+                      : <span className="badge badge-muted">No access</span>}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => openEdit(u)}>Edit</button>
@@ -193,6 +202,22 @@ export default function UsersModule() {
                     />
                     <span><strong>Administrator</strong> — full access and can manage users</span>
                   </label>
+                </div>
+
+                <div className="form-group" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <label className="form-label">Otter account <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(required to pull transcripts — no account means no Otter access)</span></label>
+                  <input className="form-input" type="email" value={form.otterEmail} onChange={set('otterEmail')} placeholder="their Otter login email" disabled={form.removeOtterAccess} style={{ marginBottom: 8 }} />
+                  <input className="form-input" type="text" value={form.otterPassword} onChange={set('otterPassword')} placeholder={modal.mode === 'add' ? 'Otter password' : 'New Otter password (leave blank to keep current)'} disabled={form.removeOtterAccess} />
+                  {modal.mode === 'edit' && modal.user.otterEmail && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={form.removeOtterAccess}
+                        onChange={e => setForm(f => ({ ...f, removeOtterAccess: e.target.checked }))}
+                      />
+                      <span style={{ color: 'var(--danger)' }}>Remove Otter access</span>
+                    </label>
+                  )}
                 </div>
 
                 {modalError && <div className="login-error">{modalError}</div>}
