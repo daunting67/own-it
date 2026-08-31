@@ -264,17 +264,47 @@ function asList(v, max) {
 }
 
 // The photo frames and the thank-you box are floating anchors, each in its own
-// run, so any of them can be lifted out cleanly. Which matters because the
-// placeholder artwork reads "right-click > Change Picture" — fine on a draft you
-// are going to fill in, but not something to issue to crews with. Same for the
-// thank-you box: with no reporter it would read "Thank you to Not recorded for
-// their contribution to keeping us safe."
+// run. The thank-you box can be lifted out cleanly, which matters because with
+// no reporter it would read "Thank you to Not recorded for their contribution
+// to keeping us safe." The photo frames are handled differently (see the
+// hasPhotos block below): rather than removing them, an incident with no
+// attachments gets its own in-house "photo not supplied" graphic swapped in,
+// so every alert keeps the same three-photo shape and never ships the
+// template's own "right-click > Change Picture" authoring artwork.
 const PHOTO_FRAME_LABELS = ['PHOTO 1', 'PHOTO 2', 'PHOTO 3']
 const HEADSHOT_LABEL = 'HEADSHOT'
 
 // Frames carry their label in the image's docPr name/descr, not in a w:t, so
 // match the anchor by its relationship id instead.
 const FRAME_RELS = { 'PHOTO 1': 'rId7', 'PHOTO 2': 'rId8', 'PHOTO 3': 'rId11', HEADSHOT: 'rId10' }
+
+// Default artwork used in place of a real photo when the incident has none.
+// Each one is pre-sized and pre-composed to match the exact pixel dimensions
+// of the template image it replaces, because document.xml crops each frame
+// with a fixed <a:srcRect> percentage — matching dimensions means the swap is
+// a pure byte replacement with no XML changes, and the existing crop still
+// lands in the right place. Regenerate with
+// scripts/make-safety-alert-placeholders.py if the template's photo frames
+// ever change size.
+const DEFAULT_PHOTO_ASSETS = {
+  'PHOTO 1': path.join(__dirname, '..', 'assets', 'safety-alert-photo1-placeholder.jpeg'),
+  'PHOTO 2': path.join(__dirname, '..', 'assets', 'safety-alert-photo2-placeholder.jpeg'),
+  'PHOTO 3': path.join(__dirname, '..', 'assets', 'safety-alert-photo3-placeholder.jpg')
+}
+
+// Resolve a relationship id to its media part (e.g. rId7 -> word/media/image1.jpeg)
+// by reading the actual rels file, rather than hardcoding the target filename —
+// the rId-to-label mapping above is already pinned to this specific template,
+// but the target filename inside it is free to shift if the template is ever
+// re-saved by Word, so this stays correct either way.
+async function mediaTargetForRel(zip, relId) {
+  const relsFile = zip.file('word/_rels/document.xml.rels')
+  if (!relsFile) return null
+  const relsXml = await relsFile.async('string')
+  const re = new RegExp(`Id="${relId}"[^>]*Target="([^"]+)"`)
+  const m = relsXml.match(re)
+  return m ? `word/${m[1]}` : null
+}
 
 // Remove the whole <w:r> holding the floating anchor that embeds `relId`.
 function removeAnchorByRel(xml, relId) {
@@ -386,15 +416,22 @@ async function buildSafetyAlertDocx(alert) {
     if (!n) missing.push(slot.prefix + '…')
   }
 
-  // With no photos on the incident, take the three frames out rather than issuing
-  // an alert with "right-click > Change Picture" boxes on it. The reporter's
-  // headshot is separate — it belongs to the thank-you box, not the incident.
+  // With no photos on the incident, swap each frame's picture for the in-house
+  // "photo not supplied" default rather than issuing an alert with the
+  // template's own "right-click > Change Picture" authoring boxes on it. The
+  // frame anchors, crop and position are untouched — only the embedded image
+  // bytes change. The reporter's headshot is separate — it belongs to the
+  // thank-you box, not the incident, and is unaffected by this.
   const removed = []
+  const defaultPhotos = []
   if (alert.hasPhotos === false) {
     for (const label of PHOTO_FRAME_LABELS) {
-      let ok
-      ;[xml, ok] = removeAnchorByRel(xml, FRAME_RELS[label])
-      if (ok) removed.push(label)
+      const target = await mediaTargetForRel(zip, FRAME_RELS[label])
+      const assetPath = DEFAULT_PHOTO_ASSETS[label]
+      if (target && fs.existsSync(assetPath)) {
+        zip.file(target, fs.readFileSync(assetPath))
+        defaultPhotos.push(label)
+      }
     }
   }
 
@@ -426,6 +463,7 @@ async function buildSafetyAlertDocx(alert) {
   const fitWarnings = checkFit(alert)
   if (fitWarnings.length) buf.fitWarnings = fitWarnings
   if (removed.length) buf.removed = removed
+  if (defaultPhotos.length) buf.defaultPhotos = defaultPhotos
   return buf
 }
 

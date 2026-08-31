@@ -838,7 +838,7 @@ router.post('/run/:id', async (req, res) => {
       if (incident.attachments.length) {
         output += `\n\n📷 ${incident.attachments.length} photo(s) are on the incident form (${incident.attachments.map(a => a.name).join(', ')}). They are NOT placed automatically — open the alert and use right-click › Change Picture on each frame, and check anyone identifiable has consented before it goes out.`
       } else {
-        output += `\n\n📷 No photos found on the incident form. The alert's photo frames are left as placeholders — right-click › Change Picture to add your own.`
+        output += `\n\n📷 No photos were on the incident form, so the three photo panels show a default "photo not supplied" graphic and the alert is ready to issue as-is. Swap any of them for a real photo via right-click › Change Picture if you have one.`
       }
     }
 
