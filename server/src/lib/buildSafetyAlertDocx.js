@@ -279,14 +279,21 @@ const HEADSHOT_LABEL = 'HEADSHOT'
 // match the anchor by its relationship id instead.
 const FRAME_RELS = { 'PHOTO 1': 'rId7', 'PHOTO 2': 'rId8', 'PHOTO 3': 'rId11', HEADSHOT: 'rId10' }
 
-// Default artwork used in place of a real photo when the incident has none.
-// Each one is pre-sized and pre-composed to match the exact pixel dimensions
-// of the template image it replaces, because document.xml crops each frame
-// with a fixed <a:srcRect> percentage — matching dimensions means the swap is
-// a pure byte replacement with no XML changes, and the existing crop still
-// lands in the right place. Regenerate with
-// scripts/make-safety-alert-placeholders.py if the template's photo frames
-// ever change size.
+// Default artwork used in place of a real photo when the incident has none —
+// three of Tony's own branded images (P&I logo, HALT poster, mindset graphic),
+// contain-fit with white padding so nothing is ever cropped (his call: "we can
+// never cut off a photo. Whitespace is acceptable"), assigned to whichever
+// frame best fits each source's aspect ratio. Each is pre-composed to match
+// the exact pixel dimensions of the template image it replaces, because
+// document.xml crops each frame with a fixed <a:srcRect> percentage — matching
+// dimensions means the swap is a pure byte replacement with no XML changes,
+// and the existing crop still lands in the right place. Regenerate with
+// scripts/fit-safety-alert-default-photos.py (reads Tony's source photos from
+// his Default Photos folder) if the template's photo frames ever change size
+// or the source photos change — NOT scripts/make-safety-alert-placeholders.py,
+// an earlier generated-icon version these superseded; that script is unused
+// and writes to the same filenames, so running it by mistake would silently
+// revert these back to a generic "photo not supplied" graphic.
 const DEFAULT_PHOTO_ASSETS = {
   'PHOTO 1': path.join(__dirname, '..', 'assets', 'safety-alert-photo1-placeholder.jpeg'),
   'PHOTO 2': path.join(__dirname, '..', 'assets', 'safety-alert-photo2-placeholder.jpeg'),
