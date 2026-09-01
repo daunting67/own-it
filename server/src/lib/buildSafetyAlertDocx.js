@@ -23,6 +23,7 @@
 const fs = require('fs')
 const path = require('path')
 const JSZip = require('jszip')
+const db = require('./supabase')
 
 const TEMPLATE = path.join(__dirname, '..', 'assets', 'safety-alert-template.docx')
 
@@ -292,6 +293,32 @@ const DEFAULT_PHOTO_ASSETS = {
   'PHOTO 3': path.join(__dirname, '..', 'assets', 'safety-alert-photo3-placeholder.jpg')
 }
 
+// Real staff headshots for the thank-you box, one file per person, named
+// exactly after their portal/Teammate name (e.g. "Tony Daunt.jpg") and
+// pre-fitted to the template's headshot image dimensions by
+// scripts/fit-safety-alert-headshots.py — same pure-byte-swap contract as
+// DEFAULT_PHOTO_ASSETS, EXCEPT these live in Supabase Storage
+// (people-config/headshots/), not committed to the repo — they're real
+// people's photos, and this backend has no access to Tony's Mac filesystem
+// where the source folder lives. Add a new person by dropping their photo in
+// ~/Documents/Claude/Projects/Safety Alert Project/Headshots, re-running that
+// script, and re-running scripts/upload-safety-alert-headshots.js; no code
+// change needed.
+const HEADSHOT_BUCKET = 'people-config'
+const HEADSHOT_PREFIX = 'headshots'
+
+async function findHeadshotAsset(reporterName) {
+  const wanted = String(reporterName || '').trim().toLowerCase()
+  if (!wanted) return null
+  const { data, error } = await db.storage.from(HEADSHOT_BUCKET).list(HEADSHOT_PREFIX)
+  if (error || !data) return null
+  const match = data.find(f => path.parse(f.name).name.trim().toLowerCase() === wanted)
+  if (!match) return null
+  const dl = await db.storage.from(HEADSHOT_BUCKET).download(`${HEADSHOT_PREFIX}/${match.name}`)
+  if (dl.error || !dl.data) return null
+  return Buffer.from(await dl.data.arrayBuffer())
+}
+
 // Resolve a relationship id to its media part (e.g. rId7 -> word/media/image1.jpeg)
 // by reading the actual rels file, rather than hardcoding the target filename —
 // the rId-to-label mapping above is already pinned to this specific template,
@@ -449,6 +476,21 @@ async function buildSafetyAlertDocx(alert) {
     if (ok) removed.push('ALERT BY line')
   }
 
+  // With a reporter AND a matching real headshot on file, swap it into the
+  // thank-you box the same way the default photos above get swapped in —
+  // pure byte replacement, frame/crop untouched. No match (reporter not
+  // recognised, or no photo supplied for them yet) just leaves the template's
+  // own authoring art, same graceful fallback as everything else here.
+  let headshotUsed = false
+  if (String(alert.reportedBy || '').trim()) {
+    const target = await mediaTargetForRel(zip, FRAME_RELS[HEADSHOT_LABEL])
+    const assetBytes = await findHeadshotAsset(alert.reportedBy)
+    if (target && assetBytes) {
+      zip.file(target, assetBytes)
+      headshotUsed = true
+    }
+  }
+
   // Never ship a document Word cannot open.
   assertWellFormed(xml)
 
@@ -464,6 +506,7 @@ async function buildSafetyAlertDocx(alert) {
   if (fitWarnings.length) buf.fitWarnings = fitWarnings
   if (removed.length) buf.removed = removed
   if (defaultPhotos.length) buf.defaultPhotos = defaultPhotos
+  if (headshotUsed) buf.headshotUsed = true
   return buf
 }
 

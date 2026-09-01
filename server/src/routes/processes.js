@@ -531,6 +531,7 @@ router.post('/run/:id', async (req, res) => {
     let output = data.content?.[0]?.text || ''
     let document = null   // base64 .docx, when a process produces a downloadable form
     let filename = null
+    let safetyAlertBuf = null   // buildSafetyAlertDocx's return value, incl. headshotUsed/defaultPhotos flags — read after the try/catch below since it's assigned inside it
 
     if (proc.structured && proc.id === 'office-minutes') {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
@@ -816,6 +817,7 @@ router.post('/run/:id', async (req, res) => {
       try {
         const { buildSafetyAlertDocx, safetyAlertFilename } = require('../lib/buildSafetyAlertDocx')
         const buf = await buildSafetyAlertDocx(alert)
+        safetyAlertBuf = buf
         document = buf.toString('base64')
         filename = safetyAlertFilename(alert)
         output += `\n\n📄 Word doc ready — use the Download button below, then check it over before issuing.`
@@ -839,6 +841,11 @@ router.post('/run/:id', async (req, res) => {
         output += `\n\n📷 ${incident.attachments.length} photo(s) are on the incident form (${incident.attachments.map(a => a.name).join(', ')}). They are NOT placed automatically — open the alert and use right-click › Change Picture on each frame, and check anyone identifiable has consented before it goes out.`
       } else {
         output += `\n\n📷 No photos were on the incident form, so the three photo panels show a default "photo not supplied" graphic and the alert is ready to issue as-is. Swap any of them for a real photo via right-click › Change Picture if you have one.`
+      }
+      if (safetyAlertBuf?.headshotUsed) {
+        output += `\n\n🧑 ${alert.reportedBy}'s headshot has been added to the thank-you box.`
+      } else if (String(alert.reportedBy || '').trim()) {
+        output += `\n\n🧑 No headshot on file for ${alert.reportedBy} — that panel still shows the template's placeholder. Add their photo to the Headshots folder and it'll be picked up next time.`
       }
     }
 

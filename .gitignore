@@ -6,3 +6,6 @@ dist/
 
 # Golden-test extraction cache — contains real fuel card numbers and driver names
 server/test/fixtures/
+
+# Real staff photos — stored in Supabase Storage instead, never in git history
+server/src/assets/headshots/

@@ -33,7 +33,7 @@ Requires Pillow (pip install pillow).
 """
 import os
 from itertools import permutations
-from PIL import Image
+from PIL import Image, ImageOps
 
 PI_BLACK = (22, 22, 22)
 
@@ -87,7 +87,9 @@ def build(src_name, frame):
     vx0, vy0, vx1, vy1 = frame["visible"]
     vw, vh = round(vx1 - vx0), round(vy1 - vy0)
 
-    src = Image.open(os.path.join(SOURCE_DIR, src_name)).convert("RGB")
+    # exif_transpose: a source photographed on a phone can carry its rotation
+    # in EXIF metadata rather than in the pixels themselves.
+    src = ImageOps.exif_transpose(Image.open(os.path.join(SOURCE_DIR, src_name))).convert("RGB")
     fitted = contain_pad(src, vw, vh)
 
     canvas = Image.new("RGB", (canvas_w, canvas_h), PI_BLACK)
@@ -99,7 +101,7 @@ def build(src_name, frame):
 
 
 if __name__ == "__main__":
-    sources = [Image.open(os.path.join(SOURCE_DIR, s)) for s in SOURCES]
+    sources = [ImageOps.exif_transpose(Image.open(os.path.join(SOURCE_DIR, s))) for s in SOURCES]
     src_aspects = [w / h for w, h in (im.size for im in sources)]
     frame_aspects = [(f["visible"][2] - f["visible"][0]) / (f["visible"][3] - f["visible"][1]) for f in FRAMES]
 
