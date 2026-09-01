@@ -771,6 +771,7 @@ router.post('/run/:id', async (req, res) => {
         date: nzDateShort(incident.date),
         reference: incident.formNumber,
         reportedBy: incident.recordedBy || '',
+        reportedByEmail: incident.recordedByEmail || '',
         // Drives whether the photo frames are kept or lifted out of the document.
         hasPhotos: incident.attachments.length > 0
       }

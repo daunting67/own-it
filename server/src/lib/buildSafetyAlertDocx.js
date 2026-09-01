@@ -391,9 +391,9 @@ function removeThankYouBox(xml) {
   return [xml, false]
 }
 
-// alert = { date, reference, reportedBy, title, identifyProblem, explainConsequences,
-//           gaps[], ownershipNote, engineeringControls[], ppeControls[],
-//           trainingControls[], actions[], takeaway }
+// alert = { date, reference, reportedBy, reportedByEmail, title, identifyProblem,
+//           explainConsequences, gaps[], ownershipNote, engineeringControls[],
+//           ppeControls[], trainingControls[], actions[], takeaway }
 async function buildSafetyAlertDocx(alert) {
   if (!fs.existsSync(TEMPLATE)) {
     throw new Error(`Safety Alert template missing at ${TEMPLATE}`)
@@ -448,6 +448,18 @@ async function buildSafetyAlertDocx(alert) {
     const [next, n] = fillOrPruneByPrefix(xml, slot.prefix, values)
     xml = next
     if (!n) missing.push(slot.prefix + '…')
+  }
+
+  // "You can reach them at [Email]." is its own run, entirely separate from
+  // the sentence before it, so a missing email drops the whole thing rather
+  // than leaving a dangling "at ." with nothing after it.
+  const EMAIL_SENTENCE = ' You can reach them at [Email].'
+  if (alert.reportedByEmail) {
+    let ok
+    ;[xml, ok] = replaceRunText(xml, EMAIL_SENTENCE, ` You can reach them at ${alert.reportedByEmail}.`)
+    if (!ok) missing.push('[Email] sentence')
+  } else {
+    ;[xml] = removeRun(xml, EMAIL_SENTENCE)
   }
 
   // With no photos on the incident, swap each frame's picture for the in-house

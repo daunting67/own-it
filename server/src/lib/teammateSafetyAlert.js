@@ -14,6 +14,7 @@
 const { signIn, getSubmissionEnvelope, haveCreds } = require('./teammateSession')
 const { tmGet } = require('./teammate')
 const { findIncidentForm } = require('./teammatePostIncidentInvestigation')
+const db = require('./supabase')
 
 // Investigation section (same ids as the investigation writer).
 const KNOWN_FIELDS = {
@@ -128,6 +129,30 @@ async function findEmployeePhoto(name) {
   }
 }
 
+// The thank-you box also offers a way to reach the reporter directly. Rather
+// than guess at Teammate's own (undocumented) employee-record shape the way
+// findEmployeePhoto above has to, this reads Own It's OWN Staff/User tables —
+// their schema is known for certain, and every real staff member's email is
+// already in one of the two: field/site staff in Staff (Full Name/.../Email
+// is one of the seven master CSV columns), office/admin accounts in User
+// (portal logins, e.g. Tony himself, who is not tracked in Staff). Read-only,
+// case-insensitive/trimmed match on name, and a miss just means no email
+// clause on the alert — never a reason to fail the whole thing.
+async function findReporterEmail(name) {
+  const wanted = String(name || '').trim().toLowerCase()
+  if (!wanted) return ''
+  try {
+    const { data: staff } = await db.from('Staff').select('name,email').ilike('name', wanted)
+    const staffMatch = (staff || []).find(s => String(s.name || '').trim().toLowerCase() === wanted)
+    if (staffMatch?.email) return staffMatch.email
+    const { data: user } = await db.from('User').select('name,email').ilike('name', wanted)
+    const userMatch = (user || []).find(u => String(u.name || '').trim().toLowerCase() === wanted)
+    return userMatch?.email || ''
+  } catch {
+    return ''
+  }
+}
+
 // Read everything an alert could need. Returns plain data — no Teammate objects,
 // no side effects.
 async function readIncidentForAlert(fsNumber, recordedByName) {
@@ -169,12 +194,15 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     else unlabelled.push({ id, text })
   }
 
+  const reporterName = personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy'])) || ''
+
   return {
     formNumber: form.formNumber,
     formId: form.id,
     date: pick(doc, ['formDate', 'date']) || form.date || '',
     description: pick(doc, ['formDescription', 'description']) || form.description || '',
-    recordedBy: personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy'])) || '',
+    recordedBy: reporterName,
+    recordedByEmail: await findReporterEmail(reporterName),
     workplace: pick(doc, ['workplace.name', 'workplace']) || '',
     branch: pick(doc, ['branch.name', 'branch']) || '',
     status: form.status || '',
