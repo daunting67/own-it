@@ -488,16 +488,19 @@ async function buildSafetyAlertDocx(alert) {
     if (!n) missing.push(slot.prefix + '…')
   }
 
-  // "You can reach them at [Email]." is its own run, entirely separate from
-  // the sentence before it, so a missing email drops the whole thing rather
-  // than leaving a dangling "at ." with nothing after it.
-  const EMAIL_SENTENCE = ' You can reach them at [Email].'
+  // "You can reach them at " (regular weight) and "[Email]." (bold, same
+  // Strong style as [Name]) are two separate runs, both entirely separate
+  // from the sentence before them, so a missing email drops both cleanly
+  // rather than leaving a dangling "at ." with nothing after it.
+  const EMAIL_LEADIN = ' You can reach them at '
+  const EMAIL_PLACEHOLDER = '[Email].'
   if (alert.reportedByEmail) {
     let ok
-    ;[xml, ok] = replaceRunText(xml, EMAIL_SENTENCE, ` You can reach them at ${alert.reportedByEmail}.`)
-    if (!ok) missing.push('[Email] sentence')
+    ;[xml, ok] = replaceRunText(xml, EMAIL_PLACEHOLDER, `${alert.reportedByEmail}.`)
+    if (!ok) missing.push('[Email] run')
   } else {
-    ;[xml] = removeRun(xml, EMAIL_SENTENCE)
+    ;[xml] = removeRun(xml, EMAIL_LEADIN)
+    ;[xml] = removeRun(xml, EMAIL_PLACEHOLDER)
   }
 
   // Every frame gets swapped, always — a real uploaded photo where one is
