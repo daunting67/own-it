@@ -26,7 +26,17 @@ function pick(obj, paths) {
   return undefined
 }
 
+// Simple in-memory cache — this page-walk means up to 20 sequential /form calls per
+// load (see the 429 note in teammate.js: every Teammate call site shares one API key,
+// so a Refresh click here can collide with other in-flight Teammate work), and module
+// state survives across requests on a warm serverless instance, so a short TTL avoids
+// re-walking the whole list on quick repeat Refresh clicks or page reloads.
+let cache = null
+const CACHE_TTL_MS = 2 * 60 * 1000
+
 async function getRecentIncidents(daysBack = 28) {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data
+
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - daysBack)
 
@@ -58,7 +68,9 @@ async function getRecentIncidents(daysBack = 28) {
     if (page > 20) break // safety backstop
   }
 
-  return results.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  const sorted = results.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  cache = { at: Date.now(), data: sorted }
+  return sorted
 }
 
 module.exports = { getRecentIncidents }
