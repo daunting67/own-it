@@ -23,6 +23,7 @@
 const fs = require('fs')
 const path = require('path')
 const JSZip = require('jszip')
+const sharp = require('sharp')
 const db = require('./supabase')
 
 const TEMPLATE = path.join(__dirname, '..', 'assets', 'safety-alert-template.docx')
@@ -267,13 +268,49 @@ function asList(v, max) {
 // The photo frames and the thank-you box are floating anchors, each in its own
 // run. The thank-you box can be lifted out cleanly, which matters because with
 // no reporter it would read "Thank you to Not recorded for their contribution
-// to keeping us safe." The photo frames are handled differently (see the
-// hasPhotos block below): rather than removing them, an incident with no
-// attachments gets its own in-house "photo not supplied" graphic swapped in,
-// so every alert keeps the same three-photo shape and never ships the
-// template's own "right-click > Change Picture" authoring artwork.
+// to keeping us safe." The photo frames are handled differently (see the photo
+// loop below): rather than ever leaving the template's own "right-click >
+// Change Picture" authoring artwork, every frame gets SOMETHING real — the
+// incident's own uploaded photos where they exist (fitted to the frame, see
+// fitPhotoToFrame), and Tony's in-house default graphics filling whatever's
+// left, so every alert keeps the same three-photo shape either way.
 const PHOTO_FRAME_LABELS = ['PHOTO 1', 'PHOTO 2', 'PHOTO 3']
 const HEADSHOT_LABEL = 'HEADSHOT'
+
+// Canvas = the template photo's own pixel size; visible = that frame's
+// <a:srcRect> crop applied to the canvas (see DEFAULT_PHOTO_ASSETS below and
+// scripts/fit-safety-alert-default-photos.py, which derives these the same
+// way for the default graphics). A real incident photo needs the identical
+// contain-fit-into-the-visible-window treatment so it lands in the same place
+// on the page a default image would.
+const FRAME_SPECS = {
+  'PHOTO 1': { canvas: [1025, 770], visible: [308.5, 234.7, 785.8, 641.9] },
+  'PHOTO 2': { canvas: [484, 644], visible: [0, 68.6, 484, 575.4] },
+  'PHOTO 3': { canvas: [800, 450], visible: [71.9, 0, 648, 397.2] }
+}
+
+// Fit a real, arbitrary-aspect-ratio incident photo into one frame: never
+// cropped (Tony's rule for the default graphics applies just as much to a
+// real photo — evidence shouldn't lose content to a crop), scaled to fit
+// within the frame's visible window and padded with white, then placed at
+// that window's offset inside a full-size canvas so the template's existing
+// crop lands on it exactly like it does on the default artwork.
+async function fitPhotoToFrame(sourceBuffer, label) {
+  const { canvas, visible } = FRAME_SPECS[label]
+  const [cw, ch] = canvas
+  const [vx0, vy0, vx1, vy1] = visible
+  const vw = Math.round(vx1 - vx0)
+  const vh = Math.round(vy1 - vy0)
+  const fitted = await sharp(sourceBuffer)
+    .rotate() // orient by EXIF — a phone photo often carries rotation there, not in the pixels
+    .resize(vw, vh, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+    .jpeg()
+    .toBuffer()
+  return sharp({ create: { width: cw, height: ch, channels: 3, background: { r: 22, g: 22, b: 22 } } })
+    .composite([{ input: fitted, left: Math.round(vx0), top: Math.round(vy0) }])
+    .jpeg({ quality: 90 })
+    .toBuffer()
+}
 
 // Frames carry their label in the image's docPr name/descr, not in a w:t, so
 // match the anchor by its relationship id instead.
@@ -393,7 +430,8 @@ function removeThankYouBox(xml) {
 
 // alert = { date, reference, reportedBy, reportedByEmail, title, identifyProblem,
 //           explainConsequences, gaps[], ownershipNote, engineeringControls[],
-//           ppeControls[], trainingControls[], actions[], takeaway }
+//           ppeControls[], trainingControls[], actions[], takeaway,
+//           attachmentPhotos: [{ name, data: Buffer }] }
 async function buildSafetyAlertDocx(alert) {
   if (!fs.existsSync(TEMPLATE)) {
     throw new Error(`Safety Alert template missing at ${TEMPLATE}`)
@@ -462,22 +500,37 @@ async function buildSafetyAlertDocx(alert) {
     ;[xml] = removeRun(xml, EMAIL_SENTENCE)
   }
 
-  // With no photos on the incident, swap each frame's picture for the in-house
-  // "photo not supplied" default rather than issuing an alert with the
-  // template's own "right-click > Change Picture" authoring boxes on it. The
-  // frame anchors, crop and position are untouched — only the embedded image
-  // bytes change. The reporter's headshot is separate — it belongs to the
+  // Every frame gets swapped, always — a real uploaded photo where one is
+  // available (in order: alert.attachmentPhotos[0] into PHOTO 1, etc.),
+  // Tony's default graphic filling any frame that's left over. The frame
+  // anchors, crop and position are untouched — only the embedded image bytes
+  // change. The reporter's headshot is separate — it belongs to the
   // thank-you box, not the incident, and is unaffected by this.
   const removed = []
   const defaultPhotos = []
-  if (alert.hasPhotos === false) {
-    for (const label of PHOTO_FRAME_LABELS) {
-      const target = await mediaTargetForRel(zip, FRAME_RELS[label])
-      const assetPath = DEFAULT_PHOTO_ASSETS[label]
-      if (target && fs.existsSync(assetPath)) {
-        zip.file(target, fs.readFileSync(assetPath))
-        defaultPhotos.push(label)
+  const realPhotos = []
+  const photoErrors = []
+  const attachmentPhotos = alert.attachmentPhotos || []
+  for (let i = 0; i < PHOTO_FRAME_LABELS.length; i++) {
+    const label = PHOTO_FRAME_LABELS[i]
+    const target = await mediaTargetForRel(zip, FRAME_RELS[label])
+    if (!target) continue
+    const real = attachmentPhotos[i]
+    if (real) {
+      try {
+        zip.file(target, await fitPhotoToFrame(real.data, label))
+        realPhotos.push(label)
+        continue
+      } catch (e) {
+        // Falls through to the default below — a bad/corrupt download must
+        // never leave a frame with the raw template artwork, or crash the alert.
+        photoErrors.push(`${label}: ${e.message}`)
       }
+    }
+    const assetPath = DEFAULT_PHOTO_ASSETS[label]
+    if (fs.existsSync(assetPath)) {
+      zip.file(target, fs.readFileSync(assetPath))
+      defaultPhotos.push(label)
     }
   }
 
@@ -525,6 +578,8 @@ async function buildSafetyAlertDocx(alert) {
   if (fitWarnings.length) buf.fitWarnings = fitWarnings
   if (removed.length) buf.removed = removed
   if (defaultPhotos.length) buf.defaultPhotos = defaultPhotos
+  if (realPhotos.length) buf.realPhotos = realPhotos
+  if (photoErrors.length) buf.photoErrors = photoErrors
   if (headshotUsed) buf.headshotUsed = true
   return buf
 }

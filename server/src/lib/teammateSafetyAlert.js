@@ -96,6 +96,46 @@ function collectAttachments(doc) {
   return out
 }
 
+// Recognisable magic bytes for the image formats we might get back, checked
+// independently of whatever Content-Type header comes with the response — a
+// failed auth attempt is far more likely to come back as an HTML login page
+// or a JSON error body than a non-2xx status, and embedding THAT as if it
+// were a photo would silently corrupt the alert rather than failing loudly.
+function looksLikeImage(buf) {
+  if (!buf || buf.length < 4) return false
+  if (buf[0] === 0xff && buf[1] === 0xd8) return true // JPEG
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true // PNG
+  if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return true
+  if (buf.slice(0, 3).toString('ascii') === 'GIF') return true
+  return false
+}
+
+// Download one incident attachment's real bytes from Teammate.
+//
+// UNPROVEN, by necessity: nothing in this codebase has ever fetched a binary
+// file from an external URL before (every existing "download" reads from
+// Supabase Storage), and no prior session has ever seen a real attachment
+// URL to know its shape. The `authtoken` header is the same one every other
+// authenticated Teammate call in this codebase uses (see internal() in
+// teammateSession.js) — the best available guess, not a confirmed contract.
+// If that guess is wrong, this fails SAFELY: a non-2xx status or a body that
+// doesn't look like a real image both return null with a reason attached,
+// never embedded as if it were a photo. `fieldReport()` surfaces exactly
+// what came back so the real shape can be pinned after one live run, same
+// as every other undocumented Teammate behaviour in this file.
+async function downloadAttachment(att, session) {
+  if (!att.url) return { error: 'no URL on this attachment' }
+  try {
+    const res = await fetch(att.url, { headers: { authtoken: session.token } })
+    const buf = Buffer.from(await res.arrayBuffer())
+    const preview = () => buf.slice(0, 160).toString('utf8').replace(/\s+/g, ' ').trim()
+    if (!res.ok) return { error: `HTTP ${res.status}`, preview: preview() }
+    if (!looksLikeImage(buf)) return { error: `response was not an image (${buf.length} bytes)`, preview: preview() }
+    return { data: buf }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
 
 // The thank-you box wants the reporter's headshot, and Teammate holds staff photos
 // under Human Resources. Nothing in this codebase has ever read one, so rather
@@ -195,6 +235,19 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
   }
 
   const reporterName = personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy'])) || ''
+  const attachments = collectAttachments(doc)
+
+  // Up to 3 — there are only 3 photo frames on the alert. PDFs among the
+  // attachments (collectAttachments also matches those) aren't photos and
+  // are left for Tony to handle manually, same as before.
+  const photoAttachments = attachments.filter(a => /\.(jpe?g|png|gif|webp)$/i.test(a.name)).slice(0, 3)
+  const attachmentPhotos = []
+  const attachmentPhotoErrors = []
+  for (const att of photoAttachments) {
+    const result = await downloadAttachment(att, session)
+    if (result.data) attachmentPhotos.push({ name: att.name, data: result.data })
+    else attachmentPhotoErrors.push(`${att.name}: ${result.error}${result.preview ? ` — "${result.preview}"` : ''}`)
+  }
 
   return {
     formNumber: form.formNumber,
@@ -210,7 +263,9 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     category,
     known,
     unlabelled,
-    attachments: collectAttachments(doc),
+    attachments,
+    attachmentPhotos,
+    attachmentPhotoErrors,
     reporterPhoto: await findEmployeePhoto(personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy']))),
     taskNames: (doc.taskData || []).filter(t => t && t.isDelete !== 'yes').map(t => t.name || '').filter(Boolean)
   }
@@ -252,6 +307,8 @@ function fieldReport(inc) {
     bits.push(`${inc.unlabelled.length} unlabelled: ${inc.unlabelled.map(f => `${f.id} (${f.text.length} chars)`).join(', ')}`)
   }
   bits.push(inc.attachments.length ? `${inc.attachments.length} attachment(s): ${inc.attachments.map(a => a.name).join(', ')}` : 'no attachments found')
+  if (inc.attachmentPhotos?.length) bits.push(`${inc.attachmentPhotos.length} photo(s) downloaded OK for auto-placement`)
+  if (inc.attachmentPhotoErrors?.length) bits.push(`photo download failed — ${inc.attachmentPhotoErrors.join(' | ')}`)
   const rp = inc.reporterPhoto
   if (!rp) bits.push('no reporter to look up')
   else if (rp.error) bits.push(`employee lookup failed: ${rp.error}`)

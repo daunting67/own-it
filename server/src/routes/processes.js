@@ -763,17 +763,27 @@ router.post('/run/:id', async (req, res) => {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
 
-      // The three identity fields come from the incident record, never from the
+      // The identity fields come from the incident record, never from the
       // model — that is what keeps the injured party out of the alert and puts
       // only the reporter in the thank-you box.
+      //
+      // Teammate's own "recorded by" is sometimes not a real person (e.g. a
+      // submission attributed to "company") — `reporterPhoto.matched` already
+      // tells us whether it resolved to one of the 91 real employees. When it
+      // didn't, Tony's call: show whoever is actually running this process
+      // instead of a name that means nothing to the crew reading the alert.
+      const reporterIsReal = incident.reporterPhoto?.matched === true
       let alert = {
         ...parsed,
         date: nzDateShort(incident.date),
         reference: incident.formNumber,
-        reportedBy: incident.recordedBy || '',
-        reportedByEmail: incident.recordedByEmail || '',
-        // Drives whether the photo frames are kept or lifted out of the document.
-        hasPhotos: incident.attachments.length > 0
+        reportedBy: reporterIsReal ? (incident.recordedBy || '') : coordinatorName,
+        reportedByEmail: reporterIsReal ? (incident.recordedByEmail || '') : (req.user?.email || ''),
+        // Used for the "N photos are on the incident" banner text below.
+        hasPhotos: incident.attachments.length > 0,
+        // The actual bytes buildSafetyAlertDocx places into the photo frames —
+        // see readIncidentForAlert for how these were downloaded.
+        attachmentPhotos: incident.attachmentPhotos || []
       }
 
       // Length is the one rule the model keeps missing — it will happily write a
@@ -854,10 +864,18 @@ router.post('/run/:id', async (req, res) => {
         output += `\n\n⚠️ Could not build the Word document: ${docErr.message}\nThe alert text above is still valid — paste it into the template manually.`
       }
       output += `\n\n🔎 ${fieldReport(incident)}`
-      if (incident.attachments.length) {
-        output += `\n\n📷 ${incident.attachments.length} photo(s) are on the incident form (${incident.attachments.map(a => a.name).join(', ')}). They are NOT placed automatically — open the alert and use right-click › Change Picture on each frame, and check anyone identifiable has consented before it goes out.`
-      } else {
-        output += `\n\n📷 No photos were on the incident form, so the three photo panels show a default "photo not supplied" graphic and the alert is ready to issue as-is. Swap any of them for a real photo via right-click › Change Picture if you have one.`
+      if (safetyAlertBuf?.realPhotos?.length) {
+        output += `\n\n📷 ${safetyAlertBuf.realPhotos.length} real photo(s) from the incident were placed automatically. Check them over and confirm anyone identifiable has consented before it goes out.`
+      }
+      if (safetyAlertBuf?.photoErrors?.length) {
+        output += `\n\n⚠️ Couldn't automatically place ${safetyAlertBuf.photoErrors.length} photo(s) (${safetyAlertBuf.photoErrors.join('; ')}) — a default graphic was used instead. Open the alert and use right-click › Change Picture to add the real photo yourself.`
+      }
+      if (!safetyAlertBuf?.realPhotos?.length && !safetyAlertBuf?.photoErrors?.length) {
+        if (incident.attachments.length) {
+          output += `\n\n📷 ${incident.attachments.length} attachment(s) are on the incident form (${incident.attachments.map(a => a.name).join(', ')}), but none looked like a photo to place automatically. The panels show a default graphic — use right-click › Change Picture if you have a real photo to add.`
+        } else {
+          output += `\n\n📷 No photos were on the incident form, so the three photo panels show a default "photo not supplied" graphic and the alert is ready to issue as-is.`
+        }
       }
       if (safetyAlertBuf?.headshotUsed) {
         output += `\n\n🧑 ${alert.reportedBy}'s headshot has been added to the thank-you box.`
