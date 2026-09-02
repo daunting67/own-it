@@ -804,7 +804,23 @@ router.post('/run/:id', async (req, res) => {
             const rtext = (await repair.json()).content?.[0]?.text || ''
             const rclean = rtext.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
             const rparsed = JSON.parse(rclean)
-            const candidate = { ...rparsed, date: alert.date, reference: alert.reference, reportedBy: alert.reportedBy }
+            // Spread `alert` FIRST so every non-model field (hasPhotos,
+            // reportedByEmail, and anything added later) survives automatically —
+            // the previous version spread `rparsed` first and only re-patched
+            // date/reference/reportedBy by name, which silently dropped
+            // hasPhotos on every successful repair (undefined !== false, so the
+            // default-photo swap never ran) and would have dropped
+            // reportedByEmail the same way. The identity fields are re-asserted
+            // last so nothing the model echoes back in its JSON can override them.
+            const candidate = {
+              ...alert,
+              ...rparsed,
+              date: alert.date,
+              reference: alert.reference,
+              reportedBy: alert.reportedBy,
+              reportedByEmail: alert.reportedByEmail,
+              hasPhotos: alert.hasPhotos
+            }
             // Only accept the repair if it actually improved the fit.
             if (fitCheck(candidate).length < fit.length) {
               alert = candidate
