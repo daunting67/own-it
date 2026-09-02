@@ -11,7 +11,7 @@
 // rather than guess we hand every unrecognised field to the model as raw content
 // and let it identify them. `fieldReport()` prints what was seen so the ids can be
 // pinned properly after a real run.
-const { signIn, getSubmissionEnvelope, haveCreds } = require('./teammateSession')
+const { signIn, getSubmissionEnvelope, haveCreds, ORIGIN } = require('./teammateSession')
 const { tmGet } = require('./teammate')
 const { findIncidentForm } = require('./teammatePostIncidentInvestigation')
 const db = require('./supabase')
@@ -112,28 +112,38 @@ function looksLikeImage(buf) {
 
 // Download one incident attachment's real bytes from Teammate.
 //
-// UNPROVEN, by necessity: nothing in this codebase has ever fetched a binary
-// file from an external URL before (every existing "download" reads from
-// Supabase Storage), and no prior session has ever seen a real attachment
-// URL to know its shape. The `authtoken` header is the same one every other
-// authenticated Teammate call in this codebase uses (see internal() in
-// teammateSession.js) — the best available guess, not a confirmed contract.
-// If that guess is wrong, this fails SAFELY: a non-2xx status or a body that
-// doesn't look like a real image both return null with a reason attached,
-// never embedded as if it were a photo. `fieldReport()` surfaces exactly
-// what came back so the real shape can be pinned after one live run, same
-// as every other undocumented Teammate behaviour in this file.
+// The `authtoken` header is the same one every other authenticated Teammate
+// call in this codebase uses (see internal() in teammateSession.js) — the
+// best available guess, still UNCONFIRMED as of this comment: the first real
+// run (FS00718) never got far enough to test it, because the attachment's
+// `url` turned out to be a path relative to Teammate's own host
+// ("uploads/document/file/....jpg"), not an absolute URL — `fetch()` rejects
+// that outright before any request goes out, auth or otherwise. Resolved
+// against ORIGIN (my.teammateapp.com, no /api — this is a plain asset path,
+// not an internal API endpoint) rather than assumed to already be complete.
+// If the auth guess turns out to be wrong too, this still fails SAFELY: a
+// non-2xx status or a body that doesn't look like a real image both return
+// null with a reason attached, never embedded as if it were a photo.
+// `fieldReport()` surfaces exactly what came back so the real shape can be
+// pinned after the next live run, same as every other undocumented
+// Teammate behaviour in this file.
 async function downloadAttachment(att, session) {
   if (!att.url) return { error: 'no URL on this attachment' }
+  let url
   try {
-    const res = await fetch(att.url, { headers: { authtoken: session.token } })
+    url = new URL(att.url, ORIGIN).toString()
+  } catch (e) {
+    return { error: `could not resolve "${att.url}" to a URL: ${e.message}` }
+  }
+  try {
+    const res = await fetch(url, { headers: { authtoken: session.token } })
     const buf = Buffer.from(await res.arrayBuffer())
     const preview = () => buf.slice(0, 160).toString('utf8').replace(/\s+/g, ' ').trim()
-    if (!res.ok) return { error: `HTTP ${res.status}`, preview: preview() }
-    if (!looksLikeImage(buf)) return { error: `response was not an image (${buf.length} bytes)`, preview: preview() }
+    if (!res.ok) return { error: `HTTP ${res.status} from ${url}`, preview: preview() }
+    if (!looksLikeImage(buf)) return { error: `response from ${url} was not an image (${buf.length} bytes)`, preview: preview() }
     return { data: buf }
   } catch (e) {
-    return { error: e.message }
+    return { error: `${e.message} (${url})` }
   }
 }
 

@@ -9,6 +9,9 @@
 // If they are not set, callers should fall back to shell-only + paste guidance.
 
 const ROOT = 'https://my.teammateapp.com/api'
+// The host on its own, no /api — attachment references from a submission
+// (e.g. "uploads/document/file/....jpg") are relative to this, not to ROOT.
+const ORIGIN = 'https://my.teammateapp.com'
 
 // Resolve the Teammate login to use for a given submitter name.
 //
@@ -145,4 +148,4 @@ async function shareSubmission(formId, employeeIds, message, session) {
   return { notifiedCount: res?.response_data?.notifiedCount ?? null }
 }
 
-module.exports = { haveCreds, signIn, getSubmission, getSubmissionEnvelope, populateSubmission, shareSubmission, internal }
+module.exports = { haveCreds, signIn, getSubmission, getSubmissionEnvelope, populateSubmission, shareSubmission, internal, ORIGIN }
