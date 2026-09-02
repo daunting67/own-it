@@ -16,6 +16,9 @@ const COMPANY_VEHICLE_ITEMS = [
 // state across, which keeps this file's deliberate no-bulk-migration approach.
 const RENAMED_ITEMS = {
   'Drug & alcohol policy signed': 'Drug test completed',
+  'Intake form sent to candidate': 'Personal Details Form sent to candidate',
+  'Intake form sent': 'Personal Details Form sent',
+  'Intake form completed': 'Personal Details Form completed',
 }
 
 // Sections retired from TEMPLATES. Listing one here strips it from checklists
