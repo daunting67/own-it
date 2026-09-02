@@ -12,9 +12,7 @@
 // and let it identify them. `fieldReport()` prints what was seen so the ids can be
 // pinned properly after a real run.
 const { signIn, getSubmissionEnvelope, haveCreds, ORIGIN } = require('./teammateSession')
-const { tmGet } = require('./teammate')
 const { findIncidentForm } = require('./teammatePostIncidentInvestigation')
-const db = require('./supabase')
 
 // Investigation section (same ids as the investigation writer).
 const KNOWN_FIELDS = {
@@ -86,14 +84,17 @@ function collectAttachments(doc) {
     if (Array.isArray(node)) { node.forEach(n => walk(n, depth + 1)); return }
     const name = pick(node, ['fileName', 'filename', 'originalName', 'name'])
     const url = pick(node, ['url', 'fileUrl', 'path', 'location', 'signedUrl', 'src'])
+    const id = pick(node, ['_id', 'id', 'fileId', 'documentId'])
     if (name && /\.(jpe?g|png|gif|webp|heic|pdf)$/i.test(String(name))) {
       const key = `${name}|${url || ''}`
       // rawKeys: what ELSE sits beside `url` on this object — the first real
       // attachment (FS00718) proved `url` alone isn't enough (it resolves to
       // Teammate's own app shell, not the file), so if this guess needs a
       // second round of fixing, fieldReport() showing what other fields exist
-      // beats guessing blind again.
-      if (!seen.has(key)) { seen.add(key); out.push({ name: String(name), url: url ? String(url) : null, rawKeys: Object.keys(node) }) }
+      // beats guessing blind again. FS00718's own attachment carried an `_id`
+      // alongside `path` — captured here so downloadAttachment can also try
+      // an id-keyed endpoint, not just the raw path.
+      if (!seen.has(key)) { seen.add(key); out.push({ name: String(name), url: url ? String(url) : null, id: id ? String(id) : null, rawKeys: Object.keys(node) }) }
     }
     for (const v of Object.values(node)) walk(v, depth + 1)
   }
@@ -131,98 +132,51 @@ async function tryFetchImage(url, session) {
 
 // Download one incident attachment's real bytes from Teammate.
 //
-// FS00718 proved two things the hard way, one attempt at a time (each noted
-// so the next fix doesn't have to rediscover it):
-// (1) the attachment's `url` is a path relative to Teammate's own host
-//     ("uploads/document/file/....jpg"), not an absolute URL — first
-//     attempted as one, `fetch()` rejected it outright before any request
-//     went out. Now resolved against ORIGIN (my.teammateapp.com, no /api).
-// (2) that resolved URL, fetched directly, returns Teammate's own SPA shell
-//     (an HTML page bootstrapping their web app), not the file — meaning a
-//     plain path under the host falls through to their client-side router
-//     rather than serving the asset. So this now also tries the SAME path
-//     under ROOT (.../api/uploads/...), since every other authenticated call
-//     in this codebase goes through /api and a raw host path clearly doesn't
-//     serve real files.
-// The `authtoken` header itself (used both attempts) is STILL unconfirmed —
-// neither attempt so far has produced a response that would prove or disprove
-// it, since both failures happened for other reasons. If this second guess is
-// also wrong, this keeps failing safely: nothing that doesn't pass
-// looksLikeImage() is ever embedded as if it were a photo, and fieldReport()
-// now also prints the attachment's other field names (rawKeys) so the next
-// fix has more than one more guess to work from.
+// SOLVED (confirmed, not guessed) 3 Sep 2026: Tony sent Teammate's own PDF
+// export of FS00718, which embeds the REAL working link as a hyperlink on
+// the photo —
+//   https://my.teammateapp.com/teammatedoc/uploads/document/file/<name>
+//     ?token=<JWT>&proxy=true
+// Decoding that JWT (HS256) gave the exact shape: header {alg:"HS256",
+// typ:"JWT"}, payload {type:"file", companyId, id, _id, iat, exp} — a
+// SEPARATE, file-scoped token (7-day validity: exp-iat = 604800s), not the
+// session `authtoken` this codebase uses for every other Teammate call. That
+// also explains every earlier failure: the prefix is /teammatedoc/, not a
+// bare host path (which falls through to Teammate's own SPA shell) or /api
+// (flat 502 — that route doesn't exist). And auth here is a QUERY PARAM, not
+// a header — this route is meant to work as a plain link/embed, which a
+// custom header can't do.
+//
+// We cannot mint one of these file tokens ourselves (HS256 needs Teammate's
+// signing secret, which we don't have and won't try to guess). What we DO
+// have is our own session token from signIn() — same signing family, just a
+// different `type` claim. Tried here as the query token on the chance their
+// verification only checks signature/expiry and not the `type` claim; if
+// Teammate's backend enforces `type:"file"` strictly, this still fails
+// safely (falls back to the default graphic) and reports exactly what came
+// back, same as every attempt before it.
 async function downloadAttachment(att, session) {
   if (!att.url) return { error: 'no URL on this attachment' }
-  let hostUrl, apiUrl
+  let path
   try {
-    hostUrl = new URL(att.url, ORIGIN).toString()
-    apiUrl = new URL(att.url, `${ORIGIN}/api/`).toString()
+    path = new URL(att.url, `${ORIGIN}/`).pathname.replace(/^\/+/, '')
   } catch (e) {
-    return { error: `could not resolve "${att.url}" to a URL: ${e.message}` }
+    return { error: `could not resolve "${att.url}" to a path: ${e.message}` }
   }
-  const first = await tryFetchImage(hostUrl, session)
-  if (first.data) return first
-  if (apiUrl === hostUrl) return first
-  const second = await tryFetchImage(apiUrl, session)
-  if (second.data) return second
-  return { error: `${first.error} | also tried: ${second.error}`, preview: first.preview || second.preview }
+  const candidates = [
+    `${ORIGIN}/teammatedoc/${path}?token=${encodeURIComponent(session.token)}&proxy=true`,
+    `${ORIGIN}/teammatedoc/${path}?token=${encodeURIComponent(session.token)}`
+  ]
+
+  const errors = []
+  for (const url of candidates) {
+    const result = await tryFetchImage(url, session)
+    if (result.data) return result
+    errors.push(result.error)
+  }
+  return { error: errors.join(' | ') }
 }
 
-// The thank-you box wants the reporter's headshot, and Teammate holds staff photos
-// under Human Resources. Nothing in this codebase has ever read one, so rather
-// than guess at the shape, find the employee record and report what it actually
-// carries — any URL that looks like an image, plus the field names available.
-// Read-only, and a failure here must never sink an alert.
-function imageUrlsIn(node, depth = 0, out = []) {
-  if (!node || depth > 4 || typeof node !== 'object') return out
-  if (Array.isArray(node)) { node.forEach(n => imageUrlsIn(n, depth + 1, out)); return out }
-  for (const [k, v] of Object.entries(node)) {
-    if (typeof v === 'string' && /^https?:\/\//.test(v) && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(v)) {
-      out.push({ key: k, url: v })
-    } else if (v && typeof v === 'object') imageUrlsIn(v, depth + 1, out)
-  }
-  return out
-}
-
-async function findEmployeePhoto(name) {
-  const wanted = String(name || '').trim().toLowerCase()
-  if (!wanted) return null
-  try {
-    const fd = (await tmGet('/form/data')).response_data
-    const list = fd?.listEmployee || []
-    const emp = list.find(e => String(e.name || '').trim().toLowerCase() === wanted)
-      || list.find(e => String(e.name || '').trim().toLowerCase().startsWith(wanted.split(' ')[0]))
-    if (!emp) return { matched: false, candidates: list.length }
-    const urls = imageUrlsIn(emp)
-    return { matched: true, name: emp.name, fields: Object.keys(emp), urls }
-  } catch (e) {
-    return { error: e.message.slice(0, 120) }
-  }
-}
-
-// The thank-you box also offers a way to reach the reporter directly. Rather
-// than guess at Teammate's own (undocumented) employee-record shape the way
-// findEmployeePhoto above has to, this reads Own It's OWN Staff/User tables —
-// their schema is known for certain, and every real staff member's email is
-// already in one of the two: field/site staff in Staff (Full Name/.../Email
-// is one of the seven master CSV columns), office/admin accounts in User
-// (portal logins, e.g. Tony himself, who is not tracked in Staff). Read-only,
-// case-insensitive/trimmed match on name, and a miss just means no email
-// clause on the alert — never a reason to fail the whole thing.
-async function findReporterEmail(name) {
-  const wanted = String(name || '').trim().toLowerCase()
-  if (!wanted) return ''
-  try {
-    const { data: staff } = await db.from('Staff').select('name,email').ilike('name', wanted)
-    const staffMatch = (staff || []).find(s => String(s.name || '').trim().toLowerCase() === wanted)
-    if (staffMatch?.email) return staffMatch.email
-    const { data: user } = await db.from('User').select('name,email').ilike('name', wanted)
-    const userMatch = (user || []).find(u => String(u.name || '').trim().toLowerCase() === wanted)
-    return userMatch?.email || ''
-  } catch {
-    return ''
-  }
-}
 
 // Read everything an alert could need. Returns plain data — no Teammate objects,
 // no side effects.
@@ -265,6 +219,11 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     else unlabelled.push({ id, text })
   }
 
+  // Who recorded the incident in Teammate is background context for the
+  // model only (see incidentAsText below) — Tony's explicit call: who is
+  // ISSUING the alert is what's relevant to show, not who reported the
+  // incident, so this no longer feeds the thank-you box or ALERT BY line at
+  // all (processes.js always uses the person running the process for that).
   const reporterName = personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy'])) || ''
   const attachments = collectAttachments(doc)
 
@@ -286,7 +245,6 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     date: pick(doc, ['formDate', 'date']) || form.date || '',
     description: pick(doc, ['formDescription', 'description']) || form.description || '',
     recordedBy: reporterName,
-    recordedByEmail: await findReporterEmail(reporterName),
     workplace: pick(doc, ['workplace.name', 'workplace']) || '',
     branch: pick(doc, ['branch.name', 'branch']) || '',
     status: form.status || '',
@@ -297,7 +255,6 @@ async function readIncidentForAlert(fsNumber, recordedByName) {
     attachments,
     attachmentPhotos,
     attachmentPhotoErrors,
-    reporterPhoto: await findEmployeePhoto(personName(recordedBy) || personName(pick(doc, ['recordedBy', 'createdBy']))),
     taskNames: (doc.taskData || []).filter(t => t && t.isDelete !== 'yes').map(t => t.name || '').filter(Boolean)
   }
 }
@@ -341,18 +298,14 @@ function fieldReport(inc) {
   if (inc.attachmentPhotos?.length) bits.push(`${inc.attachmentPhotos.length} photo(s) downloaded OK for auto-placement`)
   if (inc.attachmentPhotoErrors?.length) {
     bits.push(`photo download failed — ${inc.attachmentPhotoErrors.join(' | ')}`)
-    // If both the host-path and /api guesses failed, these are what else was
-    // sitting on the attachment object besides `name`/`url` — the next fix
-    // should look here for a better field before guessing a third URL shape.
+    // If every URL guess so far failed, these are what else was sitting on
+    // the attachment object besides `name`/`url` — the next fix should look
+    // here for a better field (or confirm `id` actually resolved) before
+    // guessing yet another URL shape.
     for (const a of inc.attachments) {
-      if (a.rawKeys) bits.push(`${a.name} fields: [${a.rawKeys.join(', ')}]`)
+      if (a.rawKeys) bits.push(`${a.name} id=${a.id || 'none'} fields: [${a.rawKeys.join(', ')}]`)
     }
   }
-  const rp = inc.reporterPhoto
-  if (!rp) bits.push('no reporter to look up')
-  else if (rp.error) bits.push(`employee lookup failed: ${rp.error}`)
-  else if (!rp.matched) bits.push(`reporter not found among ${rp.candidates} employees`)
-  else bits.push(`employee "${rp.name}" record has [${rp.fields.join(', ')}]; image urls: ${rp.urls.length ? rp.urls.map(u => u.key).join(', ') : 'none'}`)
   return bits.join(' · ')
 }
 

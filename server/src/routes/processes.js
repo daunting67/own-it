@@ -763,22 +763,18 @@ router.post('/run/:id', async (req, res) => {
       const cleaned = output.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
       const parsed = JSON.parse(cleaned)
 
-      // The identity fields come from the incident record, never from the
-      // model — that is what keeps the injured party out of the alert and puts
-      // only the reporter in the thank-you box.
-      //
-      // Teammate's own "recorded by" is sometimes not a real person (e.g. a
-      // submission attributed to "company") — `reporterPhoto.matched` already
-      // tells us whether it resolved to one of the 91 real employees. When it
-      // didn't, Tony's call: show whoever is actually running this process
-      // instead of a name that means nothing to the crew reading the alert.
-      const reporterIsReal = incident.reporterPhoto?.matched === true
+      // The identity fields never come from the model — that is what keeps
+      // the injured party out of the alert. Tony's explicit call: who
+      // RECORDED the incident in Teammate isn't relevant to the alert (and
+      // is often unreliable — e.g. attributed to "company" instead of a real
+      // person); who's ISSUING the alert is, so the thank-you box and ALERT
+      // BY line always show whoever is actually running this process.
       let alert = {
         ...parsed,
         date: nzDateShort(incident.date),
         reference: incident.formNumber,
-        reportedBy: reporterIsReal ? (incident.recordedBy || '') : coordinatorName,
-        reportedByEmail: reporterIsReal ? (incident.recordedByEmail || '') : (req.user?.email || ''),
+        reportedBy: coordinatorName,
+        reportedByEmail: req.user?.email || '',
         // Used for the "N photos are on the incident" banner text below.
         hasPhotos: incident.attachments.length > 0,
         // The actual bytes buildSafetyAlertDocx places into the photo frames —
