@@ -88,7 +88,12 @@ function collectAttachments(doc) {
     const url = pick(node, ['url', 'fileUrl', 'path', 'location', 'signedUrl', 'src'])
     if (name && /\.(jpe?g|png|gif|webp|heic|pdf)$/i.test(String(name))) {
       const key = `${name}|${url || ''}`
-      if (!seen.has(key)) { seen.add(key); out.push({ name: String(name), url: url ? String(url) : null }) }
+      // rawKeys: what ELSE sits beside `url` on this object — the first real
+      // attachment (FS00718) proved `url` alone isn't enough (it resolves to
+      // Teammate's own app shell, not the file), so if this guess needs a
+      // second round of fixing, fieldReport() showing what other fields exist
+      // beats guessing blind again.
+      if (!seen.has(key)) { seen.add(key); out.push({ name: String(name), url: url ? String(url) : null, rawKeys: Object.keys(node) }) }
     }
     for (const v of Object.values(node)) walk(v, depth + 1)
   }
@@ -110,31 +115,8 @@ function looksLikeImage(buf) {
   return false
 }
 
-// Download one incident attachment's real bytes from Teammate.
-//
-// The `authtoken` header is the same one every other authenticated Teammate
-// call in this codebase uses (see internal() in teammateSession.js) — the
-// best available guess, still UNCONFIRMED as of this comment: the first real
-// run (FS00718) never got far enough to test it, because the attachment's
-// `url` turned out to be a path relative to Teammate's own host
-// ("uploads/document/file/....jpg"), not an absolute URL — `fetch()` rejects
-// that outright before any request goes out, auth or otherwise. Resolved
-// against ORIGIN (my.teammateapp.com, no /api — this is a plain asset path,
-// not an internal API endpoint) rather than assumed to already be complete.
-// If the auth guess turns out to be wrong too, this still fails SAFELY: a
-// non-2xx status or a body that doesn't look like a real image both return
-// null with a reason attached, never embedded as if it were a photo.
-// `fieldReport()` surfaces exactly what came back so the real shape can be
-// pinned after the next live run, same as every other undocumented
-// Teammate behaviour in this file.
-async function downloadAttachment(att, session) {
-  if (!att.url) return { error: 'no URL on this attachment' }
-  let url
-  try {
-    url = new URL(att.url, ORIGIN).toString()
-  } catch (e) {
-    return { error: `could not resolve "${att.url}" to a URL: ${e.message}` }
-  }
+// Fetch one URL and report plainly what came back — a real image, or why not.
+async function tryFetchImage(url, session) {
   try {
     const res = await fetch(url, { headers: { authtoken: session.token } })
     const buf = Buffer.from(await res.arrayBuffer())
@@ -145,6 +127,45 @@ async function downloadAttachment(att, session) {
   } catch (e) {
     return { error: `${e.message} (${url})` }
   }
+}
+
+// Download one incident attachment's real bytes from Teammate.
+//
+// FS00718 proved two things the hard way, one attempt at a time (each noted
+// so the next fix doesn't have to rediscover it):
+// (1) the attachment's `url` is a path relative to Teammate's own host
+//     ("uploads/document/file/....jpg"), not an absolute URL — first
+//     attempted as one, `fetch()` rejected it outright before any request
+//     went out. Now resolved against ORIGIN (my.teammateapp.com, no /api).
+// (2) that resolved URL, fetched directly, returns Teammate's own SPA shell
+//     (an HTML page bootstrapping their web app), not the file — meaning a
+//     plain path under the host falls through to their client-side router
+//     rather than serving the asset. So this now also tries the SAME path
+//     under ROOT (.../api/uploads/...), since every other authenticated call
+//     in this codebase goes through /api and a raw host path clearly doesn't
+//     serve real files.
+// The `authtoken` header itself (used both attempts) is STILL unconfirmed —
+// neither attempt so far has produced a response that would prove or disprove
+// it, since both failures happened for other reasons. If this second guess is
+// also wrong, this keeps failing safely: nothing that doesn't pass
+// looksLikeImage() is ever embedded as if it were a photo, and fieldReport()
+// now also prints the attachment's other field names (rawKeys) so the next
+// fix has more than one more guess to work from.
+async function downloadAttachment(att, session) {
+  if (!att.url) return { error: 'no URL on this attachment' }
+  let hostUrl, apiUrl
+  try {
+    hostUrl = new URL(att.url, ORIGIN).toString()
+    apiUrl = new URL(att.url, `${ORIGIN}/api/`).toString()
+  } catch (e) {
+    return { error: `could not resolve "${att.url}" to a URL: ${e.message}` }
+  }
+  const first = await tryFetchImage(hostUrl, session)
+  if (first.data) return first
+  if (apiUrl === hostUrl) return first
+  const second = await tryFetchImage(apiUrl, session)
+  if (second.data) return second
+  return { error: `${first.error} | also tried: ${second.error}`, preview: first.preview || second.preview }
 }
 
 // The thank-you box wants the reporter's headshot, and Teammate holds staff photos
@@ -318,7 +339,15 @@ function fieldReport(inc) {
   }
   bits.push(inc.attachments.length ? `${inc.attachments.length} attachment(s): ${inc.attachments.map(a => a.name).join(', ')}` : 'no attachments found')
   if (inc.attachmentPhotos?.length) bits.push(`${inc.attachmentPhotos.length} photo(s) downloaded OK for auto-placement`)
-  if (inc.attachmentPhotoErrors?.length) bits.push(`photo download failed — ${inc.attachmentPhotoErrors.join(' | ')}`)
+  if (inc.attachmentPhotoErrors?.length) {
+    bits.push(`photo download failed — ${inc.attachmentPhotoErrors.join(' | ')}`)
+    // If both the host-path and /api guesses failed, these are what else was
+    // sitting on the attachment object besides `name`/`url` — the next fix
+    // should look here for a better field before guessing a third URL shape.
+    for (const a of inc.attachments) {
+      if (a.rawKeys) bits.push(`${a.name} fields: [${a.rawKeys.join(', ')}]`)
+    }
+  }
   const rp = inc.reporterPhoto
   if (!rp) bits.push('no reporter to look up')
   else if (rp.error) bits.push(`employee lookup failed: ${rp.error}`)
