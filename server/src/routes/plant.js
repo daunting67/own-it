@@ -11,6 +11,36 @@ const { checkPlantList } = require('../lib/plantRegisterSync')
 const db = require('../lib/supabase')
 
 const router = Router()
+
+// TEMPORARY, secret-gated, deliberately BEFORE router.use(requireAuth) below so
+// it works with no logged-in browser session: probes candidate FastField
+// endpoints for a team/user-listing API, for a one-off user-access audit. The
+// gate is a shared secret in AUDIT_SECRET, mirroring the ?secret= pattern
+// already used by fuelReceiptWebhook.js. DELETE once the audit is done.
+router.get('/_audit-users', async (req, res) => {
+  if (!process.env.AUDIT_SECRET || req.query.secret !== process.env.AUDIT_SECRET) return res.status(404).end()
+  const candidates = [
+    '/users', '/user', '/users/list',
+    '/account/users', '/accounts/users',
+    '/company/users', '/organization/users', '/organizations/users',
+    '/teamMembers', '/team/members', '/team/users',
+  ]
+  try {
+    // Sign in once before fanning out — 11 sequential calls (each re-authenticating)
+    // overruns the ~10s serverless budget, same reason /diagnostics runs its probes
+    // concurrently under a deadline.
+    await getSessionToken()
+    const results = await Promise.all(candidates.map(path =>
+      rawGet(path)
+        .then(data => ({ path, ok: true, preview: JSON.stringify(data).slice(0, 3000) }))
+        .catch(err => ({ path, ok: false, error: String(err.message).slice(0, 200) }))
+    ))
+    res.json({ results })
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 300) })
+  }
+})
+
 router.use(requireAuth)
 
 // Machine names come from two places (the FastField lookup list and the
@@ -475,32 +505,6 @@ router.get('/_forms-list', requireAdmin, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
-})
-
-// TEMPORARY, secret-gated (no JWT needed — this is being pulled from a tool
-// with no logged-in browser session): probes candidate FastField endpoints
-// for a team/user-listing API, for a one-off user-access audit. Gate is a
-// shared secret in AUDIT_SECRET (query param) rather than requireAdmin,
-// mirroring the ?secret= pattern already used by fuelReceiptWebhook.js.
-// DELETE this route once the audit is done.
-router.get('/_audit-users', async (req, res) => {
-  if (!process.env.AUDIT_SECRET || req.query.secret !== process.env.AUDIT_SECRET) return res.status(404).end()
-  const candidates = [
-    '/users', '/user', '/users/list',
-    '/account/users', '/accounts/users',
-    '/company/users', '/organization/users', '/organizations/users',
-    '/teamMembers', '/team/members', '/team/users',
-  ]
-  const results = []
-  for (const path of candidates) {
-    try {
-      const data = await rawGet(path)
-      results.push({ path, ok: true, preview: JSON.stringify(data).slice(0, 3000) })
-    } catch (err) {
-      results.push({ path, ok: false, error: String(err.message).slice(0, 200) })
-    }
-  }
-  res.json({ results })
 })
 
 module.exports = router
