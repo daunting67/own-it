@@ -23,7 +23,12 @@ Requires Pillow (pip install pillow).
 import os
 from PIL import Image, ImageOps
 
-PI_BLACK = (22, 22, 22)
+# White, not near-black — a sub-pixel mismatch between this canvas and the
+# template's <a:srcRect> crop can leave a sliver of it visible as a thin
+# border-like line (confirmed by direct pixel sampling on a real export, on
+# the default-photo frames this same contract is shared with). White makes
+# that same sliver invisible against the page instead of a fault line.
+CANVAS_BG = (255, 255, 255)
 
 SOURCE_DIR = "/Users/tonydaunt/Documents/Claude/Projects/Safety Alert Project/Headshots"
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "src", "assets", "headshots")
@@ -55,7 +60,7 @@ def build(filename):
     src = ImageOps.exif_transpose(Image.open(os.path.join(SOURCE_DIR, filename))).convert("RGB")
     fitted = cover_crop(src, vw, vh)
 
-    canvas = Image.new("RGB", (canvas_w, canvas_h), PI_BLACK)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), CANVAS_BG)
     canvas.paste(fitted, (round(vx0), round(vy0)))
 
     out_path = os.path.join(OUT_DIR, filename)

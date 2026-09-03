@@ -1,22 +1,24 @@
 """
 Fit Tony's own three "Default Photos" (~/Documents/Claude/Projects/Safety
 Alert Project/Default Photos/Default {1,2,3}.jp*g) into the Safety Alert
-template's three photo frames, replacing the generated camera-icon
-placeholders from make-safety-alert-placeholders.py.
+template's three photo frames.
 
-Same canvas/visible-window contract as that script (see its docstring for
-why): each output image MUST be the exact pixel size of the template photo
-it stands in for, because document.xml crops each frame with a fixed
+Each output image MUST be the exact pixel size of the template photo it
+stands in for, because document.xml crops each frame with a fixed
 <a:srcRect> percentage.
 
 Per Tony: "we can never cut off a photo. Whitespace is acceptable" — so the
 source photo is "contain"-fit (scaled down to fit ENTIRELY within the
 frame's VISIBLE window, never cropped) and centered on a white background
 that fills the rest of that window, then pasted at the window's offset
-inside a full-size canvas. Canvas area outside the visible window is never
-seen (cropped away by Word — that crop is baked into the template's own XML
-and this script cannot touch it) but is filled with black to match the
-template's own dark corners rather than left blank.
+inside a full-size canvas. The canvas area outside the visible window is
+supposed to be invisible — cropped away by Word (that crop is baked into the
+template's own XML and this script cannot touch it) — but a sub-pixel
+mismatch between this canvas and that crop can leave a sliver of it showing
+as a thin line. It's filled white (CANVAS_BG), not the "it'll never be seen
+anyway" near-black this used to be, precisely so that if it DOES leak
+through, it's invisible against the page rather than reading as a fault
+line — found by direct pixel sampling on a real export, not by eye.
 
 WHICH PHOTO GOES IN WHICH FRAME IS NOT FIXED (per Tony: pick by fit, not by
 matching numbers) — this brute-forces all 3! assignments of the 3 source
@@ -35,7 +37,13 @@ import os
 from itertools import permutations
 from PIL import Image, ImageOps
 
-PI_BLACK = (22, 22, 22)
+# White, not near-black — a sub-pixel mismatch between this canvas and the
+# template's <a:srcRect> crop leaves a sliver of it visible as a thin
+# border-like line (confirmed by direct pixel sampling on a real export).
+# White makes that same sliver invisible against the page instead of a fault
+# line, since PI_BLACK was only ever meant to be a "you'll never see this"
+# fallback, not a colour anyone was supposed to be able to spot.
+CANVAS_BG = (255, 255, 255)
 
 SOURCE_DIR = "/Users/tonydaunt/Documents/Claude/Projects/Safety Alert Project/Default Photos"
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "src", "assets")
@@ -92,7 +100,7 @@ def build(src_name, frame):
     src = ImageOps.exif_transpose(Image.open(os.path.join(SOURCE_DIR, src_name))).convert("RGB")
     fitted = contain_pad(src, vw, vh)
 
-    canvas = Image.new("RGB", (canvas_w, canvas_h), PI_BLACK)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), CANVAS_BG)
     canvas.paste(fitted, (round(vx0), round(vy0)))
 
     out_path = os.path.join(ASSETS_DIR, frame["out"])

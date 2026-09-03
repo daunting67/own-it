@@ -306,7 +306,13 @@ async function fitPhotoToFrame(sourceBuffer, label) {
     .resize(vw, vh, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
     .jpeg()
     .toBuffer()
-  return sharp({ create: { width: cw, height: ch, channels: 3, background: { r: 22, g: 22, b: 22 } } })
+  // White, not a dark "won't be seen anyway" colour — a sub-pixel mismatch
+  // between this canvas and the template's <a:srcRect> crop leaves a sliver
+  // of it visible as a thin border-like line (found and confirmed by pixel
+  // sampling: a real, if narrow, JPEG-compressed line, not a Word-drawn
+  // border). White makes that same sliver invisible against the page instead
+  // of reading as a fault line.
+  return sharp({ create: { width: cw, height: ch, channels: 3, background: { r: 255, g: 255, b: 255 } } })
     .composite([{ input: fitted, left: Math.round(vx0), top: Math.round(vy0) }])
     .jpeg({ quality: 90 })
     .toBuffer()
