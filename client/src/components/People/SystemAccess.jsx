@@ -133,6 +133,23 @@ export default function SystemAccess() {
         </div>
       </div>
 
+      {/* What each system actually returned. When almost everyone shows as both
+          "missing" and "unmatched" at once, the lists aren't joining rather than
+          the accounts being wrong — and these three numbers are what makes that
+          visible instead of something to be inferred from the totals. */}
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+        Lists read — QuickBooks Time: <strong>{c.qbtTotal ?? 0}</strong>
+        {' · '}Teammate: <strong>{c.teammate ?? 0}</strong>
+        {' · '}FastField: <strong>{c.fastfield ?? 0}</strong>
+        {audit.fastfieldEndpoint ? ` (from ${audit.fastfieldEndpoint})` : ' (no endpoint responded)'}
+        {(missing.length > 0 && missing.length === (audit.roster || []).filter(r => r.qbtActive).length && notInQbt.length > 0) && (
+          <div style={{ color: 'var(--warning)', marginTop: 4 }}>
+            ⚠️ Every current staff member looks missing while {notInQbt.length} accounts match nobody — that's a name-matching
+            problem between the lists, not {missing.length + notInQbt.length} genuine account issues. Don't action this list until it's resolved.
+          </div>
+        )}
+      </div>
+
       <div className="tabs">
         {[
           ['actions', `To action (${missing.length + stale.length + notInQbt.length})`],
@@ -237,7 +254,10 @@ export default function SystemAccess() {
                   <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
                     {r.qbtActive ? 'Active' : <span style={{ color: 'var(--danger, #c00)' }}>Left</span>}
                   </td>
-                  <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}><Presence value={r.inTeammate} /></td>
+                  <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+                    <Presence value={r.inTeammate} />
+                    {r.uncertainMatch && <span title={r.matchedBy} style={{ marginLeft: 4, fontSize: 10, color: 'var(--warning)' }}>~</span>}
+                  </td>
                   <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}><Presence value={r.inFastField} /></td>
                   <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>{r.teammatePosition || '—'}</td>
                 </tr>

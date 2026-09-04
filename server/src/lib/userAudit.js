@@ -35,18 +35,46 @@ function normaliseName(name) {
     .trim()
 }
 
+function nameTokens(normalised) {
+  return String(normalised || '').split(' ').filter(Boolean)
+}
+
 function surnameOf(normalised) {
-  const parts = String(normalised || '').split(' ').filter(Boolean)
+  const parts = nameTokens(normalised)
   return parts.length > 1 ? parts[parts.length - 1] : ''
+}
+
+// Email is the ONLY identifier these three systems genuinely share — names
+// drift between them in ways no rule catches reliably ("EJ Kesomi Fa'avae" in
+// QBT vs "(EJ) Kesomi Fa'avae" or "Kesomi Fa'avae" in Teammate; middle names
+// present in one system and not the other; accents; married names). So email is
+// matched first and treated as authoritative, with name matching kept only as a
+// fallback for records that carry no email.
+function emailKey(email) {
+  return String(email || '').trim().toLowerCase()
+}
+
+// Teammate rate-limits bursts — the same 429 teammateTraining.js hit when it
+// fired every employee call through Promise.all. Same fix, same shape.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = []
+  for (let i = 0; i < items.length; i += limit) {
+    const batch = items.slice(i, i + limit)
+    results.push(...await Promise.all(batch.map(fn)))
+    if (i + limit < items.length) await new Promise(r => setTimeout(r, 400))
+  }
+  return results
 }
 
 // ---------------------------------------------------------------- QuickBooks Time
 
-// No `active` filter, deliberately: filtering to active would make ex-staff
-// vanish entirely, and "this account is still active for someone who has left"
-// is exactly what the audit needs to surface. qbtGet already pages internally.
+// `active: 'both'` is REQUIRED, not optional: QBT's /users defaults to active-only,
+// so passing no filter at all still silently hides every deactivated account —
+// which made "Left the company" read 0 on the first live run despite ex-staff
+// existing, and disabled stale-account detection entirely. 'both' is the only
+// value that returns leavers alongside current staff.
 async function getQbtUsers() {
-  const body = await qbtGet('/users', {})
+  const body = await qbtGet('/users', { active: 'both' })
   return Object.values(body.users || {}).map(u => ({
     system: 'qbt',
     id: u.id,
@@ -71,7 +99,7 @@ async function getQbtUsers() {
 // call per employee — fine in a cached/background context, too slow for a
 // single serverless request. See getUpcomingLeave() in qbt.js for the same
 // trade-off handled the same way.
-async function getTeammateEmployees({ withDetail = false } = {}) {
+async function getTeammateEmployees({ withDetail = true } = {}) {
   const rows = []
   let page = 1
   for (;;) {
@@ -98,10 +126,13 @@ async function getTeammateEmployees({ withDetail = false } = {}) {
 
   if (!withDetail) return users
 
-  // Fill in email/isActive from the per-employee detail endpoint. Failures are
-  // tolerated per-person rather than sinking the whole audit — a single 429 or
-  // a deleted record shouldn't cost us the other 37 rows.
-  await Promise.all(users.map(async u => {
+  // Fill in email/isActive from the per-employee detail endpoint. This is now
+  // on by DEFAULT rather than opt-in, because email is the primary matching key
+  // and the list endpoint doesn't carry it — without this step Teammate can only
+  // ever be matched by name. Failures are tolerated per-person rather than
+  // sinking the whole audit: one 429 or one deleted record shouldn't cost us the
+  // other 49 rows.
+  await mapWithConcurrency(users, 5, async u => {
     if (!u.id) return
     try {
       const d = await tmGet(`/employee/${u.id}`)
@@ -112,7 +143,7 @@ async function getTeammateEmployees({ withDetail = false } = {}) {
     } catch (err) {
       u.detailError = String(err.message).slice(0, 120)
     }
-  }))
+  })
 
   return users
 }
@@ -175,8 +206,12 @@ async function getFastFieldUsers() {
       const users = list.map(r => {
         const first = pick(r, ['firstName', 'first_name', 'givenName'])
         const last = pick(r, ['lastName', 'last_name', 'surname', 'familyName'])
-        const name = pick(r, ['name', 'fullName', 'displayName', 'userName', 'username'])
+        // Prefer a real name, then a constructed first+last, and only fall back
+        // to the username — which in FastField is often the email address, and
+        // makes a poor display name even though it matches perfectly on email.
+        const name = pick(r, ['name', 'fullName', 'displayName'])
           || [first, last].filter(Boolean).join(' ')
+          || pick(r, ['userName', 'username'])
         return {
           system: 'fastfield',
           id: pick(r, ['id', 'userId', 'uuid']) || null,
@@ -218,6 +253,49 @@ function indexByName(users) {
     map.get(key).push(u)
   }
   return map
+}
+
+// Look a person up in one system's list. Order matters and is deliberate:
+//
+//   1. email      — authoritative. Same address = same person, full stop.
+//   2. exact name — for records with no email on either side.
+//   3. surname + a shared given name — the ONLY fuzzy step, and it exists
+//      because of real cases in this data: "EJ Kesomi Fa'avae" vs "Kesomi
+//      Fa'avae", or a middle name recorded in one system and not the other.
+//      It requires the surname to match AND at least one given name to match,
+//      so "Jose Alibar" and "Jose Traje" can never collapse into each other.
+//
+// Every hit reports HOW it matched, so a fuzzy match is visible in the output
+// rather than silently indistinguishable from a certain one.
+function buildMatcher(users) {
+  const byEmail = new Map()
+  const byName = new Map()
+  for (const u of users) {
+    const e = emailKey(u.email)
+    if (e && !byEmail.has(e)) byEmail.set(e, u)
+    const n = normaliseName(u.name)
+    if (n && !byName.has(n)) byName.set(n, u)
+  }
+
+  return function find(person) {
+    const e = emailKey(person.email)
+    if (e && byEmail.has(e)) return { match: byEmail.get(e), by: 'email' }
+
+    const n = normaliseName(person.name)
+    if (n && byName.has(n)) return { match: byName.get(n), by: 'name' }
+
+    const t = nameTokens(n)
+    if (t.length > 1) {
+      const surname = t[t.length - 1]
+      const given = new Set(t.slice(0, -1))
+      for (const u of users) {
+        const ut = nameTokens(normaliseName(u.name))
+        if (ut.length < 2 || ut[ut.length - 1] !== surname) continue
+        if (ut.slice(0, -1).some(x => given.has(x))) return { match: u, by: 'partial-name' }
+      }
+    }
+    return null
+  }
 }
 
 function duplicatesIn(index, system) {
@@ -268,17 +346,24 @@ async function buildUserAudit({ withTeammateDetail = false } = {}) {
   // The main table: one row per QBT person, showing where they're set up.
   // Anchored on ACTIVE QBT users — an inactive QBT account is an ex-employee, so
   // "missing from Teammate" is the correct state for them, not a gap to fix.
+  const findInTeammate = buildMatcher(teammateUsers)
+  const findInFastField = buildMatcher(fastfieldUsers)
+
   const roster = qbtUsers.map(u => {
-    const key = normaliseName(u.name)
-    const inTeammate = tmIndex.has(key)
-    const inFastField = ffIndex.has(key)
+    const tmHit = findInTeammate(u)
+    const ffHit = findInFastField(u)
+    const inTeammate = !!tmHit
+    const inFastField = !!ffHit
     return {
       name: u.name,
       email: u.email,
       qbtActive: u.active,
       inTeammate: teammateReadable ? inTeammate : null,
       inFastField: fastfieldReadable ? inFastField : null,
-      teammatePosition: inTeammate ? (tmIndex.get(key)[0].position || '') : '',
+      // How each match was made, so an uncertain (fuzzy) match is visible.
+      matchedBy: [tmHit && `Teammate: ${tmHit.by}`, ffHit && `FastField: ${ffHit.by}`].filter(Boolean).join(' · '),
+      uncertainMatch: tmHit?.by === 'partial-name' || ffHit?.by === 'partial-name',
+      teammatePosition: tmHit ? (tmHit.match.position || '') : '',
       // Only a live employee can be "missing" from somewhere; for a deactivated
       // QBT account, absence elsewhere is the desired end state. And only a
       // system we actually read can contribute a verdict either way.
@@ -300,19 +385,23 @@ async function buildUserAudit({ withTeammateDetail = false } = {}) {
 
   // Accounts in the other systems that match nobody in QBT at all — the primary
   // "should this be removed?" list.
-  function unmatched(users, otherIndexKey) {
+  // The same matcher, run the other way round, so the two directions can never
+  // disagree — an account that matched a QBT person above must not also appear
+  // here as matching nobody.
+  const findInQbt = buildMatcher(qbtUsers)
+
+  function unmatched(users, systemLabel) {
     return users
-      .filter(u => !qbtIndex.has(normaliseName(u.name)))
+      .filter(u => !findInQbt(u))
       .map(u => {
         // Offer a near-miss (same surname) so an obvious spelling difference
         // reads as "check this" rather than "delete this". Never auto-matched.
-        const key = normaliseName(u.name)
-        const sur = surnameOf(key)
+        const sur = surnameOf(normaliseName(u.name))
         const candidates = sur
           ? qbtUsers.filter(q => surnameOf(normaliseName(q.name)) === sur).map(q => q.name)
           : []
         return {
-          system: otherIndexKey,
+          system: systemLabel,
           name: u.name,
           email: u.email || '',
           active: u.active,
