@@ -127,10 +127,6 @@ export default function SystemAccess() {
             {stale.length + notInQbt.length}
           </div>
         </div>
-        <div className="metric-card">
-          <div className="metric-label">Left the company</div>
-          <div className="metric-value">{c.qbtInactive ?? '—'}</div>
-        </div>
       </div>
 
       {/* What each system actually returned. When almost everyone shows as both
