@@ -56,6 +56,10 @@ export const api = {
   getQbtLeave: () => request('/api/qbt/leave'),
   getQbtLeaveDocument: () => request('/api/qbt/leave/document'),
 
+  // Cross-system user audit (QBT / Teammate / FastField)
+  getUserAudit: (opts = {}) => request(`/api/user-audit${opts.refresh ? '?refresh=1' : ''}`),
+  getUserAuditDocument: () => request('/api/user-audit/document'),
+
   // Health & Safety — recent incidents
   getRecentIncidents: () => request('/api/incidents/recent'),
 

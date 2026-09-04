@@ -1,24 +1,9 @@
 const { Router } = require('express')
 const { requireAuth } = require('../middleware/auth')
-const { getCachedUpcomingLeave, qbtGet } = require('../lib/qbt')
+const { getCachedUpcomingLeave } = require('../lib/qbt')
 const { buildLeaveDocx, leaveFilename } = require('../lib/buildLeaveDocx')
 
 const router = Router()
-
-// TEMPORARY, secret-gated, deliberately BEFORE router.use(requireAuth) below so
-// it works with no logged-in browser session: every QBT user record — no active
-// filter, so deactivated/never-used accounts are included too — for a one-off
-// user-access audit. DELETE once done.
-router.get('/_audit-users', async (req, res) => {
-  if (!process.env.AUDIT_SECRET || req.query.secret !== process.env.AUDIT_SECRET) return res.status(404).end()
-  try {
-    const body = await qbtGet('/users', {})
-    res.json({ users: Object.values(body.users || {}) })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
 router.use(requireAuth)
 
 // Visible to all Payroll staff — same access gate as the rest of the Payroll module.

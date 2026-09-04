@@ -23,6 +23,7 @@ const cronRouter = require('./routes/cron')
 const prestartRouter = require('./routes/prestart')
 const tendersRouter = require('./routes/tenders')
 const contractReviewRouter = require('./routes/contractReview')
+const userAuditRouter = require('./routes/userAudit')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -66,6 +67,7 @@ app.use('/api/cron', cronRouter)
 app.use('/api/prestart', prestartRouter)
 app.use('/api/tenders', tendersRouter)
 app.use('/api/contract-review', contractReviewRouter)
+app.use('/api/user-audit', userAuditRouter)
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-09-03-safety-alert-white-canvas-48' }))
 

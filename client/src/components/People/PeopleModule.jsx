@@ -6,6 +6,7 @@ import StaffCard from './StaffCard'
 import StaffModal from './StaffModal'
 import AddStaffModal from './AddStaffModal'
 import SiteManager from './SiteManager'
+import SystemAccess from './SystemAccess'
 import ProcessesModule from '../Processes/ProcessesModule'
 
 const HIRE_FILTERS = ['All', ...HIRE_TYPES]
@@ -368,7 +369,17 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {/* Tabs */}
       <div className="tabs">
-        {[['tracker', 'Onboarding tracker'], ['all', 'All staff'], ['details', 'Staff Details List'], ['sites', 'Sites'], ['reviews', 'Performance review']].map(([id, label]) => (
+        {[
+          ['tracker', 'Onboarding tracker'],
+          ['all', 'All staff'],
+          ['details', 'Staff Details List'],
+          ['sites', 'Sites'],
+          ['reviews', 'Performance review'],
+          // Reads three systems' staff lists side by side, including who has
+          // left — same admin gate as the /api/user-audit route behind it, so a
+          // non-admin never sees a tab that would only 403.
+          ...(user?.admin ? [['access', 'System access']] : []),
+        ].map(([id, label]) => (
           <button key={id} className={`tab-btn${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
             {label}
           </button>
@@ -517,6 +528,10 @@ export default function PeopleModule({ onSaveStateChange }) {
 
       {tab === 'reviews' && (
         <ProcessesModule only="performance-review" />
+      )}
+
+      {tab === 'access' && user?.admin && (
+        <SystemAccess />
       )}
 
       {selected && (
