@@ -58,7 +58,11 @@ function Chip({ label, onRemove }) {
 
 // Pick one or more competencies and see who holds EVERY one selected — not just any
 // one of them — so you can staff a job that needs several tickets at once.
-function CompetencyMatcher() {
+// `dataVersion` changes whenever the matrix is re-pulled from Teammate, so the
+// picker re-reads it — otherwise it keeps showing whatever was stored when the page
+// first opened, which after a first-ever pull means an empty list next to a
+// perfectly full dashboard.
+function CompetencyMatcher({ dataVersion = 0 }) {
   const [options, setOptions] = useState([])
   const [loadingOptions, setLoadingOptions] = useState(true)
   const [selected, setSelected] = useState([])
@@ -70,11 +74,12 @@ function CompetencyMatcher() {
   const dropdownRef = useRef(null)
 
   useEffect(() => {
+    setLoadingOptions(true)
     api.getTrainingCompetencies()
       .then(res => setOptions(res.competencies || []))
       .catch(err => setError(err.message || 'Could not load the training list from Teammate'))
       .finally(() => setLoadingOptions(false))
-  }, [])
+  }, [dataVersion])
 
   useEffect(() => {
     if (!open) return
@@ -93,7 +98,7 @@ function CompetencyMatcher() {
       .then(res => setMatches(res.matches))
       .catch(err => setError(err.message || 'Could not search Teammate'))
       .finally(() => setLoading(false))
-  }, [selected])
+  }, [selected, dataVersion])
 
   function toggle(name) {
     setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
@@ -106,7 +111,6 @@ function CompetencyMatcher() {
 
   return (
     <div className="card" style={{ padding: '18px 20px', marginBottom: 24 }}>
-      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>Who's completed…</div>
       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14 }}>
         Pick one or more certifications, qualifications, or licences — results must hold EVERY one
         selected, not just any of them.
@@ -132,7 +136,7 @@ function CompetencyMatcher() {
                 ? `${selected.length} selected`
                 : options.length
                   ? `Select training — ${options.length} items in the matrix`
-                  : 'No training loaded yet — use “Pull from Teammate” below'}
+                  : 'No training loaded yet — use “Pull from Teammate” above'}
           </span>
           <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
         </button>
@@ -254,7 +258,51 @@ function CompetencyMatcher() {
   )
 }
 
+// Expired / expiring-soon renewals — a different job from the "who's completed…"
+// lookup, so it lives on its own tab. Both read the same stored matrix, which is
+// why the pull control and the as-at line sit above the tabs rather than in here.
+function ExpiringTab({ expired, expiringSoon, loading, error }) {
+  const metrics = [
+    { kicker: 'Expired', num: expired ? expired.length : '…', meta: 'need action now', urgent: !!expired?.length },
+    { kicker: 'Expiring within 6 weeks', num: expiringSoon ? expiringSoon.length : '…', meta: 'plan renewals', urgent: false },
+  ]
+
+  return (
+    <>
+      <div className="metrics" style={{ marginBottom: 20 }}>
+        {metrics.map(m => (
+          <div key={m.kicker} className={`card${m.urgent ? ' urgent' : ''}`} style={{ padding: '16px 18px' }}>
+            <div className="card-kicker">{m.kicker}</div>
+            <div className="card-num">{loading ? '…' : m.num}</div>
+            <div className="card-meta">{m.meta}</div>
+          </div>
+        ))}
+      </div>
+
+      {!error && expired && (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger, #a33)', marginBottom: 10 }}>Expired ({expired.length})</div>
+          <Table rows={expired} emptyText="Nothing expired." />
+        </>
+      )}
+
+      {!error && expiringSoon && (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning, #b8860b)', marginBottom: 10 }}>Expiring within 6 weeks ({expiringSoon.length})</div>
+          <Table rows={expiringSoon} emptyText="Nothing expiring in the next 6 weeks." />
+        </>
+      )}
+    </>
+  )
+}
+
+const TABS = [
+  { id: 'who', label: "Who's Completed" },
+  { id: 'expiring', label: 'Expiring & Expired' },
+]
+
 export default function TrainingModule() {
+  const [tab, setTab] = useState('who')
   const [expired, setExpired] = useState(null)
   const [expiringSoon, setExpiringSoon] = useState(null)
   const [generatedAt, setGeneratedAt] = useState(null)
@@ -262,6 +310,9 @@ export default function TrainingModule() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [pulling, setPulling] = useState(null)
+  // Bumped after a pull so the picker re-reads the matrix instead of showing what
+  // was stored when the page opened.
+  const [dataVersion, setDataVersion] = useState(0)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -294,6 +345,7 @@ export default function TrainingModule() {
         if (!c || c.complete || !c.walk?.employeesRead) break
       }
       await load()
+      setDataVersion(v => v + 1)
     } catch (err) {
       setError(err.message || 'Could not pull from Teammate')
     } finally {
@@ -301,30 +353,13 @@ export default function TrainingModule() {
     }
   }, [load])
 
-  const metrics = [
-    { kicker: 'Expired', num: expired ? expired.length : '…', meta: 'need action now', urgent: !!expired?.length },
-    { kicker: 'Expiring within 6 weeks', num: expiringSoon ? expiringSoon.length : '…', meta: 'plan renewals', urgent: false },
-  ]
-
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <div className="page-title">Training</div>
-          <div className="page-subtitle">Expiring competencies, licences, and certificates from Teammate</div>
+          <div className="page-subtitle">Competencies, qualifications, licences and certificates from Teammate</div>
         </div>
-      </div>
-
-      <CompetencyMatcher />
-
-      <div className="metrics" style={{ marginBottom: 20 }}>
-        {metrics.map(m => (
-          <div key={m.kicker} className={`card${m.urgent ? ' urgent' : ''}`} style={{ padding: '16px 18px' }}>
-            <div className="card-kicker">{m.kicker}</div>
-            <div className="card-num">{loading ? '…' : m.num}</div>
-            <div className="card-meta">{m.meta}</div>
-          </div>
-        ))}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
@@ -345,8 +380,8 @@ export default function TrainingModule() {
           ) : (
             <>
               ⚠️ Partial data — {coverage.employeesRead} of {coverage.employeesTotal || '?'} staff read from
-              Teammate so far. Anyone not yet read will look as though they hold nothing, so use
-              “Pull from Teammate” to finish before trusting a result.
+              Teammate so far. Anyone not yet read will look as though they hold nothing, so pull
+              again to finish before trusting a result.
             </>
           )}
         </div>
@@ -365,18 +400,21 @@ export default function TrainingModule() {
         </div>
       )}
 
-      {!error && expired && (
-        <>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger, #a33)', marginBottom: 10 }}>Expired ({expired.length})</div>
-          <Table rows={expired} emptyText="Nothing expired." />
-        </>
-      )}
+      <div className="tabs">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            className={`tab-btn${tab === t.id ? ' active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {!error && expiringSoon && (
-        <>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning, #b8860b)', marginBottom: 10 }}>Expiring within 6 weeks ({expiringSoon.length})</div>
-          <Table rows={expiringSoon} emptyText="Nothing expiring in the next 6 weeks." />
-        </>
+      {tab === 'who' && <CompetencyMatcher dataVersion={dataVersion} />}
+      {tab === 'expiring' && (
+        <ExpiringTab expired={expired} expiringSoon={expiringSoon} loading={loading} error={error} />
       )}
     </div>
   )
