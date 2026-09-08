@@ -69,7 +69,7 @@ app.use('/api/tenders', tendersRouter)
 app.use('/api/contract-review', contractReviewRouter)
 app.use('/api/user-audit', userAuditRouter)
 
-app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-09-03-safety-alert-white-canvas-48' }))
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2026-09-08-training-competency-matcher-49' }))
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => console.log(`Own It server running on port ${PORT}`))
