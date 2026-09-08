@@ -65,6 +65,8 @@ export const api = {
 
   // Training — expiring competencies/certificates
   getExpiringTraining: () => request('/api/training/expiring'),
+  getTrainingCompetencies: () => request('/api/training/competencies'),
+  getTrainingMatches: (names) => request(`/api/training/match?names=${encodeURIComponent(names.join(','))}`),
 
   // Plant & Equipment — today's Mobile Plant Checks (FastField)
   getPlantChecksToday: () => request('/api/plant/today'),
