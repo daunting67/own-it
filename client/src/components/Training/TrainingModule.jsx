@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 
 function fmtDate(d) {
@@ -63,16 +63,27 @@ function CompetencyMatcher() {
   const [loadingOptions, setLoadingOptions] = useState(true)
   const [selected, setSelected] = useState([])
   const [filterText, setFilterText] = useState('')
+  const [open, setOpen] = useState(false)
   const [matches, setMatches] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const dropdownRef = useRef(null)
 
   useEffect(() => {
     api.getTrainingCompetencies()
       .then(res => setOptions(res.competencies || []))
-      .catch(err => setError(err.message || 'Could not load competency list from Teammate'))
+      .catch(err => setError(err.message || 'Could not load the training list from Teammate'))
       .finally(() => setLoadingOptions(false))
   }, [])
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e) {
+      if (!dropdownRef.current?.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
 
   useEffect(() => {
     if (!selected.length) { setMatches(null); return }
@@ -88,7 +99,10 @@ function CompetencyMatcher() {
     setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
   }
 
-  const filtered = options.filter(o => o.toLowerCase().includes(filterText.toLowerCase()))
+  const filtered = options.filter(o => o.name.toLowerCase().includes(filterText.toLowerCase()))
+  const groups = ['Competency', 'Qualification', 'Training']
+    .map(kind => [kind, filtered.filter(o => o.kind === kind)])
+    .filter(([, items]) => items.length)
 
   return (
     <div className="card" style={{ padding: '18px 20px', marginBottom: 24 }}>
@@ -98,42 +112,92 @@ function CompetencyMatcher() {
         selected, not just any of them.
       </div>
 
+      {/* The chips sit BELOW the dropdown deliberately: above it, each new selection
+          grew this row and pushed the open list down mid-click, so the next tick
+          landed on the wrong row. */}
+      <div ref={dropdownRef} style={{ position: 'relative' }}>
+        <button
+          type="button"
+          className="form-input"
+          onClick={() => setOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: 'pointer', textAlign: 'left', gap: 10,
+          }}
+        >
+          <span style={{ color: selected.length ? 'var(--pi-ink)' : 'var(--text-muted)' }}>
+            {loadingOptions
+              ? 'Loading the training matrix from Teammate…'
+              : selected.length
+                ? `${selected.length} selected`
+                : `Select training — ${options.length} items in the matrix`}
+          </span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
+        </button>
+
+        {open && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, marginTop: 4,
+            border: '1px solid rgba(0,0,0,.18)', borderRadius: 4, background: '#fff',
+            boxShadow: '0 6px 20px rgba(0,0,0,.14)', maxHeight: 320, display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ padding: 8, borderBottom: '1px solid rgba(0,0,0,.08)' }}>
+              <input
+                className="form-input"
+                autoFocus
+                placeholder="Search training, qualifications, licences…"
+                value={filterText}
+                onChange={e => setFilterText(e.target.value)}
+              />
+            </div>
+
+            <div style={{ overflowY: 'auto' }}>
+              {loadingOptions ? (
+                <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
+              ) : groups.length ? (
+                groups.map(([kind, items]) => (
+                  <div key={kind}>
+                    <div style={{
+                      padding: '6px 12px', fontSize: 10.5, fontWeight: 800, letterSpacing: '.1em',
+                      textTransform: 'uppercase', color: 'var(--text-muted)', background: 'rgba(0,0,0,.04)',
+                    }}>
+                      {kind} ({items.length})
+                    </div>
+                    {items.map(o => (
+                      <label key={o.name} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13,
+                        cursor: 'pointer', borderBottom: '1px solid rgba(0,0,0,.06)',
+                      }}>
+                        <input type="checkbox" checked={selected.includes(o.name)} onChange={() => toggle(o.name)} />
+                        {o.name}
+                      </label>
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>No matching training.</div>
+              )}
+            </div>
+
+            <div style={{ padding: 8, borderTop: '1px solid rgba(0,0,0,.08)', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected([])} disabled={!selected.length}>
+                Clear all
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(false)}>Done</button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {selected.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '12px 0' }}>
           {selected.map(name => (
             <Chip key={name} label={name} onRemove={() => toggle(name)} />
           ))}
         </div>
       )}
 
-      <input
-        className="form-input"
-        placeholder="Search certifications, qualifications, licences…"
-        value={filterText}
-        onChange={e => setFilterText(e.target.value)}
-        style={{ marginBottom: 10 }}
-      />
-
-      <div style={{
-        border: '1px solid rgba(0,0,0,.18)', borderRadius: 4, maxHeight: 200, overflowY: 'auto',
-        marginBottom: 16, background: '#fff',
-      }}>
-        {loadingOptions ? (
-          <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>
-        ) : filtered.length ? (
-          filtered.map(name => (
-            <label key={name} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 13,
-              cursor: 'pointer', borderBottom: '1px solid rgba(0,0,0,.06)',
-            }}>
-              <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)} />
-              {name}
-            </label>
-          ))
-        ) : (
-          <div style={{ padding: 12, fontSize: 13, color: 'var(--text-muted)' }}>No matching competencies.</div>
-        )}
-      </div>
+      <div style={{ height: selected.length ? 4 : 16 }} />
 
       {error && (
         <div style={{ padding: 12, marginBottom: 16, background: '#fdeaea', color: '#a33', borderRadius: 6, fontSize: 13 }}>

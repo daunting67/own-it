@@ -36,22 +36,56 @@ async function getAllActiveEmployees() {
 // completedDate, expiryDate, duration, competencyLevel, groupName, isActive }.
 // `expiryDate` is the real due date — `duration` is often descriptive text
 // ("Perpetual") rather than a date, so it's not usable for expiry filtering.
+//
+// The training matrix spans all THREE of Teammate's training arrays, not just
+// `skill` — a qualification or a one-off course is training someone has completed
+// just as much as a licence is. Only `skill`'s row shape is confirmed against real
+// data; `qualification` and `adHocTraining` field names have never been seen live
+// from this Mac (no Teammate key here), so their name/cert/date fields are read
+// tolerantly rather than guessed at exactly.
+const NAME_FIELDS = ['skill', 'qualification', 'training', 'course', 'name', 'title', 'trainingName', 'qualificationName', 'courseName']
+const CERT_FIELDS = ['certNo', 'certificateNo', 'certificateNumber', 'regNo', 'registrationNo']
+const COMPLETED_FIELDS = ['completedDate', 'dateCompleted', 'completionDate', 'issueDate', 'achievedDate']
+const EXPIRY_FIELDS = ['expiryDate', 'expireDate', 'dueDate', 'renewalDate']
+
+function pickField(row, fields) {
+  for (const f of fields) {
+    const v = row[f]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return null
+}
+
 // No `.filter(dueDate)` here — a "who's completed X" lookup needs perpetual/no-expiry
-// competencies too, not just ones with a due date. Callers that only care about expiry
+// training too, not just items with a due date. Callers that only care about expiry
 // (getExpiringTraining) filter that in themselves.
-async function getCompetenciesFor(employee) {
+async function getTrainingFor(employee) {
   const body = await tmGet(`/employeeCompetencyList?employeeId=${employee.id}`)
-  const list = body?.response_data?.skill || []
-  return list
-    .filter(c => c.isActive !== 'no')
-    .map(c => ({
-      employee: employee.name,
-      competency: c.skill,
-      certNo: c.certNo,
-      completedDate: c.completedDate,
-      dueDate: c.expiryDate,
-      status: c.isActive === 'yes' ? 'Active' : c.isActive,
-    }))
+  const rd = body?.response_data || {}
+  const groups = [
+    ['Competency', rd.skill],
+    ['Qualification', rd.qualification],
+    ['Training', rd.adHocTraining],
+  ]
+
+  const rows = []
+  for (const [kind, list] of groups) {
+    if (!Array.isArray(list)) continue
+    for (const c of list) {
+      if (c.isActive === 'no') continue
+      const name = pickField(c, NAME_FIELDS)
+      if (!name) continue
+      rows.push({
+        employee: employee.name,
+        competency: name,
+        kind,
+        certNo: pickField(c, CERT_FIELDS),
+        completedDate: pickField(c, COMPLETED_FIELDS),
+        dueDate: pickField(c, EXPIRY_FIELDS),
+      })
+    }
+  }
+  return rows
 }
 
 // Teammate's API rate-limits bursts (hit a 429 firing all 38 employeeCompetencyList
@@ -73,20 +107,35 @@ async function mapWithConcurrency(items, limit, fn) {
 // TTL avoids re-hammering Teammate on quick refreshes/repeat page loads. Shared by
 // every feature below (expiry list, "who's completed X" lookup) so selecting a new
 // competency in the UI doesn't re-walk all 38 employees again.
+//
+// The IN-FLIGHT walk is cached too, not just the finished result: the Training page
+// loads the expiry list and the picker at the same moment, and caching only the
+// result meant both missed the cache and ran the full 1 + 38-call walk in parallel —
+// double the Teammate load, which is exactly what trips its rate limit and leaves
+// the page sitting on "Loading…" while tmRequest backs off.
 let recordsCache = null
+let inFlight = null
 const CACHE_TTL_MS = 5 * 60 * 1000
 
-// One row per (employee, competency) they currently hold, across ALL competencies —
-// not just ones with a due date.
+// One row per (employee, training item) they currently hold, across the whole
+// matrix — not just items with a due date.
 async function getAllCompetencyRecords() {
   if (recordsCache && Date.now() - recordsCache.at < CACHE_TTL_MS) return recordsCache.data
+  if (inFlight) return inFlight
 
-  const employees = await getAllActiveEmployees()
-  const perEmployee = await mapWithConcurrency(employees, 5, e => getCompetenciesFor(e).catch(() => []))
-  const data = perEmployee.flat()
+  inFlight = (async () => {
+    const employees = await getAllActiveEmployees()
+    const perEmployee = await mapWithConcurrency(employees, 5, e => getTrainingFor(e).catch(() => []))
+    const data = perEmployee.flat()
+    recordsCache = { at: Date.now(), data }
+    return data
+  })()
 
-  recordsCache = { at: Date.now(), data }
-  return data
+  try {
+    return await inFlight
+  } finally {
+    inFlight = null
+  }
 }
 
 // Returns { expired, expiringSoon } — one row per competency (an employee can
@@ -115,11 +164,17 @@ async function getExpiringTraining(weeksAhead = 6) {
   return { expired, expiringSoon }
 }
 
-// Distinct competency/certificate/licence names across the whole company, for the
-// "who's completed…" picker.
+// Every distinct item in the training matrix — competencies/licences, qualifications
+// and one-off training alike — for the "who's completed…" picker. `kind` lets the
+// picker group them so it's visible that all three categories are covered.
 async function getCompetencyNames() {
   const all = await getAllCompetencyRecords()
-  return [...new Set(all.map(c => c.competency).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const byName = new Map()
+  for (const r of all) {
+    if (!r.competency || byName.has(r.competency)) continue
+    byName.set(r.competency, { name: r.competency, kind: r.kind })
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 // Employees who hold EVERY competency named in `names` (not just any one of them) —
