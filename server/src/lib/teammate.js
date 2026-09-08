@@ -18,19 +18,38 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)) }
 // still fails immediately as before.
 const MAX_ATTEMPTS = 4
 
-async function tmRequest(method, path, body) {
+// fetch() has no default timeout, so a Teammate call that never answers used to hang
+// the whole request until the platform killed it — no error, no log, just a page
+// stuck on "Loading…" (which is what the Training page did). Every call now has a
+// deadline; callers that fan out over many calls pass a shorter one.
+const DEFAULT_TIMEOUT_MS = 20000
+
+async function tmRequest(method, path, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   let res, text
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: {
-        'x-api-key': apiKey(),
-        'authtoken': apiKey(),
-        'Content-Type': 'application/json'
-      },
-      body: body ? JSON.stringify(body) : undefined
-    })
-    text = await res.text()
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: {
+          'x-api-key': apiKey(),
+          'authtoken': apiKey(),
+          'Content-Type': 'application/json'
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      text = await res.text()
+    } catch (err) {
+      // A timeout/abort is worth one more go (same as a 429); anything else isn't.
+      const timedOut = err.name === 'TimeoutError' || err.name === 'AbortError'
+      if (!timedOut || attempt === MAX_ATTEMPTS) {
+        throw timedOut
+          ? new Error(`Teammate ${method} ${path} timed out after ${timeoutMs}ms`)
+          : err
+      }
+      await sleep(1000 * (2 ** (attempt - 1)))
+      continue
+    }
     if (res.status !== 429 || attempt === MAX_ATTEMPTS) break
     const retryAfter = Number(res.headers.get('retry-after'))
     const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000 * (2 ** (attempt - 1))
@@ -42,8 +61,8 @@ async function tmRequest(method, path, body) {
   return data
 }
 
-const tmGet = (path) => tmRequest('GET', path)
-const tmPost = (path, body) => tmRequest('POST', path, body)
-const tmPut = (path, body) => tmRequest('PUT', path, body)
+const tmGet = (path, opts) => tmRequest('GET', path, undefined, opts)
+const tmPost = (path, body, opts) => tmRequest('POST', path, body, opts)
+const tmPut = (path, body, opts) => tmRequest('PUT', path, body, opts)
 
 module.exports = { tmGet, tmPost, tmPut }

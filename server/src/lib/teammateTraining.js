@@ -1,5 +1,9 @@
 const { tmGet } = require('./teammate')
 
+// This walk makes one call per employee, so a single slow call must not eat the
+// whole request budget — fail that employee fast and let the walk carry on.
+const TM_OPTS = { timeoutMs: 6000 }
+
 // Health & Safety / Training — expired and soon-to-expire competencies (licences,
 // certificates, tickets) from Teammate's Competency records (Human Resources →
 // Employees → [person] → Competency; company-wide view is the "COMPETENCY REPORT"
@@ -15,7 +19,7 @@ async function getAllActiveEmployees() {
   const results = []
   let page = 1
   for (;;) {
-    const body = await tmGet(`/employee?page=${page}&length=100&order=employeeId&direction=asc`)
+    const body = await tmGet(`/employee?page=${page}&length=100&order=employeeId&direction=asc`, TM_OPTS)
     const list = body?.response_data?.data || []
     if (!list.length) break
     for (const e of list) {
@@ -60,7 +64,7 @@ function pickField(row, fields) {
 // training too, not just items with a due date. Callers that only care about expiry
 // (getExpiringTraining) filter that in themselves.
 async function getTrainingFor(employee) {
-  const body = await tmGet(`/employeeCompetencyList?employeeId=${employee.id}`)
+  const body = await tmGet(`/employeeCompetencyList?employeeId=${employee.id}`, TM_OPTS)
   const rd = body?.response_data || {}
   const groups = [
     ['Competency', rd.skill],
@@ -77,6 +81,8 @@ async function getTrainingFor(employee) {
       if (!name) continue
       rows.push({
         employee: employee.name,
+        // Kept so a resumed walk can tell which stored rows to replace.
+        employeeId: String(employee.id),
         competency: name,
         kind,
         certNo: pickField(c, CERT_FIELDS),
@@ -91,57 +97,141 @@ async function getTrainingFor(employee) {
 // Teammate's API rate-limits bursts (hit a 429 firing all 38 employeeCompetencyList
 // calls via Promise.all) — run a handful concurrently instead of all at once, with a
 // short gap between batches.
-async function mapWithConcurrency(items, limit, fn) {
+async function mapWithConcurrency(items, limit, fn, { deadlineAt } = {}) {
   const results = []
   for (let i = 0; i < items.length; i += limit) {
+    // Stop cleanly at the deadline rather than being killed mid-flight by the
+    // serverless timeout — whatever is done by then still gets saved.
+    if (deadlineAt && Date.now() > deadlineAt) break
     const batch = items.slice(i, i + limit)
     const batchResults = await Promise.all(batch.map(fn))
     results.push(...batchResults)
-    if (i + limit < items.length) await new Promise(r => setTimeout(r, 400))
+    if (i + limit < items.length) await new Promise(r => setTimeout(r, 250))
   }
   return results
 }
 
-// Simple in-memory cache — this endpoint means 1 + N Teammate calls per load, and
-// module state survives across requests on a warm serverless instance, so a short
-// TTL avoids re-hammering Teammate on quick refreshes/repeat page loads. Shared by
-// every feature below (expiry list, "who's completed X" lookup) so selecting a new
-// competency in the UI doesn't re-walk all 38 employees again.
-//
-// The IN-FLIGHT walk is cached too, not just the finished result: the Training page
-// loads the expiry list and the picker at the same moment, and caching only the
-// result meant both missed the cache and ran the full 1 + 38-call walk in parallel —
-// double the Teammate load, which is exactly what trips its rate limit and leaves
-// the page sitting on "Loading…" while tmRequest backs off.
-let recordsCache = null
+// A page load must never wait on the Teammate walk. It reads the stored snapshot
+// (see trainingSnapshotStore.js); only an explicit refresh, or a completely empty
+// store, goes near Teammate. The in-memory cache is just a per-instance shortcut in
+// front of Storage — on Vercel it is cold far more often than it is warm, which is
+// why it can't be the only cache.
+const { loadSnapshot, saveSnapshot } = require('./trainingSnapshotStore')
+
+let memCache = null
 let inFlight = null
 const CACHE_TTL_MS = 5 * 60 * 1000
+// Kept well inside the serverless limit so the response is ours, not a 504 — the
+// walk resumes from where it stopped on the next refresh.
+const WALK_BUDGET_MS = 8000
 
-// One row per (employee, training item) they currently hold, across the whole
-// matrix — not just items with a due date.
-async function getAllCompetencyRecords() {
-  if (recordsCache && Date.now() - recordsCache.at < CACHE_TTL_MS) return recordsCache.data
-  if (inFlight) return inFlight
+// Walks Teammate for the employees not already covered by `previous`, merges them
+// into it, and saves. Returns the merged snapshot plus what this pass managed to do.
+async function refreshSnapshot(previous) {
+  const startedAt = Date.now()
+  const deadlineAt = startedAt + WALK_BUDGET_MS
 
-  inFlight = (async () => {
-    const employees = await getAllActiveEmployees()
-    const perEmployee = await mapWithConcurrency(employees, 5, e => getTrainingFor(e).catch(() => []))
-    const data = perEmployee.flat()
-    recordsCache = { at: Date.now(), data }
-    return data
-  })()
+  const employees = await getAllActiveEmployees()
+  const covered = new Set((previous?.coveredIds || []).map(String))
+  // Continue with whoever is missing; once everyone is covered a refresh means
+  // "re-read the lot", so start over.
+  const outstanding = employees.filter(e => !covered.has(String(e.id)))
+  const todo = outstanding.length ? outstanding : employees
+  const resuming = outstanding.length > 0 && covered.size > 0
 
-  try {
-    return await inFlight
-  } finally {
-    inFlight = null
+  const done = []
+  const perEmployee = await mapWithConcurrency(
+    todo,
+    5,
+    async (e) => {
+      const rows = await getTrainingFor(e).catch(() => [])
+      done.push(String(e.id))
+      return rows
+    },
+    { deadlineAt },
+  )
+
+  const doneSet = new Set(done)
+  const keptRecords = resuming
+    ? (previous?.records || []).filter(r => !doneSet.has(String(r.employeeId)))
+    : []
+  const keptIds = resuming
+    ? (previous?.coveredIds || []).map(String).filter(id => !doneSet.has(id))
+    : []
+
+  const snapshot = {
+    records: [...keptRecords, ...perEmployee.flat()],
+    coveredIds: [...new Set([...keptIds, ...done])],
+    total: employees.length,
+    generatedAt: new Date().toISOString(),
+  }
+
+  await saveSnapshot(snapshot).catch(err => {
+    console.error('Training snapshot save failed:', err.message)
+  })
+
+  return {
+    ...snapshot,
+    walk: {
+      employeesRead: done.length,
+      employeesTotal: employees.length,
+      elapsedMs: Date.now() - startedAt,
+      complete: snapshot.coveredIds.length >= employees.length,
+    },
   }
 }
 
-// Returns { expired, expiringSoon } — one row per competency (an employee can
-// appear more than once if they hold more than one expiring ticket).
-async function getExpiringTraining(weeksAhead = 6) {
-  const all = await getAllCompetencyRecords()
+// { records, coveredIds, total, generatedAt, walk? } — one record per (employee,
+// training item) held, across the whole matrix, not just items with a due date.
+async function getTrainingMatrix({ refresh = false } = {}) {
+  if (!refresh && memCache && Date.now() - memCache.at < CACHE_TTL_MS) return memCache.data
+  if (!refresh && inFlight) return inFlight
+
+  const load = (async () => {
+    const stored = await loadSnapshot().catch(() => null)
+    if (!refresh) {
+      // A page load NEVER walks Teammate, even with nothing stored — that walk is
+      // what outlived the serverless timeout and hung the page. Report an empty
+      // matrix instead; the UI then asks for an explicit "Pull from Teammate".
+      return stored || { records: [], coveredIds: [], total: 0, generatedAt: null }
+    }
+    return refreshSnapshot(stored)
+  })()
+
+  if (!refresh) inFlight = load
+  try {
+    const data = await load
+    memCache = { at: Date.now(), data }
+    return data
+  } finally {
+    if (!refresh) inFlight = null
+  }
+}
+
+async function getAllCompetencyRecords(opts) {
+  return (await getTrainingMatrix(opts)).records
+}
+
+// How much of the matrix a snapshot actually covers — the page has to be able to
+// say "18 of 38 staff read so far" rather than quietly presenting partial data as
+// the whole picture, since a missing person looks identical to an unqualified one.
+function coverageOf(snapshot) {
+  const total = snapshot.total || 0
+  const read = (snapshot.coveredIds || []).length
+  return {
+    generatedAt: snapshot.generatedAt || null,
+    employeesRead: read,
+    employeesTotal: total,
+    complete: total > 0 && read >= total,
+    walk: snapshot.walk || null,
+  }
+}
+
+// Returns { expired, expiringSoon, coverage } — one row per competency (an employee
+// can appear more than once if they hold more than one expiring ticket).
+async function getExpiringTraining({ refresh = false, weeksAhead = 6 } = {}) {
+  const snapshot = await getTrainingMatrix({ refresh })
+  const all = snapshot.records
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -161,20 +251,23 @@ async function getExpiringTraining(weeksAhead = 6) {
   expired.sort((a, b) => a.dueDate.localeCompare(b.dueDate))
   expiringSoon.sort((a, b) => a.dueDate.localeCompare(b.dueDate))
 
-  return { expired, expiringSoon }
+  return { expired, expiringSoon, coverage: coverageOf(snapshot) }
 }
 
 // Every distinct item in the training matrix — competencies/licences, qualifications
 // and one-off training alike — for the "who's completed…" picker. `kind` lets the
 // picker group them so it's visible that all three categories are covered.
-async function getCompetencyNames() {
-  const all = await getAllCompetencyRecords()
+async function getCompetencyNames({ refresh = false } = {}) {
+  const snapshot = await getTrainingMatrix({ refresh })
   const byName = new Map()
-  for (const r of all) {
+  for (const r of snapshot.records) {
     if (!r.competency || byName.has(r.competency)) continue
     byName.set(r.competency, { name: r.competency, kind: r.kind })
   }
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+  return {
+    competencies: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    coverage: coverageOf(snapshot),
+  }
 }
 
 // Employees who hold EVERY competency named in `names` (not just any one of them) —
@@ -182,11 +275,12 @@ async function getCompetencyNames() {
 // job that needs both. Each match's `details` lists the specific record held per
 // requested competency (cert no, completed/due dates, and whether it's lapsed) so a
 // lapsed-but-technically-on-file ticket is visible rather than silently hidden.
-async function getEmployeesWithAllCompetencies(names) {
+async function getEmployeesWithAllCompetencies(names, { refresh = false } = {}) {
   const wanted = [...new Set((names || []).map(n => (n || '').trim()).filter(Boolean))]
-  if (!wanted.length) return []
+  if (!wanted.length) return { matches: [], coverage: null }
 
-  const all = await getAllCompetencyRecords()
+  const snapshot = await getTrainingMatrix({ refresh })
+  const all = snapshot.records
   const wantedSet = new Set(wanted)
 
   const byEmployee = new Map()
@@ -222,7 +316,13 @@ async function getEmployeesWithAllCompetencies(names) {
   }
 
   matches.sort((a, b) => a.employee.localeCompare(b.employee))
-  return matches
+  return { matches, coverage: coverageOf(snapshot) }
 }
 
-module.exports = { getExpiringTraining, getCompetencyNames, getEmployeesWithAllCompetencies }
+module.exports = {
+  getExpiringTraining,
+  getCompetencyNames,
+  getEmployeesWithAllCompetencies,
+  getTrainingMatrix,
+  coverageOf,
+}

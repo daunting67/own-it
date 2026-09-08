@@ -127,10 +127,12 @@ function CompetencyMatcher() {
         >
           <span style={{ color: selected.length ? 'var(--pi-ink)' : 'var(--text-muted)' }}>
             {loadingOptions
-              ? 'Loading the training matrix from Teammate…'
+              ? 'Loading the training matrix…'
               : selected.length
                 ? `${selected.length} selected`
-                : `Select training — ${options.length} items in the matrix`}
+                : options.length
+                  ? `Select training — ${options.length} items in the matrix`
+                  : 'No training loaded yet — use “Pull from Teammate” below'}
           </span>
           <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
         </button>
@@ -256,19 +258,48 @@ export default function TrainingModule() {
   const [expired, setExpired] = useState(null)
   const [expiringSoon, setExpiringSoon] = useState(null)
   const [generatedAt, setGeneratedAt] = useState(null)
+  const [coverage, setCoverage] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [pulling, setPulling] = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
     setError(null)
-    api.getExpiringTraining()
-      .then(res => { setExpired(res.expired); setExpiringSoon(res.expiringSoon); setGeneratedAt(res.generatedAt) })
+    return api.getExpiringTraining()
+      .then(res => {
+        setExpired(res.expired)
+        setExpiringSoon(res.expiringSoon)
+        setGeneratedAt(res.generatedAt)
+        setCoverage(res.coverage || null)
+        return res
+      })
       .catch(err => setError(err.message || 'Could not load training data from Teammate'))
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Pull from Teammate. Each call reads as many staff as it can inside the server's
+  // time budget, so keep going until the matrix is fully covered rather than leaving
+  // it half-read — a missing person would otherwise look simply unqualified.
+  const pullFromTeammate = useCallback(async () => {
+    setError(null)
+    try {
+      for (let pass = 1; pass <= 12; pass++) {
+        const res = await api.refreshTraining()
+        const c = res.coverage
+        setCoverage(c)
+        setPulling(c)
+        if (!c || c.complete || !c.walk?.employeesRead) break
+      }
+      await load()
+    } catch (err) {
+      setError(err.message || 'Could not pull from Teammate')
+    } finally {
+      setPulling(null)
+    }
+  }, [load])
 
   const metrics = [
     { kicker: 'Expired', num: expired ? expired.length : '…', meta: 'need action now', urgent: !!expired?.length },
@@ -296,14 +327,36 @@ export default function TrainingModule() {
         ))}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12 }}>
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading || !!pulling}>
+          {loading ? 'Loading…' : 'Reload'}
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={pullFromTeammate} disabled={loading || !!pulling}>
+          {pulling
+            ? `Pulling from Teammate… ${pulling.employeesRead}/${pulling.employeesTotal || '?'} staff`
+            : 'Pull from Teammate'}
         </button>
       </div>
 
+      {coverage && !coverage.complete && (
+        <div style={{ padding: 12, marginBottom: 16, background: 'var(--warning-bg, #fdf1e6)', color: 'var(--warning, #b8860b)', borderRadius: 6, fontSize: 13 }}>
+          {coverage.employeesRead === 0 ? (
+            <>⚠️ Nothing pulled from Teammate yet — use “Pull from Teammate” to build the training matrix.</>
+          ) : (
+            <>
+              ⚠️ Partial data — {coverage.employeesRead} of {coverage.employeesTotal || '?'} staff read from
+              Teammate so far. Anyone not yet read will look as though they hold nothing, so use
+              “Pull from Teammate” to finish before trusting a result.
+            </>
+          )}
+        </div>
+      )}
+
       {generatedAt && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>Live from Teammate · updated {new Date(generatedAt).toLocaleString('en-NZ')}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Teammate data as at {new Date(generatedAt).toLocaleString('en-NZ')}
+          {coverage?.complete ? ` · all ${coverage.employeesTotal} staff` : ''}
+        </div>
       )}
 
       {error && (

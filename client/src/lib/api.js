@@ -67,6 +67,7 @@ export const api = {
   getExpiringTraining: () => request('/api/training/expiring'),
   getTrainingCompetencies: () => request('/api/training/competencies'),
   getTrainingMatches: (names) => request(`/api/training/match?names=${encodeURIComponent(names.join(','))}`),
+  refreshTraining: () => request('/api/training/refresh', { method: 'POST' }),
 
   // Plant & Equipment — today's Mobile Plant Checks (FastField)
   getPlantChecksToday: () => request('/api/plant/today'),
