@@ -12,13 +12,14 @@ const { nzDayRange } = require('./nzDay')
 // form's field names blind.
 const FUEL_RECEIPTS_FORM_ID = 679065
 
-// Tony's delivery action has BOTH "JSON" and "PDF" checked as Format — confirmed from FastField's
-// own config screen, which states outright: "Formats other than JSON and XML are posted as
-// multipart/form-data." So both the structured fields and the rendered PDF arrive together in
-// ONE request, as separate multipart parts — not two independent requests (an earlier,
-// incorrect assumption). storeMultipartSubmission below handles that combined shape; the plain
-// storeSubmission(body) above remains correct for a hypothetical JSON-only delivery (that format
-// alone is NOT multipart, per the same FastField note).
+// Tony's delivery action has BOTH "JSON" and "PDF" checked as Format. FastField's config screen
+// says "Formats other than JSON and XML are posted as multipart/form-data", which was once read
+// as meaning both arrive together in ONE multipart request. THE FIRST REAL SUBMISSION DISPROVED
+// THAT (10 Sep 2026): FastField sends TWO INDEPENDENT REQUESTS per submission —
+//   1. application/json  — every field, no file          -> storeSubmission()
+//   2. multipart/form-data — the rendered PDF, NO fields  -> storeMultipartSubmission()
+// observed 9 seconds apart. Both paths below are therefore live and each stores HALF a
+// submission; joining the two is the outstanding problem (see storeMultipartSubmission).
 
 // Temporary holding area for the PDF part before it's matched to a specific reconciliation run —
 // separate from cost-docs (which holds only per-run FINAL output), mirroring the
@@ -45,13 +46,17 @@ async function uploadPdfPart(buffer, contentType) {
   return path
 }
 
-// One multipart request = one submission. `fields` is whatever multer parsed from the non-file
-// parts (a plain object — could be one field holding a JSON blob, or the form's own fields
-// spread across many parts; either way it's already JSON-storable as-is, same as a plain JSON
-// body would be). `files` is multer's array of uploaded parts; the field NAME FastField gives
-// the PDF part is unknown until a real submission is seen, so this is matched by mimetype/
-// filename rather than an assumed field name — deliberately permissive, same reasoning as the
-// rest of this file.
+// The submission id FastField appends to the delivered filename, after the display-mask part
+// (e.g. "10_09_2026 Angelliz Ebarle7080591007108174_26d9172e-....pdf"). Recovering it is what
+// lets the PDF request be joined to the JSON request for the same submission.
+const SUBMISSION_ID_IN_NAME = /_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=\.[A-Za-z0-9]+$)/i
+
+// A multipart request is HALF a submission — the rendered PDF. Its JSON twin arrives as a
+// SEPARATE request seconds earlier (see storeMultipartSubmission). `fields` is whatever multer
+// parsed from the non-file parts, and on the real deliveries observed so far that is EMPTY.
+// `files` is multer's array of uploaded parts; the field NAME FastField gives the PDF part is
+// still unknown, so this is matched by mimetype/filename rather than an assumed field name —
+// deliberately permissive, same reasoning as the rest of this file.
 function findPdfFile(files) {
   return (files || []).find(f => f.mimetype === 'application/pdf')
     || (files || []).find(f => /\.pdf$/i.test(f.originalname || ''))
@@ -62,13 +67,26 @@ async function storeMultipartSubmission({ fields, files }) {
   const pdfFile = findPdfFile(files)
   const pdfPath = pdfFile ? await uploadPdfPart(pdfFile.buffer, pdfFile.mimetype) : null
 
+  // PROVEN BY THE FIRST REAL SUBMISSION (10 Sep 2026, Angelliz Ebarle): FastField sends the
+  // JSON and the PDF as TWO SEPARATE REQUESTS 9s apart, not one combined multipart request as
+  // this file previously assumed. The PDF request carries NO fields whatsoever — so every
+  // identifying column below lands null and NOTHING in the stored row ties the PDF back to
+  // its submission. The uploaded part's own filename is the only link FastField gives us
+  // (it is the display mask + "_" + submissionId, matching the manually-downloaded files),
+  // and uploadPdfPart discards it in favour of a random UUID path. Keep it.
+  const pdfOriginalName = pdfFile?.originalname || null
+  const submissionIdFromName = pdfOriginalName && pdfOriginalName.match(SUBMISSION_ID_IN_NAME)
+
   const row = {
     formId: fields?.formId ?? FUEL_RECEIPTS_FORM_ID,
-    submissionId: fields?.submissionId || fields?.submitId || null,
+    submissionId: fields?.submissionId || fields?.submitId || (submissionIdFromName && submissionIdFromName[1]) || null,
     submitterName: fields?.userName || null,
     contentType: 'multipart/form-data',
     pdfPath,
-    rawPayload: fields && Object.keys(fields).length ? fields : null,
+    rawPayload: {
+      ...(fields && Object.keys(fields).length ? fields : {}),
+      _pdfOriginalName: pdfOriginalName,
+    },
   }
   const { data, error } = await db.from('FuelReceiptSubmission').insert(row).select().single()
   if (!error) return data

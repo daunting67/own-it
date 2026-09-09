@@ -16,13 +16,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 // 404s, for any form), so unlike Plant Checks this form has no pull fallback: the webhook is
 // the only way any Fuel Receipts data reaches this app at all.
 //
-// Tony's delivery action has BOTH "JSON" and "PDF" checked as Format — confirmed from a
-// screenshot of the actual FastField config screen, which states outright: "Formats other than
-// JSON and XML are posted as multipart/form-data." So this is ONE request per submission
-// carrying both the structured fields AND the rendered PDF together as multipart parts — not
-// two independent requests as first assumed. multer's own middleware checks content-type and
-// only engages for multipart/form-data, leaving a plain application/json body (if Tony ever
-// unchecks PDF later) to the app's existing global express.json() untouched.
+// Tony's delivery action has BOTH "JSON" and "PDF" checked as Format. CONFIRMED BY REAL TRAFFIC
+// (10 Sep 2026, the first submission ever received): that means TWO INDEPENDENT REQUESTS per
+// submission, ~9s apart — an application/json one carrying every field and no file, then a
+// multipart/form-data one carrying the rendered PDF and NO fields at all. An earlier reading of
+// FastField's config note had these as a single combined multipart request; they are not.
+// Both land here: multer only engages for multipart/form-data, leaving the JSON delivery to the
+// app's global express.json(). Each request stores HALF a submission, so a row with a pdfPath
+// and a row with the fields are two views of one receipt and still need joining.
 router.post('/', upload.any(), async (req, res) => {
   if (req.query.secret !== process.env.FASTFIELD_WEBHOOK_SECRET || !process.env.FASTFIELD_WEBHOOK_SECRET) {
     return res.status(401).json({ error: 'Invalid or missing secret' })
