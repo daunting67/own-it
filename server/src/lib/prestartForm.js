@@ -172,8 +172,8 @@ const SECTIONS = [
       { ref: '4.3', say: 'Who is spotting, and what signage or exclusion zones are we using?' },
     ],
     fields: [
-      { id: 'vmpDiagram', label: 'Site diagram / vehicle movement sketch', type: 'photo',
-        help: 'Photo of a hand-drawn plan, or an existing site diagram — entry/exit points, routes, parking, exclusion zones.' },
+      { id: 'vmpDiagram', label: 'Site diagram / vehicle movement sketch', type: 'sitediagram',
+        help: 'Build a traffic management plan on the aerial photo of where you are standing — cones, barriers, fencing, routes and signage. Or photograph a hand-drawn plan or a client-supplied TMP.' },
       { id: 'vmpEntryExit', label: 'Site entry & exit points', type: 'textarea', rows: 2 },
       { id: 'vmpRoutes', label: 'Vehicle routes on site · one-way, reversing & shared areas', type: 'textarea', rows: 3 },
       { id: 'vmpPedestrianSeparation', label: 'Pedestrian / plant separation', type: 'textarea', rows: 2 },

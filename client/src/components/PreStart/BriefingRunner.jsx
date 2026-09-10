@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { api } from '../../lib/api'
 import SignOnPad from './SignOnPad'
+import TmpBuilder from './tmp/TmpBuilder'
 
 const DRAFT_KEY = 'ownit_prestart_draft'
 
@@ -64,6 +65,8 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
   // into the 23-minute budget before section 1 has even started.
   const [startedAt, setStartedAt] = useState(() => existing?.startedAt || new Date().toISOString())
   const [padOpen, setPadOpen] = useState(false)
+  // Which site-diagram field the TMP builder is open for, if any.
+  const [tmpField, setTmpField] = useState(null)
   const [padInitial, setPadInitial] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -80,7 +83,15 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
   // Keep a local draft so a dropped connection or an accidental reload on the
   // iPad doesn't lose a briefing that's half-run.
   useEffect(() => {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ id: briefingId, day, startedAt, values, signOns, step }))
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ id: briefingId, day, startedAt, values, signOns, step }))
+    } catch {
+      // A saved traffic management plan is ~300 KB and every sign-on carries a
+      // photo, so a long briefing can now run past the ~5 MB localStorage
+      // quota. The resume draft is a convenience — the briefing itself is saved
+      // to the server at each section boundary — so losing it must never take
+      // the running briefing down with it.
+    }
   }, [briefingId, day, startedAt, values, signOns, step])
 
   useEffect(() => { topRef.current?.scrollIntoView({ block: 'start' }) }, [step])
@@ -204,14 +215,25 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
             onChange={rows => setValue(field.id, rows)}
           />
         )
+      case 'sitediagram':
       case 'photo': {
         const MAX_PHOTO_BYTES = 3 * 1024 * 1024
+        // The site diagram can be built from the aerial photo of where the crew
+        // is standing, or — when there is no fix, no signal, or the client has
+        // already supplied a TMP — photographed like any other field.
+        const isDiagram = field.type === 'sitediagram'
+        const plan = values[`${field.id}Plan`] || null
         return (
           <div className="ps-photo">
             {value && <img className="ps-photo-preview" src={value} alt={field.label} />}
             <div className="ps-photo-actions">
+              {isDiagram && (
+                <button className="btn btn-primary ps-btn-lg" onClick={() => setTmpField(field.id)}>
+                  {plan ? 'Edit the plan' : 'Build the plan'}
+                </button>
+              )}
               <label className="btn btn-secondary ps-btn-lg">
-                {value ? 'Replace photo' : 'Add a photo'}
+                {value ? (isDiagram ? 'Use a photo instead' : 'Replace photo') : 'Add a photo'}
                 <input
                   type="file"
                   accept="image/*"
@@ -232,7 +254,10 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
                 />
               </label>
               {value && (
-                <button className="btn btn-secondary ps-btn-lg" onClick={() => setValue(field.id, null)}>
+                <button
+                  className="btn btn-secondary ps-btn-lg"
+                  onClick={() => { setValue(field.id, null); if (isDiagram) setValue(`${field.id}Plan`, null) }}
+                >
                   Remove
                 </button>
               )}
@@ -542,6 +567,22 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
           </button>
         )}
       </div>
+
+      {tmpField && (
+        <TmpBuilder
+          value={values[`${tmpField}Plan`] || null}
+          meta={{
+            jobSite: values.jobSite || '',
+            foreman: values.foreman || '',
+            date: new Date().toLocaleDateString('en-NZ', { day: '2-digit', month: 'short', year: 'numeric' }),
+          }}
+          onSave={(dataUrl, plan) => {
+            setValue(tmpField, dataUrl)
+            setValue(`${tmpField}Plan`, plan)
+          }}
+          onClose={() => setTmpField(null)}
+        />
+      )}
 
       <SignOnPad
         open={padOpen}
