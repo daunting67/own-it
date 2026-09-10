@@ -84,6 +84,11 @@ export const api = {
   getPrestartBriefing: (day, id) => request(`/api/prestart/briefings/${day}/${id}`),
   savePrestartBriefing: (briefing) => request('/api/prestart/briefings', { method: 'POST', body: JSON.stringify(briefing) }),
   addPrestartSignOn: (day, id, signOn) => request(`/api/prestart/briefings/${day}/${id}/signon`, { method: 'POST', body: JSON.stringify(signOn) }),
+  // Traffic management plans — a reusable library, not tied to one briefing
+  getPrestartPlans: () => request('/api/prestart/plans'),
+  getPrestartPlan: (id) => request(`/api/prestart/plans/${id}`),
+  savePrestartPlan: (plan) => request('/api/prestart/plans', { method: 'POST', body: JSON.stringify(plan) }),
+  deletePrestartPlan: (id) => request(`/api/prestart/plans/${id}`, { method: 'DELETE' }),
 
   // Operations — today's site DJR submissions (FastField)
   getDjrToday: () => request('/api/operations/djr/today'),

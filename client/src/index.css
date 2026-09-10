@@ -778,3 +778,189 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
 /* Shown only on paper — identifies the document once the topbar is gone. */
 .print-only { display: none; }
 @media print { .print-only { display: block !important; } }
+
+/* ---------------------------------------------------- TMP / plan builder */
+/* Full-bleed rather than a centred modal: laying out a site on an aerial photo
+   needs every pixel of an iPad, in either orientation. */
+.tmp-overlay {
+  position: fixed; inset: 0; z-index: 200; background: #101317;
+  display: flex; align-items: center; justify-content: center;
+}
+.tmp-shell { display: flex; flex-direction: column; width: 100%; height: 100%; }
+
+.tmp-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; background: #161616; border-bottom: 1px solid rgba(255,255,255,.12);
+  flex: 0 0 auto;
+}
+.tmp-bar-title {
+  color: #fff; font-size: 14px; font-weight: 900;
+  text-transform: uppercase; letter-spacing: .04em;
+  display: flex; align-items: center; gap: 10px;
+}
+.tmp-accuracy {
+  font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none;
+  color: rgba(255,255,255,.6); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 999px; padding: 2px 8px;
+}
+.tmp-bar-actions { display: flex; gap: 8px; }
+
+.tmp-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+.tmp-palette {
+  flex: 0 0 186px; overflow-y: auto; background: #181c21;
+  border-right: 1px solid rgba(255,255,255,.1); padding: 10px;
+  display: flex; flex-direction: column; gap: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.tmp-group-label {
+  font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: rgba(255,255,255,.42); margin-bottom: 6px;
+}
+.tmp-group-tools { display: flex; flex-direction: column; gap: 6px; }
+.tmp-tool {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  min-height: 52px; padding: 6px 10px; text-align: left;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 5px; color: rgba(255,255,255,.88);
+  font-size: 12px; font-weight: 600; line-height: 1.25; cursor: pointer;
+}
+.tmp-tool.on { background: var(--pi-orange); border-color: var(--pi-orange); color: #fff; }
+.tmp-tool-wide { justify-content: center; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.tmp-tool-icon { width: 34px; height: 34px; flex: 0 0 34px; }
+
+.tmp-stage {
+  flex: 1 1 auto; position: relative; min-width: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 10px; background: #0c0e11;
+}
+/* Shrink-wraps the plan so the hint, zoom pill and errors pin to the image
+   itself rather than floating in the empty space a tall screen leaves. */
+.tmp-canvas-wrap {
+  position: relative; display: flex; max-width: 100%; max-height: 100%;
+}
+.tmp-canvas {
+  display: block;
+  max-width: 100%; max-height: 100%; width: auto; height: auto;
+  border-radius: 4px; box-shadow: 0 8px 30px rgba(0,0,0,.55);
+  /* The canvas handles its own drag gestures — let the browser keep its hands
+     off, or every attempt to drag a cone scrolls the page instead. */
+  touch-action: none;
+}
+.tmp-busy, .tmp-hint, .tmp-zoom {
+  position: absolute; background: rgba(12,14,17,.86); color: #fff;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 5px;
+  font-size: 12px; font-weight: 600; padding: 8px 12px;
+}
+.tmp-busy { top: 50%; left: 50%; transform: translate(-50%,-50%); }
+.tmp-hint { left: 18px; top: 18px; max-width: 46%; }
+.tmp-zoom {
+  right: 18px; bottom: calc(12.6% + 14px);
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+}
+.tmp-zoom-btn {
+  width: 44px; height: 44px; border-radius: 4px; font-size: 22px; font-weight: 700;
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+  color: #fff; cursor: pointer;
+}
+.tmp-zoom-btn:disabled { opacity: .35; cursor: default; }
+
+.tmp-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; background: #161616; border-top: 1px solid rgba(255,255,255,.12);
+}
+.tmp-foot-label {
+  color: #fff; font-size: 12px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.tmp-foot-empty { color: rgba(255,255,255,.5); }
+.tmp-foot-note { margin-left: auto; font-size: 11px; color: rgba(255,255,255,.45); }
+.tmp-foot-input {
+  min-height: 52px; min-width: 190px; padding: 10px 12px; font-size: 15px;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,.2);
+  background: rgba(255,255,255,.08); color: #fff;
+}
+.tmp-foot-slider {
+  display: flex; align-items: center; gap: 8px;
+  color: rgba(255,255,255,.7); font-size: 11px; font-weight: 700; text-transform: uppercase;
+}
+.tmp-foot-slider input { width: 132px; height: 44px; }
+
+.tmp-locate {
+  max-width: 520px; margin: auto; padding: 28px; background: #fff; border-radius: 6px;
+  border-top: 4px solid var(--pi-orange); display: flex; flex-direction: column; gap: 14px;
+}
+.tmp-locate h2 { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+.tmp-locate p { font-size: 14px; line-height: 1.5; color: rgba(0,0,0,.7); }
+.tmp-locate-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.tmp-error {
+  background: rgba(208,2,27,.1); border: 1px solid rgba(208,2,27,.4); color: #a3021a;
+  border-radius: 4px; padding: 10px 12px; font-size: 13px; font-weight: 600;
+}
+.tmp-error-float { position: absolute; left: 18px; bottom: calc(12.6% + 14px); max-width: 46%; }
+
+/* On an iPad in portrait the palette becomes a scrolling strip along the
+   bottom, so the aerial keeps the full width of the screen. */
+@media (max-width: 900px) {
+  .tmp-body { flex-direction: column-reverse; }
+  .tmp-palette {
+    flex: 0 0 auto; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-top: 1px solid rgba(255,255,255,.1);
+  }
+  .tmp-group { flex: 0 0 auto; }
+  .tmp-group-tools { flex-direction: row; }
+  .tmp-tool { width: auto; min-width: 128px; }
+  .tmp-hint, .tmp-error-float { max-width: 70%; }
+}
+
+/* ------------------------------------------- TMP library (Traffic Plans tab) */
+.tmp-details {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 20px; margin: 0 20px 16px;
+  border: 1px solid rgba(0,0,0,.12); border-radius: 5px; background: rgba(0,0,0,.02);
+}
+.tmp-details label { display: flex; flex-direction: column; gap: 6px; flex: 1;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.tmp-details-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.tmp-details-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.tmp-optional { font-weight: 600; text-transform: none; letter-spacing: 0; color: rgba(0,0,0,.4); }
+
+.tmp-library {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px; padding: 16px 20px;
+}
+.tmp-plan-card {
+  position: relative; border: 1px solid rgba(0,0,0,.12); border-radius: 5px;
+  overflow: hidden; background: #fff; display: flex; flex-direction: column;
+}
+.tmp-plan-open {
+  display: flex; flex-direction: column; text-align: left; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.tmp-plan-open:disabled { opacity: .5; cursor: default; }
+.tmp-plan-open img { width: 100%; display: block; background: #20242a; }
+.tmp-plan-nothumb {
+  padding: 38px 0; text-align: center; background: #eef1f4;
+  color: rgba(0,0,0,.4); font-size: 12px; font-weight: 600;
+}
+.tmp-plan-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+.tmp-plan-site { font-size: 14px; font-weight: 800; }
+.tmp-plan-meta { font-size: 11px; color: rgba(0,0,0,.55); font-weight: 600; }
+.tmp-plan-notes { font-size: 12px; color: rgba(0,0,0,.7); line-height: 1.35; }
+.tmp-plan-delete {
+  position: absolute; top: 8px; right: 8px; min-height: 34px; padding: 6px 12px;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,.35);
+  background: rgba(20,24,29,.72); color: #fff;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  cursor: pointer;
+}
+.tmp-plan-delete:hover { background: rgba(208,2,27,.9); border-color: rgba(208,2,27,.9); }
+.tmp-search { display: flex; gap: 10px; }
+.tmp-search input { flex: 1; }
+.tmp-results { display: flex; flex-direction: column; gap: 6px; max-height: 210px; overflow-y: auto; }
+.tmp-result {
+  text-align: left; padding: 12px 14px; min-height: 52px; cursor: pointer;
+  border: 1px solid rgba(0,0,0,.14); border-radius: 4px; background: #fff;
+  font-size: 13px; line-height: 1.35;
+}
+.tmp-result:hover { background: rgba(0,0,0,.04); border-color: var(--pi-orange); }

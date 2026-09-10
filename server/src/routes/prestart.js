@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth')
 const db = require('../lib/supabase')
 const form = require('../lib/prestartForm')
 const { saveBriefing, getBriefing, listBriefingsForDay, addSignOn } = require('../lib/prestartStore')
+const { savePlan, listPlans, getPlan, deletePlan } = require('../lib/prestartPlanStore')
 const { nzDateString } = require('../lib/nzDay')
 
 const router = Router()
@@ -136,6 +137,52 @@ router.post('/briefings/:day/:id/signon', async (req, res) => {
     res.json(record)
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not add the sign-on' })
+  }
+})
+
+/* ------------------------------------------------- traffic management plans */
+// The plan library is separate from briefings on purpose: a plan is drawn ahead
+// of time, reused every morning on that site, and retired when the layout
+// changes. Attaching one to a briefing copies the image into that briefing.
+
+router.get('/plans', async (_req, res) => {
+  try {
+    res.json(await listPlans())
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load the plans' })
+  }
+})
+
+router.get('/plans/:id', async (req, res) => {
+  try {
+    const plan = await getPlan(req.params.id)
+    if (!plan) return res.status(404).json({ error: 'Plan not found' })
+    res.json(plan)
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load the plan' })
+  }
+})
+
+router.post('/plans', async (req, res) => {
+  try {
+    const plan = req.body || {}
+    if (!String(plan.jobSite || '').trim()) {
+      return res.status(400).json({ error: 'Job site is required to save a plan' })
+    }
+    const problem = checkPhoto(plan.image)
+    if (problem) return res.status(400).json({ error: problem })
+    res.json(await savePlan(plan, req.user))
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save the plan' })
+  }
+})
+
+router.delete('/plans/:id', async (req, res) => {
+  try {
+    await deletePlan(req.params.id)
+    res.status(204).end()
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not delete the plan' })
   }
 })
 
