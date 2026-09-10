@@ -131,20 +131,21 @@ const CACHE_TTL_MS = 5 * 60 * 1000
 // Kept well inside the serverless limit so the response is ours, not a 504 — the
 // walk resumes from where it stopped on the next refresh.
 const WALK_BUDGET_MS = 8000
-
-// Walks Teammate for the employees not already covered by `previous`, merges them
-// into it, and saves. Returns the merged snapshot plus what this pass managed to do.
+// The employee list is one call, but tmRequest retries a timeout three times with
+// backoff, so a sluggish Teammate can spend ~30s just getting the roster. Measuring
+// the walk budget from the start of the request then left ZERO time for the walk
+// itself: it read nobody and saved an empty snapshot over a good one (11 Sep 2026).
+// The walk now always gets its budget from the moment the roster lands.
 async function refreshSnapshot(previous) {
   const startedAt = Date.now()
-  const deadlineAt = startedAt + WALK_BUDGET_MS
 
   const employees = await getAllActiveEmployees()
+  const deadlineAt = Date.now() + WALK_BUDGET_MS
   const covered = new Set((previous?.coveredIds || []).map(String))
   // Continue with whoever is missing; once everyone is covered a refresh means
   // "re-read the lot", so start over.
   const outstanding = employees.filter(e => !covered.has(String(e.id)))
   const todo = outstanding.length ? outstanding : employees
-  const resuming = outstanding.length > 0 && covered.size > 0
 
   const done = []
   const perEmployee = await mapWithConcurrency(
@@ -158,13 +159,17 @@ async function refreshSnapshot(previous) {
     { deadlineAt },
   )
 
+  // Only ever replace the people this pass actually re-read. Anyone it didn't reach —
+  // because the budget ran out, or Teammate was slow — keeps the rows already held,
+  // so a bad pass degrades to "nothing changed" instead of erasing the matrix. Staff
+  // no longer on the roster are dropped, which is the only intended deletion here.
   const doneSet = new Set(done)
-  const keptRecords = resuming
-    ? (previous?.records || []).filter(r => !doneSet.has(String(r.employeeId)))
-    : []
-  const keptIds = resuming
-    ? (previous?.coveredIds || []).map(String).filter(id => !doneSet.has(id))
-    : []
+  const rosterIds = new Set(employees.map(e => String(e.id)))
+  const keptRecords = (previous?.records || [])
+    .filter(r => !doneSet.has(String(r.employeeId)) && rosterIds.has(String(r.employeeId)))
+  const keptIds = (previous?.coveredIds || [])
+    .map(String)
+    .filter(id => !doneSet.has(id) && rosterIds.has(id))
 
   const snapshot = {
     records: [...keptRecords, ...perEmployee.flat()],
@@ -173,9 +178,13 @@ async function refreshSnapshot(previous) {
     generatedAt: new Date().toISOString(),
   }
 
-  await saveSnapshot(snapshot).catch(err => {
-    console.error('Training snapshot save failed:', err.message)
-  })
+  // A pass that reached nobody has nothing to contribute; saving it would only
+  // restamp generatedAt and make stale data look fresh.
+  if (done.length) {
+    await saveSnapshot(snapshot).catch(err => {
+      console.error('Training snapshot save failed:', err.message)
+    })
+  }
 
   return {
     ...snapshot,
