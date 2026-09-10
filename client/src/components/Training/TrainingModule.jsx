@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../../lib/api'
 
+// Teammate stores each dropdown option with its ordering key on the front —
+// "p) 1,2,4,W,T,R". The key means nothing to a reader; the classes and endorsements
+// after it are the whole point of the column.
+function fmtLevel(v) {
+  if (!v) return '—'
+  return v.replace(/^[a-z]{1,2}\)\s*/i, '').trim() || '—'
+}
+
 function fmtDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -25,7 +33,7 @@ function Table({ rows, emptyText }) {
             <tr key={i}>
               <td>{r.employee}</td>
               <td>{r.competency}</td>
-              <td>{r.level || '—'}</td>
+              <td>{fmtLevel(r.level)}</td>
               <td>{r.certNo || '—'}</td>
               <td>{fmtDate(r.dueDate)}</td>
             </tr>
@@ -239,7 +247,7 @@ function CompetencyMatcher({ dataVersion = 0 }) {
                         <td key={name} style={d?.expired ? { color: 'var(--danger)' } : undefined}>
                           {d ? (
                             <>
-                              {d.level ? <strong>{d.level}</strong> : null}
+                              {d.level ? <strong>{fmtLevel(d.level)}</strong> : null}
                               {d.level ? ' · ' : ''}
                               {d.certNo ? `${d.certNo} · ` : ''}{fmtDate(d.dueDate)}{d.expired ? ' (expired)' : ''}
                             </>
