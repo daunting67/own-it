@@ -507,7 +507,7 @@ export default function BriefingRunner({ form, staffNames, siteNames = [], roste
                       {s.hazardId ? ` · hazard: ${s.hazardId}` : ''}
                     </div>
                   </div>
-                  {s.signature && <img className="ps-signon-sig" src={s.signature} alt={`${s.name} signature`} />}
+                  {s.photo && <img className="ps-signon-sig" src={s.photo} alt={`${s.name} sign-on photo`} />}
                   <button className="ps-row-remove" onClick={() => setSignOns(list => list.filter((_, j) => j !== i))}>✕</button>
                 </div>
               ))}

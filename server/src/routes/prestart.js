@@ -20,15 +20,16 @@ async function isOnStaffList(name) {
   return (data || []).some(s => String(s.name || '').trim().replace(/\s+/g, ' ').toLowerCase() === target)
 }
 
-// A finger-drawn signature at the size the pad renders is ~10–30KB of PNG.
-// Anything far bigger is a mistake (a pasted photo, a runaway canvas) and would
-// bloat every read of the briefing, so it is rejected rather than stored.
-const MAX_SIGNATURE_CHARS = 400 * 1024
+// A sign-on photo is a downscaled thumbnail (client caps it at 320px, JPEG
+// quality 0.7 — see SignOnPad.jsx), not a full camera photo, so it should
+// land well under 100KB. The cap here is generous headroom over that, not a
+// second stricter limit the crew can't see.
+const MAX_SIGNON_PHOTO_CHARS = 300 * 1024
 
-function checkSignature(signature) {
-  if (!signature) return null
-  if (typeof signature !== 'string' || !signature.startsWith('data:image/')) return 'Signature must be an image'
-  if (signature.length > MAX_SIGNATURE_CHARS) return 'Signature image is too large'
+function checkSignOnPhoto(photo) {
+  if (!photo) return null
+  if (typeof photo !== 'string' || !photo.startsWith('data:image/')) return 'Sign-on photo must be an image'
+  if (photo.length > MAX_SIGNON_PHOTO_CHARS) return 'Sign-on photo is too large'
   return null
 }
 
@@ -109,7 +110,7 @@ router.post('/briefings', async (req, res) => {
     const photoProblem = checkPhoto(briefing.values?.vmpDiagram)
     if (photoProblem) return res.status(400).json({ error: photoProblem })
     for (const signOn of briefing.signOns || []) {
-      const problem = checkSignature(signOn.signature)
+      const problem = checkSignOnPhoto(signOn.photo)
       if (problem) return res.status(400).json({ error: `${signOn.name || 'Sign-on'}: ${problem}` })
       // Stamped server-side, not trusted from the client, so the record is an
       // honest answer to "who was on site who isn't on the books".
@@ -127,7 +128,7 @@ router.post('/briefings/:day/:id/signon', async (req, res) => {
   try {
     const signOn = req.body || {}
     if (!String(signOn.name || '').trim()) return res.status(400).json({ error: 'Name is required' })
-    const problem = checkSignature(signOn.signature)
+    const problem = checkSignOnPhoto(signOn.photo)
     if (problem) return res.status(400).json({ error: problem })
     signOn.onList = await isOnStaffList(signOn.name)
     const record = await addSignOn(req.params.day, req.params.id, signOn)

@@ -1,104 +1,85 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 
-// One crew member signing on, on the iPad, with a finger.
-//
-// Pointer events (not touch events) so a finger, an Apple Pencil and a mouse
-// all draw the same way. The canvas is backed at device resolution so the
-// signature isn't a blurry mess on a Retina screen, and touch-action:none stops
-// iPadOS scrolling the page while someone is signing.
+// A downscaled thumbnail, not the raw camera photo — a full-res iPad photo is
+// several MB, which is both slow to store for every sign-on and unnecessary
+// for what this is actually for (proof of who was on site, not a portrait).
+// Capped small enough that ~20 sign-ons in one briefing stay well inside
+// localStorage's ~5MB budget and Supabase Storage's per-file cost.
+const THUMB_MAX_DIMENSION = 320
+const THUMB_QUALITY = 0.7
+
+function fileToThumbnail(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read the photo'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('Could not read the photo'))
+      img.onload = () => {
+        const scale = Math.min(1, THUMB_MAX_DIMENSION / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', THUMB_QUALITY))
+      }
+      img.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+// One crew member signing on, on the iPad. A front-camera thumbnail replaces
+// what used to be a finger-drawn signature — a photo is a better answer to
+// "who actually signed for this" than a scribble anyone could draw for anyone
+// else, and it's what ends up on the permanent Teammate record.
 export default function SignOnPad({ open, declaration, staffNames = [], initial = null, onSave, onClose }) {
-  const canvasRef = useRef(null)
-  const drawing = useRef(false)
-  const hasInk = useRef(false)
   const [name, setName] = useState('')
   const [employer, setEmployer] = useState('P&I (North) Ltd')
   const [visitor, setVisitor] = useState(false)
   const [hazardId, setHazardId] = useState('')
+  const [photo, setPhoto] = useState(null)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
+  // Reset every time the pad opens, same as before — whether it's opening for
+  // a different person, or reopening for the same "someone not on the list"
+  // (initial === null) after a previous entry left fields populated.
   useEffect(() => {
     if (!open) return
     setName(initial?.name || '')
     setEmployer(initial?.employer || 'P&I (North) Ltd')
     setVisitor(!!initial?.visitor)
     setHazardId(initial?.hazardId || '')
+    setPhoto(null)
     setError('')
-    hasInk.current = false
   }, [open, initial])
 
-  // Size the backing store the moment the canvas mounts (a callback ref, not an
-  // effect — setting canvas.width CLEARS it, and doing that a frame later could
-  // wipe the first stroke of a fast signer). Coordinates are converted from CSS
-  // pixels to backing-store pixels on every event instead of scaling the
-  // context once, so rotating the iPad mid-sheet can't skew the next stroke.
-  const attachCanvas = useCallback(node => {
-    canvasRef.current = node
-    if (!node) return
-    const rect = node.getBoundingClientRect()
-    const ratio = window.devicePixelRatio || 1
-    node.width = Math.round(rect.width * ratio)
-    node.height = Math.round(rect.height * ratio)
-    const ctx = node.getContext('2d')
-    ctx.lineWidth = 2.5 * ratio
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.strokeStyle = '#1B1B1B'
-  }, [])
-
-  function pointFrom(e) {
-    const canvas = canvasRef.current
-    const rect = canvas.getBoundingClientRect()
-    return {
-      x: (e.clientX - rect.left) * (canvas.width / rect.width),
-      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setBusy(true)
+    setError('')
+    try {
+      setPhoto(await fileToThumbnail(file))
+    } catch (err) {
+      setError(err.message || 'Could not read the photo')
+    } finally {
+      setBusy(false)
     }
-  }
-
-  function start(e) {
-    e.preventDefault()
-    drawing.current = true
-    canvasRef.current.setPointerCapture(e.pointerId)
-    const { x, y } = pointFrom(e)
-    const ctx = canvasRef.current.getContext('2d')
-    ctx.beginPath()
-    ctx.moveTo(x, y)
-    // A dot, so a signature made of taps (a full stop, a dotted i) still marks
-    // the canvas as signed even if the finger never moves.
-    ctx.lineTo(x + 0.01, y)
-    ctx.stroke()
-    hasInk.current = true
-  }
-
-  function move(e) {
-    if (!drawing.current) return
-    e.preventDefault()
-    const { x, y } = pointFrom(e)
-    const ctx = canvasRef.current.getContext('2d')
-    ctx.lineTo(x, y)
-    ctx.stroke()
-    hasInk.current = true
-  }
-
-  function end() {
-    drawing.current = false
-  }
-
-  function clear() {
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    hasInk.current = false
   }
 
   function save() {
     if (!name.trim()) return setError('Enter your name')
-    if (!hasInk.current) return setError('Please sign in the box')
+    if (!photo) return setError('Take a photo to sign on')
     onSave({
       name: name.trim(),
       employer: employer.trim(),
       visitor,
       hazardId: hazardId.trim(),
-      signature: canvasRef.current.toDataURL('image/png'),
+      photo,
       timeIn: new Date().toISOString(),
     })
   }
@@ -156,23 +137,29 @@ export default function SignOnPad({ open, declaration, staffNames = [], initial 
           </div>
 
           <div className="ps-sig-head">
-            <span className="form-label">Signature</span>
-            <button className="btn btn-ghost btn-sm" onClick={clear}>Clear</button>
+            <span className="form-label">Photo</span>
           </div>
-          <canvas
-            ref={attachCanvas}
-            className="ps-sig-canvas"
-            onPointerDown={start}
-            onPointerMove={move}
-            onPointerUp={end}
-            onPointerLeave={end}
-            onPointerCancel={end}
-          />
+          <div className="ps-photo">
+            {photo && <img className="ps-photo-preview ps-signon-photo-preview" src={photo} alt="" />}
+            <div className="ps-photo-actions">
+              <label className="btn btn-secondary ps-btn-lg">
+                {busy ? 'Reading photo…' : photo ? 'Retake photo' : 'Take photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="user"
+                  style={{ display: 'none' }}
+                  disabled={busy}
+                  onChange={handleFile}
+                />
+              </label>
+            </div>
+          </div>
           {error && <div className="ps-error">{error}</div>}
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary ps-btn-lg" onClick={save}>Sign on</button>
+          <button className="btn btn-primary ps-btn-lg" onClick={save} disabled={busy}>Sign on</button>
         </div>
       </div>
     </div>

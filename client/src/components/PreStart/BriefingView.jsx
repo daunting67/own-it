@@ -190,7 +190,7 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>Full name</th><th>Signature</th><th>Employer / company</th><th>Visitor</th><th>Time in</th><th>Hazard ID</th></tr>
+              <tr><th>#</th><th>Full name</th><th>Photo</th><th>Employer / company</th><th>Visitor</th><th>Time in</th><th>Hazard ID</th></tr>
             </thead>
             <tbody>
               {(briefing.signOns || []).map((s, i) => (
@@ -201,7 +201,7 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
                     {s.late && <span className="badge badge-muted" style={{ marginLeft: 6 }}>late</span>}
                     {!s.visitor && s.onList === false && <span className="badge badge-warning" style={{ marginLeft: 6 }}>Not on list</span>}
                   </td>
-                  <td>{s.signature ? <img className="ps-signon-sig" src={s.signature} alt="" /> : '—'}</td>
+                  <td>{s.photo ? <img className="ps-signon-sig" src={s.photo} alt="" /> : '—'}</td>
                   <td>{s.employer || '—'}</td>
                   <td>{s.visitor ? 'Yes' : '—'}</td>
                   <td>{fmtTime(s.timeIn)}</td>
@@ -215,7 +215,7 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
           </table>
         </div>
         <button className="btn btn-secondary ps-btn-lg" style={{ marginTop: 12 }} onClick={() => setPadOpen(true)}>
-          + Add a late sign-on
+          + Post Pre Start Sign On
         </button>
       </div>
 

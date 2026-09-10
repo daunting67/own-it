@@ -96,7 +96,7 @@ async function addSignOn(day, id, signOn) {
     employer: String(signOn.employer || '').trim(),
     visitor: !!signOn.visitor,
     hazardId: String(signOn.hazardId || '').trim(),
-    signature: signOn.signature || null,
+    photo: signOn.photo || null,
     timeIn: signOn.timeIn || new Date().toISOString(),
     late: signOn.late !== undefined ? !!signOn.late : true,
     onList: signOn.onList !== undefined ? !!signOn.onList : true,
