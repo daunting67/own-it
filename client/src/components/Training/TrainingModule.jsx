@@ -15,6 +15,7 @@ function Table({ rows, emptyText }) {
           <tr>
             <th>Employee</th>
             <th>Competency</th>
+            <th>Class/Level</th>
             <th>Cert/Licence No</th>
             <th>Due date</th>
           </tr>
@@ -24,6 +25,7 @@ function Table({ rows, emptyText }) {
             <tr key={i}>
               <td>{r.employee}</td>
               <td>{r.competency}</td>
+              <td>{r.level || '—'}</td>
               <td>{r.certNo || '—'}</td>
               <td>{fmtDate(r.dueDate)}</td>
             </tr>
@@ -237,6 +239,8 @@ function CompetencyMatcher({ dataVersion = 0 }) {
                         <td key={name} style={d?.expired ? { color: 'var(--danger)' } : undefined}>
                           {d ? (
                             <>
+                              {d.level ? <strong>{d.level}</strong> : null}
+                              {d.level ? ' · ' : ''}
                               {d.certNo ? `${d.certNo} · ` : ''}{fmtDate(d.dueDate)}{d.expired ? ' (expired)' : ''}
                             </>
                           ) : '—'}

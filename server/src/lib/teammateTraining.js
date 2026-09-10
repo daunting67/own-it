@@ -51,6 +51,12 @@ const NAME_FIELDS = ['skill', 'qualification', 'training', 'course', 'name', 'ti
 const CERT_FIELDS = ['certNo', 'certificateNo', 'certificateNumber', 'regNo', 'registrationNo']
 const COMPLETED_FIELDS = ['completedDate', 'dateCompleted', 'completionDate', 'issueDate', 'achievedDate']
 const EXPIRY_FIELDS = ['expiryDate', 'expireDate', 'dueDate', 'renewalDate']
+// The actual thing held, as distinct from the paper it's written on: for a driver
+// licence this is the class/endorsement string ("1,2,3,4,5,W,T,R"), for a ticket it
+// is the level/grade. Teammate calls it `competencyLevel` on a skill row; without it
+// a "Driver Licence & Endorsements" column only shows a number and a date, which
+// says nothing about what the person is actually allowed to drive.
+const LEVEL_FIELDS = ['competencyLevel', 'level', 'grade', 'classes', 'endorsements']
 
 function pickField(row, fields) {
   for (const f of fields) {
@@ -86,6 +92,7 @@ async function getTrainingFor(employee) {
         competency: name,
         kind,
         certNo: pickField(c, CERT_FIELDS),
+        level: pickField(c, LEVEL_FIELDS),
         completedDate: pickField(c, COMPLETED_FIELDS),
         dueDate: pickField(c, EXPIRY_FIELDS),
       })
@@ -307,6 +314,7 @@ async function getEmployeesWithAllCompetencies(names, { refresh = false } = {}) 
       return {
         competency: name,
         certNo: r.certNo,
+        level: r.level || null,
         completedDate: r.completedDate,
         dueDate: r.dueDate,
         expired: !!(due && !isNaN(due) && due < today),
