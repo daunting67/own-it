@@ -1,5 +1,5 @@
 const { Router } = require('express')
-const { randomUUID } = require('crypto')
+const { randomUUID, createHash } = require('crypto')
 const { PDFDocument } = require('pdf-lib')
 const db = require('../lib/supabase')
 const { requireAuth, requireDept } = require('../middleware/auth')
@@ -150,21 +150,28 @@ const SPLIT_CHUNK_SIZE = 6
 // original scan. Non-PDF files (bowser photos) and genuinely single-page PDFs pass through
 // untouched — there's nothing to split.
 async function splitPdfIfNeeded(f) {
-  if (!f.filename.toLowerCase().endsWith('.pdf')) return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }]
+  // Stamp the ORIGINAL bytes' hash before anything is re-serialised, and carry it on every
+  // chunk (both split helpers spread `...f`, so it propagates for free). The extraction cache
+  // keys on this, NOT on the chunk's own bytes: pdf-lib does not round-trip deterministically
+  // — MEASURED, splitting the same 25-page scan twice 2.5s apart produced 5/5 chunks with
+  // different bytes — so hashing the chunk would mint a brand new key on every single run and
+  // the cache would never once hit. A chunk is fully identified by (original file, page range).
+  const src = { ...f, sourceHash: createHash('sha256').update(f.buffer).digest('hex') }
+  if (!src.filename.toLowerCase().endsWith('.pdf')) return [{ ...src, pageOffset: 0, pages: 1, isSplitPart: false }]
   let doc
   try {
-    doc = await PDFDocument.load(f.buffer, { ignoreEncryption: true })
+    doc = await PDFDocument.load(src.buffer, { ignoreEncryption: true })
   } catch {
-    return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }] // unreadable as a PDF object tree — let Claude try it whole
+    return [{ ...src, pageOffset: 0, pages: 1, isSplitPart: false }] // unreadable as a PDF object tree — let Claude try it whole
   }
   const total = doc.getPageCount()
-  if (total <= 1) return [{ ...f, pageOffset: 0, pages: total, isSplitPart: false }]
+  if (total <= 1) return [{ ...src, pageOffset: 0, pages: total, isSplitPart: false }]
 
   const chunks = []
   for (let start = 0; start < total; start += SPLIT_CHUNK_SIZE) {
     const end = Math.min(start + SPLIT_CHUNK_SIZE, total)
     const buf = await extractPageRange(doc, start, end)
-    chunks.push({ ...f, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
+    chunks.push({ ...src, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
   }
   return chunks
 }
@@ -343,7 +350,78 @@ async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
 // needs to be a good starting guess — verbose receipts, an unusually detailed cover-sheet
 // comment, or simply more receipts next month can never truncate a response, because any
 // batch that's still too big keeps halving itself down to individual files if it must.
+/*
+ * EXTRACTION CACHE — the fix for run-to-run variance.
+ * ===================================================
+ * MEASURED 10 Sep 2026, two full live runs over the same 37 real July files: 58 of 61 receipts
+ * came back identical and THREE wobbled. In all three the TOTAL was identical and only the
+ * LITRES moved — 15.1 vs 19.1, 55.98 vs 55.88, and one that read no litres at all in one run:
+ *
+ *   the money on a till slip is printed; the litres is a glary 7-segment pump display.
+ *
+ * That matters because fuelEngine's primary match key is txn_date + product + LITRES — the
+ * least reliable field of the three. One of those three receipts (Oliver Tyler, 05/07) is the
+ * one that flipped a run to FAIL earlier the same morning while an identical re-run passed.
+ *
+ * Sonnet 5 has no temperature dial (see MODELS_ACCEPTING_TEMPERATURE above), so the read cannot
+ * be pinned at the model. What CAN be pinned is how often we ask: a given PDF's bytes never
+ * change, so re-reading it on every run buys nothing but a fresh roll of the dice. Cache the
+ * extraction against a hash of exactly what was sent, and the same upload always reconciles to
+ * the same number.
+ *
+ * HONEST LIMITS. This fixes REPRODUCIBILITY, not accuracy — a receipt misread the first time
+ * stays misread, so it is the prerequisite for tuning accuracy, not a substitute. The key
+ * includes the prompt text and the model, so changing either invalidates every entry. Set
+ * COST_EXTRACT_CACHE=off to force fresh reads.
+ *
+ * Every cache operation FAILS OPEN: any storage error falls through to a normal extraction, so
+ * the cache can never be the reason a reconciliation fails.
+ */
+const EXTRACT_CACHE_BUCKET = 'extract-cache'
+const cacheEnabled = () => (process.env.COST_EXTRACT_CACHE || '').toLowerCase() !== 'off'
+
+// Hash exactly what goes to the model: the prompt, the model, and every file's bytes in order.
+// Order is included deliberately — the same pages in a different batch are a different request
+// and can legitimately read differently.
+function extractCacheKey(system, model, files) {
+  const h = createHash('sha256')
+  h.update(model).update('\u0000').update(system)
+  for (const f of files) {
+    h.update('\u0000').update(f.filename || '')
+    h.update('#').update(String(f.pageOffset ?? '')).update('+').update(String(f.pages ?? ''))
+    // sourceHash = the ORIGINAL upload's bytes (see splitPdfIfNeeded). Falling back to the
+    // buffer is correct for anything that never went through the splitter.
+    h.update(':').update(f.sourceHash || createHash('sha256').update(f.buffer).digest('hex'))
+  }
+  return h.digest('hex')
+}
+
+async function cacheGet(key) {
+  if (!cacheEnabled()) return null
+  try {
+    const { data, error } = await db.storage.from(EXTRACT_CACHE_BUCKET).download(`${key}.json`)
+    if (error || !data) return null
+    return JSON.parse(Buffer.from(await data.arrayBuffer()).toString('utf8'))
+  } catch { return null }
+}
+
+async function cachePut(key, value) {
+  if (!cacheEnabled()) return
+  try {
+    const body = Buffer.from(JSON.stringify(value), 'utf8')
+    const opts = { contentType: 'application/json', upsert: true }
+    let { error } = await db.storage.from(EXTRACT_CACHE_BUCKET).upload(`${key}.json`, body, opts)
+    if (error && /bucket not found/i.test(error.message)) {
+      await db.storage.createBucket(EXTRACT_CACHE_BUCKET, { public: false }).catch(() => {})
+      await db.storage.from(EXTRACT_CACHE_BUCKET).upload(`${key}.json`, body, opts)
+    }
+  } catch { /* fail open — a cache miss next time is the only cost */ }
+}
+
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
+  const key = extractCacheKey(RECEIPT_PROMPT, RECEIPT_MODEL, files)
+  const cached = await cacheGet(key)
+  if (Array.isArray(cached)) return cached
   try {
     const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files, RECEIPT_MODEL)
     if (!Array.isArray(parsed?.receipts)) {
@@ -363,6 +441,9 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
         + `not the expected {"receipts":[...]}. Nothing was silently dropped — re-run, or remove the `
         + `problem file and re-run without it.`)
     }
+    // Only a productive read is cached. Caching an empty result would freeze a silent
+    // failure in place for good, which is the one outcome this whole module is built to avoid.
+    if (parsed.receipts.length) await cachePut(key, parsed.receipts)
     return parsed.receipts
   } catch (err) {
     if (err.isMaxTokens && files.length > 1 && depth < 8) {
@@ -371,7 +452,14 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
         extractReceiptsBatch(anthropicKey, files.slice(0, mid), depth + 1),
         extractReceiptsBatch(anthropicKey, files.slice(mid), depth + 1),
       ])
-      return [...a, ...b]
+      // Cache the COMBINED result under this batch's own key, not just the halves'.
+      // Without this the bisect path never writes the top-level entry, so every future run
+      // re-attempts the whole batch, overflows again and re-splits — paying full price and
+      // rolling the dice afresh. Measured: this is why a second run of the 25-page batch scan
+      // was no faster than the first and still produced different readings.
+      const combined = [...a, ...b]
+      if (combined.length) await cachePut(key, combined)
+      return combined
     }
     // Down to a single file and it STILL overflows — if it's a multi-page PDF chunk (a
     // batch-scan page range denser than SPLIT_CHUNK_SIZE assumed), re-split THAT chunk by
@@ -383,7 +471,9 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
           extractReceiptsBatch(anthropicKey, [halves[0]], depth + 1),
           extractReceiptsBatch(anthropicKey, [halves[1]], depth + 1),
         ])
-        return [...a, ...b]
+        const combined = [...a, ...b]   // same reasoning as the batch-halving path above
+        if (combined.length) await cachePut(key, combined)
+        return combined
       }
     }
     if (err.isMaxTokens) {
@@ -412,8 +502,18 @@ function mergeInvoiceParts(a, b) {
 // Same self-adaptive halving as extractReceiptsBatch, but for the invoice: a long invoice
 // (many transaction lines) can equally overflow one response.
 async function extractInvoiceBatch(anthropicKey, files, depth = 0) {
+  // Cached on the same terms as the receipts (see the EXTRACTION CACHE block above). The
+  // invoice is a text PDF and has always read identically, so this is about time and money
+  // rather than determinism: with the receipts cached the invoice became the whole wall-clock
+  // cost of a re-run — 62s of a 62s run. It also makes a retry after a dropped connection
+  // cheap, which matters because a single failed call currently loses the entire run.
+  const key = extractCacheKey(INVOICE_PROMPT, INVOICE_MODEL, files)
+  const cached = await cacheGet(key)
+  if (cached && typeof cached === 'object') return cached
   try {
-    return await extract(anthropicKey, INVOICE_PROMPT, files)
+    const parsed = await extract(anthropicKey, INVOICE_PROMPT, files)
+    if (parsed && Array.isArray(parsed.lines) && parsed.lines.length) await cachePut(key, parsed)
+    return parsed
   } catch (err) {
     if (err.isMaxTokens && files.length > 1 && depth < 8) {
       const mid = Math.ceil(files.length / 2)
@@ -604,5 +704,6 @@ module.exports = router
 // test of production, it's a test of the duplicate. Nothing here changes route behaviour.
 module.exports.__test = {
   splitPdfIfNeeded, batchByPageCount, extractInvoiceBatch, extractReceiptsBatch,
+  extractCacheKey,
   mergeInvoiceParts, INVOICE_MODEL, RECEIPT_MODEL, MAX_PAGES_PER_BATCH,
 }
