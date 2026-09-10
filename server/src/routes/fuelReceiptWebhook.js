@@ -3,7 +3,7 @@ const multer = require('multer')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const db = require('../lib/supabase')
 const {
-  storeSubmission, storeMultipartSubmission, getPdfSignedUrl,
+  storeSubmission, storeMultipartSubmission, getPdfSignedUrl, pairSubmissions,
 } = require('../lib/fuelReceiptSubmissions')
 
 const router = Router()
@@ -62,7 +62,30 @@ router.get('/_recent', requireAuth, requireAdmin, async (req, res) => {
       ...row,
       pdfUrl: row.pdfPath ? await getPdfSignedUrl(row.pdfPath).catch(err => `ERROR: ${err.message}`) : null,
     })))
-    res.json({ since, hours, count: rows.length, rows })
+
+    // Rows are HALVES, not receipts — one submission is a JSON row plus a PDF row. Reporting
+    // the row count alone reads as "12 receipts arrived" when it means six. Pair them up and
+    // report both numbers, plus any half that never found its partner: a 'missing-pdf' is a
+    // receipt with no image to read, which is the silent loss this process keeps suffering and
+    // which nothing else currently notices.
+    const { receipts, incomplete } = pairSubmissions(data || [])
+    res.json({
+      since,
+      hours,
+      receiptCount: receipts.length,
+      rowCount: rows.length,
+      incomplete: incomplete.map(i => ({ kind: i.kind, submissionId: i.submissionId, receivedAt: i.row.receivedAt })),
+      receipts: receipts.map(r => ({
+        submissionId: r.submissionId,
+        driver: r.fields && Array.isArray(r.fields.fuel) ? r.fields.fuel[0] : null,
+        fillDate: r.fields ? r.fields.date : null,
+        card: r.fields ? r.fields.card : null,
+        pdfPath: r.pdfPath,
+        complete: r.complete,
+        pairedBy: r.pairedBy,
+      })),
+      rows,
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
