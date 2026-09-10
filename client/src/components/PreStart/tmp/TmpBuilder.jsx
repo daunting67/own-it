@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, LINZ_IS_DEMO_KEY,
-  currentPosition, lonLatToWorld, worldToLonLat, renderAerial,
+  currentPosition, searchAddress, lonLatToWorld, worldToLonLat, renderAerial,
 } from './tmpGeo'
 import { SYMBOLS, SYMBOL_GROUPS, drawPreview } from './tmpSymbols'
 import { drawPlan, PLAN_HEIGHT, PLAN_WIDTH, TITLE_HEIGHT } from './tmpRender'
@@ -27,6 +27,10 @@ export default function TmpBuilder({ value, meta = {}, onSave, onClose }) {
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Address search on the locate screen, seeded with the job site so a plan
+  // drawn at a desk usually needs no typing at all.
+  const [query, setQuery] = useState(meta.jobSite || '')
+  const [results, setResults] = useState(null)
 
   const canvasRef = useRef(null)
   const baseRef = useRef(null)
@@ -80,6 +84,33 @@ export default function TmpBuilder({ value, meta = {}, onSave, onClose }) {
       setBusy('')
     }
   }, [])
+
+  const dropPinAt = useCallback((lon, lat) => {
+    setAccuracy(null)
+    setCentre({ lon, lat })
+    setItems(current =>
+      current.some(i => i.type === 'pin')
+        ? current
+        : [...current, { id: nextId(), type: 'pin', x: PLAN_WIDTH / 2, y: (PLAN_HEIGHT - TITLE_HEIGHT) / 2, rotation: 0, scale: 1, text: 'SITE' }]
+    )
+    setStep('edit')
+  }, [])
+
+  async function runSearch(e) {
+    e?.preventDefault()
+    setBusy('Searching…')
+    setError('')
+    setResults(null)
+    try {
+      const rows = await searchAddress(query)
+      if (!rows.length) setError('No match for that address. Try a street and suburb.')
+      setResults(rows)
+    } catch (err) {
+      setError(err.message || 'Address search failed.')
+    } finally {
+      setBusy('')
+    }
+  }
 
   /* ---------------------------------------------------------------- paint */
 
@@ -286,7 +317,14 @@ export default function TmpBuilder({ value, meta = {}, onSave, onClose }) {
       // JPEG at 0.82 keeps a full aerial plan around 250–400 KB, comfortably
       // under the 3 MB the briefing endpoint accepts for this field.
       const dataUrl = out.toDataURL('image/jpeg', 0.82)
-      await onSave(dataUrl, { centre, zoom, accuracy, items, savedAt: new Date().toISOString() })
+      // A small thumbnail travels with the plan's metadata so the library can
+      // show every plan as a picture without downloading 300 KB apiece.
+      const thumbCanvas = document.createElement('canvas')
+      thumbCanvas.width = 320
+      thumbCanvas.height = Math.round((320 * PLAN_HEIGHT) / PLAN_WIDTH)
+      thumbCanvas.getContext('2d').drawImage(out, 0, 0, thumbCanvas.width, thumbCanvas.height)
+      const thumb = thumbCanvas.toDataURL('image/jpeg', 0.6)
+      await onSave(dataUrl, { centre, zoom, accuracy, items, savedAt: new Date().toISOString() }, thumb)
       onClose()
     } catch (err) {
       setError(err.message || 'Could not save the plan.')
@@ -302,11 +340,34 @@ export default function TmpBuilder({ value, meta = {}, onSave, onClose }) {
         <div className="tmp-locate">
           <h2>Build the traffic management plan</h2>
           <p>
-            Stand where you want the plan centred — usually the site entry — and tap below.
-            We drop a pin on your position and pull the aerial photo of that spot, then you
-            lay out the cones, barriers and routes on top.
+            Search for the site, or — if you are already standing on it — drop a pin on your
+            own position. Either way we pull the aerial photo of that spot and you lay out the
+            cones, barriers and routes on top.
           </p>
           {error && <div className="tmp-error">{error}</div>}
+
+          <form className="tmp-search" onSubmit={runSearch}>
+            <input
+              className="form-input ps-input"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Find the site by address"
+            />
+            <button className="btn btn-secondary ps-btn-lg" type="submit" disabled={!!busy || query.trim().length < 3}>
+              Search
+            </button>
+          </form>
+
+          {results?.length > 0 && (
+            <div className="tmp-results">
+              {results.map(r => (
+                <button key={`${r.lat},${r.lon}`} className="tmp-result" onClick={() => dropPinAt(r.lon, r.lat)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="tmp-locate-actions">
             <button className="btn btn-primary ps-btn-lg" onClick={locate} disabled={!!busy}>
               {busy || 'Drop a pin where I am standing'}

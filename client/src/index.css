@@ -912,3 +912,55 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
   .tmp-tool { width: auto; min-width: 128px; }
   .tmp-hint, .tmp-error-float { max-width: 70%; }
 }
+
+/* ------------------------------------------- TMP library (Traffic Plans tab) */
+.tmp-details {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px 20px; margin: 0 20px 16px;
+  border: 1px solid rgba(0,0,0,.12); border-radius: 5px; background: rgba(0,0,0,.02);
+}
+.tmp-details label { display: flex; flex-direction: column; gap: 6px; flex: 1;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.tmp-details-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.tmp-details-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.tmp-optional { font-weight: 600; text-transform: none; letter-spacing: 0; color: rgba(0,0,0,.4); }
+
+.tmp-library {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px; padding: 16px 20px;
+}
+.tmp-plan-card {
+  position: relative; border: 1px solid rgba(0,0,0,.12); border-radius: 5px;
+  overflow: hidden; background: #fff; display: flex; flex-direction: column;
+}
+.tmp-plan-open {
+  display: flex; flex-direction: column; text-align: left; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.tmp-plan-open:disabled { opacity: .5; cursor: default; }
+.tmp-plan-open img { width: 100%; display: block; background: #20242a; }
+.tmp-plan-nothumb {
+  padding: 38px 0; text-align: center; background: #eef1f4;
+  color: rgba(0,0,0,.4); font-size: 12px; font-weight: 600;
+}
+.tmp-plan-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 4px; }
+.tmp-plan-site { font-size: 14px; font-weight: 800; }
+.tmp-plan-meta { font-size: 11px; color: rgba(0,0,0,.55); font-weight: 600; }
+.tmp-plan-notes { font-size: 12px; color: rgba(0,0,0,.7); line-height: 1.35; }
+.tmp-plan-delete {
+  position: absolute; top: 8px; right: 8px; min-height: 34px; padding: 6px 12px;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,.35);
+  background: rgba(20,24,29,.72); color: #fff;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  cursor: pointer;
+}
+.tmp-plan-delete:hover { background: rgba(208,2,27,.9); border-color: rgba(208,2,27,.9); }
+.tmp-search { display: flex; gap: 10px; }
+.tmp-search input { flex: 1; }
+.tmp-results { display: flex; flex-direction: column; gap: 6px; max-height: 210px; overflow-y: auto; }
+.tmp-result {
+  text-align: left; padding: 12px 14px; min-height: 52px; cursor: pointer;
+  border: 1px solid rgba(0,0,0,.14); border-radius: 4px; background: #fff;
+  font-size: 13px; line-height: 1.35;
+}
+.tmp-result:hover { background: rgba(0,0,0,.04); border-color: var(--pi-orange); }

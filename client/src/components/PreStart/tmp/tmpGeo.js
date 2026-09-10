@@ -117,6 +117,29 @@ export async function renderAerial({ lon, lat, zoom, width, height, onProgress }
   return canvas
 }
 
+// Find a site by address rather than by standing on it. Plans are now drawn
+// ahead of time at a desk, where the GPS fix is the office car park and not the
+// job — so an address search is the primary way in for a planned job, and the
+// GPS pin is for the foreman who is already on site.
+//
+// OpenStreetMap's Nominatim is free and needs no key. It is rate-limited to
+// roughly one request a second and asks that it not be hammered, which suits a
+// handful of lookups a week. Results are restricted to New Zealand.
+export async function searchAddress(query) {
+  const q = String(query || '').trim()
+  if (q.length < 3) return []
+  const url = 'https://nominatim.openstreetmap.org/search'
+    + `?q=${encodeURIComponent(q)}&countrycodes=nz&format=jsonv2&limit=6&addressdetails=0`
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error('Address search is unavailable right now.')
+  const rows = await res.json()
+  return rows.map(r => ({
+    label: r.display_name,
+    lat: Number(r.lat),
+    lon: Number(r.lon),
+  })).filter(r => Number.isFinite(r.lat) && Number.isFinite(r.lon))
+}
+
 // One shared position lookup so the "drop a pin where I'm standing" button
 // behaves the same everywhere. High accuracy matters here: a 100 m civic-centre
 // fix would put the plan on the wrong street.

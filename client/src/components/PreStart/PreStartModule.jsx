@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import BriefingRunner, { DRAFT_KEY } from './BriefingRunner'
 import BriefingView from './BriefingView'
 import RunSheetView from './RunSheetView'
+import PlansView from './tmp/PlansView'
 import ProcessesModule from '../Processes/ProcessesModule'
 
 function fmtTime(iso) {
@@ -55,7 +56,7 @@ export default function PreStartModule() {
   // there's never a separate list to keep in sync.
   const [roster, setRoster] = useState([])
   const [mode, setMode] = useState('list')       // list | run | view
-  const [tab, setTab] = useState('briefings')    // briefings | runsheet | transcript
+  const [tab, setTab] = useState('briefings')    // briefings | plans | runsheet | transcript
   const [current, setCurrent] = useState(null)
   const [draft, setDraft] = useState(null)
   const [error, setError] = useState('')
@@ -168,6 +169,9 @@ export default function PreStartModule() {
         <button className={`tab-btn${tab === 'briefings' ? ' active' : ''}`} onClick={() => { setTab('briefings'); load() }}>
           Briefings
         </button>
+        <button className={`tab-btn${tab === 'plans' ? ' active' : ''}`} onClick={() => setTab('plans')}>
+          Traffic Plans
+        </button>
         <button className={`tab-btn${tab === 'runsheet' ? ' active' : ''}`} onClick={() => setTab('runsheet')}>
           Run Sheet
         </button>
@@ -175,6 +179,10 @@ export default function PreStartModule() {
           From a transcript
         </button>
       </div>
+
+      {/* Traffic management plans are drawn here, ahead of time and away from
+          the site, then attached by whichever briefing needs them. */}
+      {tab === 'plans' && <PlansView siteNames={siteNames} />}
 
       {/* The full facilitator script, for whoever's running the briefing to
           follow along on their own device while Otter records — no formal
