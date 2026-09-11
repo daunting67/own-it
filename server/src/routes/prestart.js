@@ -4,7 +4,7 @@ const db = require('../lib/supabase')
 const form = require('../lib/prestartForm')
 const { saveBriefing, getBriefing, listBriefingsForDay, addSignOn } = require('../lib/prestartStore')
 const { savePlan, listPlans, getPlan, deletePlan } = require('../lib/prestartPlanStore')
-const { submitPrestart } = require('../lib/teammatePrestart')
+const { submitPrestart, retryPrestartPhotos } = require('../lib/teammatePrestart')
 const { nzDateString } = require('../lib/nzDay')
 
 const router = Router()
@@ -174,6 +174,7 @@ router.post('/briefings/:day/:id/submit-teammate', async (req, res) => {
     // Teammate: a partial upload means Teammate is not yet a complete record,
     // and these are the only other copies in existence.
     const allPhotosLanded = result.photos.attempted > 0 && result.photos.failed.length === 0
+    record.teammatePhotoErrors = result.photos.failed.length ? result.photos.failed : null
     if (allPhotosLanded) {
       record.values = { ...(record.values || {}), vmpDiagram: null }
       record.signOns = (record.signOns || []).map(s => ({ ...s, photo: null }))
@@ -184,6 +185,36 @@ router.post('/briefings/:day/:id/submit-teammate', async (req, res) => {
     res.json({ ...result, photosCleanedUp: allPhotosLanded, briefing: record })
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not file the briefing to Teammate' })
+  }
+})
+
+// Retry just the photos for a briefing that is already filed.
+//
+// Uploads are the one part of filing that can fail on its own, and a failure
+// must not push anyone into filing a second — duplicate — safety record. The
+// portal is still holding the only copies until this succeeds.
+router.post('/briefings/:day/:id/retry-teammate-photos', async (req, res) => {
+  try {
+    const record = await getBriefing(req.params.day, req.params.id)
+    if (!record) return res.status(404).json({ error: 'Briefing not found' })
+    if (!record.teammateSubmissionId) {
+      return res.status(400).json({ error: 'This briefing has not been filed to Teammate yet' })
+    }
+
+    const photos = await retryPrestartPhotos(record, req.user?.name)
+
+    const allPhotosLanded = photos.attempted > 0 && photos.failed.length === 0
+    record.teammatePhotoErrors = photos.failed.length ? photos.failed : null
+    if (allPhotosLanded) {
+      record.values = { ...(record.values || {}), vmpDiagram: null }
+      record.signOns = (record.signOns || []).map(s => ({ ...s, photo: null }))
+      record.photosMovedToTeammate = true
+    }
+
+    await saveBriefing(record, req.user)
+    res.json({ photos, photosCleanedUp: allPhotosLanded, briefing: record })
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not upload the photos to Teammate' })
   }
 })
 

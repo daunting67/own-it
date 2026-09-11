@@ -69,6 +69,20 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
     }
   }
 
+  async function retryPhotos() {
+    setFileError('')
+    setFiling(true)
+    try {
+      const result = await api.retryPrestartTeammatePhotos(briefing.day, briefing.id)
+      setFileResult({ ...result, number: briefing.teammateNumber, fieldsWritten: null })
+      onChanged?.(result.briefing)
+    } catch (err) {
+      setFileError(err.message || 'Could not upload the photos to Teammate')
+    } finally {
+      setFiling(false)
+    }
+  }
+
   return (
     <div className="ps-view">
       <div className="ps-view-head">
@@ -248,10 +262,22 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
               {briefing.teammateSubmittedAt ? ` on ${fmtDate(briefing.teammateSubmittedAt)}` : ''}
               {briefing.teammateSubmittedBy ? ` by ${briefing.teammateSubmittedBy}` : ''}.
             </div>
-            {briefing.photosMovedToTeammate && (
+            {briefing.photosMovedToTeammate ? (
               <div className="ps-view-blank" style={{ marginTop: 6 }}>
                 Photos now live in Teammate; the portal's copies have been removed.
               </div>
+            ) : (
+              <>
+                <div className="banner banner-warning ps-banner" style={{ marginTop: 8 }}>
+                  The record is filed, but its photos are not in Teammate yet — the portal is still
+                  holding the only copies.
+                  {briefing.teammatePhotoErrors?.length ? ` (${briefing.teammatePhotoErrors[0]})` : ''}
+                </div>
+                {fileError && <div className="banner banner-danger ps-banner">{fileError}</div>}
+                <button className="btn btn-secondary ps-btn-lg" style={{ marginTop: 10 }} disabled={filing} onClick={retryPhotos}>
+                  {filing ? 'Uploading photos…' : 'Retry photo upload'}
+                </button>
+              </>
             )}
           </>
         ) : briefing.status === 'complete' ? (
@@ -271,7 +297,8 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
         {fileResult && (
           <div style={{ marginTop: 12 }}>
             <div className="ps-view-text">
-              Filed as {fileResult.number || fileResult.submissionId} · {fileResult.fieldsWritten} fields
+              Filed as {fileResult.number || fileResult.submissionId}
+              {fileResult.fieldsWritten != null ? ` · ${fileResult.fieldsWritten} fields` : ''}
               {fileResult.tasks ? ` · ${fileResult.tasks} action${fileResult.tasks === 1 ? '' : 's'}` : ''}
               {fileResult.photos.attempted ? ` · ${fileResult.photos.uploaded} of ${fileResult.photos.attempted} photos` : ''}
             </div>

@@ -109,6 +109,47 @@ function dataUrlToFile(dataUrl, name) {
   return { buffer: Buffer.from(m[2], 'base64'), mime, name: `${name}.${ext}` }
 }
 
+/* ------------------------------------------------------------------ photos */
+
+// Every photo on the briefing, one upload call each. Counted rather than
+// thrown on: a single failure should leave a filed record plus an honest
+// "1 of 4 photos didn't make it", not lose the whole submission.
+async function uploadPhotos(briefing, submissionId, session) {
+  const values = briefing.values || {}
+  const uploads = []
+
+  const diagram = dataUrlToFile(values.vmpDiagram, `vmp-diagram-${briefing.day}`)
+  if (diagram) uploads.push({ field: F.SITE_DIAGRAM_FIELD, file: diagram })
+
+  for (const [i, s] of (briefing.signOns || []).entries()) {
+    const who = text(s.name).replace(/[^\w]+/g, '-').toLowerCase() || 'crew'
+    const photo = dataUrlToFile(s.photo, `signon-${i + 1}-${who}`)
+    if (photo) uploads.push({ field: F.SIGNON_PHOTOS_FIELD, file: photo })
+  }
+
+  let uploaded = 0
+  const failed = []
+  for (const u of uploads) {
+    try {
+      await uploadFieldFile(submissionId, u.field, u.file, session)
+      uploaded++
+    } catch (err) {
+      failed.push(`${u.file.name}: ${err.message}`)
+    }
+  }
+  return { attempted: uploads.length, uploaded, failed }
+}
+
+// Re-upload the photos for a briefing that is already filed. A failed upload
+// must not force a duplicate safety record, and the portal is still holding
+// the only copies until this succeeds.
+async function retryPrestartPhotos(briefing, submitterName) {
+  if (!briefing.teammateSubmissionId) throw new Error('This briefing has not been filed to Teammate yet')
+  if (!haveCreds(submitterName)) throw new Error('No Teammate login configured for this user')
+  const session = await signIn(submitterName)
+  return uploadPhotos(briefing, briefing.teammateSubmissionId, session)
+}
+
 /* ------------------------------------------------------------- submission */
 
 // briefing = the stored pre-start record; form = prestartForm (for the rule
@@ -193,27 +234,7 @@ async function submitPrestart(briefing, form, submitterName) {
   const submissionId = res.response_data?._id
   if (!submissionId) throw new Error('Teammate accepted the submission but returned no id')
 
-  // Photos, one call each. Counted rather than thrown on, so a single failed
-  // upload leaves a filed record plus an honest "1 of 4 photos didn't make it"
-  // — and leaves the portal's copies in place.
-  const uploads = []
-  const diagram = dataUrlToFile(values.vmpDiagram, `vmp-diagram-${briefing.day}`)
-  if (diagram) uploads.push({ field: F.SITE_DIAGRAM_FIELD, file: diagram })
-  for (const [i, s] of (briefing.signOns || []).entries()) {
-    const photo = dataUrlToFile(s.photo, `signon-${i + 1}-${text(s.name).replace(/[^\w]+/g, '-').toLowerCase() || 'crew'}`)
-    if (photo) uploads.push({ field: F.SIGNON_PHOTOS_FIELD, file: photo })
-  }
-
-  let uploaded = 0
-  const failed = []
-  for (const u of uploads) {
-    try {
-      await uploadFieldFile(submissionId, u.field, u.file, session)
-      uploaded++
-    } catch (err) {
-      failed.push(`${u.file.name}: ${err.message}`)
-    }
-  }
+  const photos = await uploadPhotos(briefing, submissionId, session)
 
   return {
     submissionId,
@@ -222,9 +243,9 @@ async function submitPrestart(briefing, form, submitterName) {
     submittedBy: submitter.name,
     fieldsWritten: fv.length,
     tasks: tasks.length,
-    photos: { attempted: uploads.length, uploaded, failed },
+    photos,
     unmatchedCrew: crew.others ? crew.others.split('\n') : [],
   }
 }
 
-module.exports = { submitPrestart }
+module.exports = { submitPrestart, retryPrestartPhotos }
