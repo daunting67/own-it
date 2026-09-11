@@ -56,8 +56,9 @@ const CREW_FIELD    = '6aa35858b6fe719713523de8'
 //     — they return 200 and the array comes back empty.
 //   * the only thing that works is POST /formSubmission/formSubmissionEditImage
 //     as multipart: `_id` (the submission — NOT `formSubmissionId`, which is
-//     rejected), `relatedFormId`, `attach[0]`, with the session's `fileToken`
-//     in a `filetoken` header. Repeat calls append.
+//     rejected), `relatedFormId`, `attach[0]`. Plain `authtoken` is enough —
+//     the separate `fileToken` that /fileUpload insists on is NOT required
+//     here. Repeat calls append.
 //
 // So a photo is only really filed once formSubmissionEditImage confirms, which
 // is what the Supabase photo cleanup has to wait on.

@@ -60,9 +60,9 @@ async function signIn(submitterName) {
   if (!res.ok || !token) {
     throw new Error(`Teammate sign-in failed (${res.status}) — check TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD`)
   }
-  // fileToken is a SECOND token, separate from authToken. Uploads
-  // (/fileUpload, /formSubmission/formSubmissionEditImage) are rejected with a
-  // 401 "you need to be logged in" if you send authToken instead.
+  // fileToken is a SECOND token some upload routes want (/fileUpload 401s
+  // without it). signIn does not always return one — the web app fetches it
+  // separately — so nothing here may depend on it being present.
   return { token, fileToken: rd.fileToken, companyId: rd.companyId, userId: rd._id, employeeId: rd.employeeId }
 }
 
@@ -146,25 +146,31 @@ async function populateSubmission(formId, values, session) {
 // File fields do not live in formValue — they land on the submission's
 // top-level `attachment[]`, and neither addFormSubmission nor
 // formSubmissionEdit will write that array (both accept it and silently drop
-// it). formSubmissionEditImage is the only route that works. It wants
-// multipart, keyed on `_id` (`formSubmissionId` is rejected), and it wants the
-// session's fileToken rather than its authToken.
+// it). formSubmissionEditImage is the only route that works, as multipart,
+// keyed on `_id` (`formSubmissionId` is rejected).
 //
-// Calls append, so one call per photo. Returns the submission's stored
-// attachment list so the caller can confirm the file actually landed before
-// acting on it (e.g. deleting its only other copy).
+// It authenticates with the ordinary authToken. Teammate's OTHER upload route,
+// /fileUpload, does demand the separate fileToken and 401s without it — but
+// that requirement does not carry over to here, and assuming it did is what
+// made the first real submission file its record with no photos at all.
+// fileToken is still sent when the session happens to have one.
+//
+// Calls append, so one call per photo.
 async function uploadFieldFile(formId, relatedFormId, file, session) {
+  const token = typeof session === 'string' ? session : session.token
   const fileToken = typeof session === 'object' ? session.fileToken : null
-  if (!fileToken) throw new Error('No fileToken on this Teammate session — cannot upload')
 
   const fd = new FormData()
   fd.append('_id', formId)
   fd.append('relatedFormId', relatedFormId)
   fd.append('attach[0]', new Blob([file.buffer], { type: file.mime || 'image/jpeg' }), file.name)
 
+  const headers = { 'authtoken': token }
+  if (fileToken) headers.filetoken = fileToken
+
   const res = await fetch(`${ROOT}/formSubmission/formSubmissionEditImage`, {
     method: 'POST',
-    headers: { 'authtoken': typeof session === 'string' ? session : session.token, 'filetoken': fileToken },
+    headers,
     body: fd,
   })
   const text = await res.text()
