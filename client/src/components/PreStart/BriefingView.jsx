@@ -31,6 +31,9 @@ function Text({ value }) {
 export default function BriefingView({ briefing, form, roster = [], onBack, onChanged }) {
   const [padOpen, setPadOpen] = useState(false)
   const [error, setError] = useState('')
+  const [filing, setFiling] = useState(false)
+  const [fileResult, setFileResult] = useState(null)
+  const [fileError, setFileError] = useState('')
   const values = briefing.values || {}
   const rulesOn = values.lifeSavingRules || []
   const permits = Object.entries(values.permits || {}).filter(([, p]) => p?.required)
@@ -46,6 +49,23 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
       onChanged?.(updated)
     } catch (err) {
       setError(err.message || 'Could not add the sign-on')
+    }
+  }
+
+  // File the briefing into Teammate as the permanent record. The button only
+  // appears once the briefing is complete, and disappears once it is filed —
+  // a second submission would be a duplicate safety record, not an update.
+  async function fileToTeammate() {
+    setFileError('')
+    setFiling(true)
+    try {
+      const result = await api.submitPrestartToTeammate(briefing.day, briefing.id)
+      setFileResult(result)
+      onChanged?.(result.briefing)
+    } catch (err) {
+      setFileError(err.message || 'Could not file the briefing to Teammate')
+    } finally {
+      setFiling(false)
     }
   }
 
@@ -217,6 +237,57 @@ export default function BriefingView({ briefing, form, roster = [], onBack, onCh
         <button className="btn btn-secondary ps-btn-lg" style={{ marginTop: 12 }} onClick={() => setPadOpen(true)}>
           + Post Pre Start Sign On
         </button>
+      </div>
+
+      <div className="ps-card">
+        <div className="ps-view-section">Permanent record</div>
+        {briefing.teammateSubmissionId ? (
+          <>
+            <div className="ps-view-text">
+              Filed to Teammate{briefing.teammateNumber ? ` as ${briefing.teammateNumber}` : ''}
+              {briefing.teammateSubmittedAt ? ` on ${fmtDate(briefing.teammateSubmittedAt)}` : ''}
+              {briefing.teammateSubmittedBy ? ` by ${briefing.teammateSubmittedBy}` : ''}.
+            </div>
+            {briefing.photosMovedToTeammate && (
+              <div className="ps-view-blank" style={{ marginTop: 6 }}>
+                Photos now live in Teammate; the portal's copies have been removed.
+              </div>
+            )}
+          </>
+        ) : briefing.status === 'complete' ? (
+          <>
+            <div className="ps-view-text">
+              Filing this briefing writes it into Teammate as a permanent safety record. It can only be done once.
+            </div>
+            {fileError && <div className="banner banner-danger ps-banner">{fileError}</div>}
+            <button className="btn btn-primary ps-btn-lg" style={{ marginTop: 12 }} disabled={filing} onClick={fileToTeammate}>
+              {filing ? 'Filing to Teammate…' : 'Submit to Teammate'}
+            </button>
+          </>
+        ) : (
+          <div className="ps-view-blank">The briefing has to be completed before it can be filed to Teammate.</div>
+        )}
+
+        {fileResult && (
+          <div style={{ marginTop: 12 }}>
+            <div className="ps-view-text">
+              Filed as {fileResult.number || fileResult.submissionId} · {fileResult.fieldsWritten} fields
+              {fileResult.tasks ? ` · ${fileResult.tasks} action${fileResult.tasks === 1 ? '' : 's'}` : ''}
+              {fileResult.photos.attempted ? ` · ${fileResult.photos.uploaded} of ${fileResult.photos.attempted} photos` : ''}
+            </div>
+            {fileResult.photos.failed.length > 0 && (
+              <div className="banner banner-warning ps-banner" style={{ marginTop: 8 }}>
+                {fileResult.photos.failed.length} photo{fileResult.photos.failed.length === 1 ? '' : 's'} did not upload.
+                The portal's copies have been kept.
+              </div>
+            )}
+            {fileResult.unmatchedCrew.length > 0 && (
+              <div className="ps-view-blank" style={{ marginTop: 8 }}>
+                Recorded as text (no matching Teammate employee): {fileResult.unmatchedCrew.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <SignOnPad

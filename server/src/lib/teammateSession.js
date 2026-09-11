@@ -60,7 +60,10 @@ async function signIn(submitterName) {
   if (!res.ok || !token) {
     throw new Error(`Teammate sign-in failed (${res.status}) — check TEAMMATE_USER_EMAIL / TEAMMATE_USER_PASSWORD`)
   }
-  return { token, companyId: rd.companyId, userId: rd._id, employeeId: rd.employeeId }
+  // fileToken is a SECOND token, separate from authToken. Uploads
+  // (/fileUpload, /formSubmission/formSubmissionEditImage) are rejected with a
+  // 401 "you need to be logged in" if you send authToken instead.
+  return { token, fileToken: rd.fileToken, companyId: rd.companyId, userId: rd._id, employeeId: rd.employeeId }
 }
 
 async function internal(method, path, session, body) {
@@ -138,6 +141,41 @@ async function populateSubmission(formId, values, session) {
   return { matched, updated, created, total: (doc.formValue || []).length, response_message: res.response_message }
 }
 
+// Attach a file to a `file` type field on a submission.
+//
+// File fields do not live in formValue — they land on the submission's
+// top-level `attachment[]`, and neither addFormSubmission nor
+// formSubmissionEdit will write that array (both accept it and silently drop
+// it). formSubmissionEditImage is the only route that works. It wants
+// multipart, keyed on `_id` (`formSubmissionId` is rejected), and it wants the
+// session's fileToken rather than its authToken.
+//
+// Calls append, so one call per photo. Returns the submission's stored
+// attachment list so the caller can confirm the file actually landed before
+// acting on it (e.g. deleting its only other copy).
+async function uploadFieldFile(formId, relatedFormId, file, session) {
+  const fileToken = typeof session === 'object' ? session.fileToken : null
+  if (!fileToken) throw new Error('No fileToken on this Teammate session — cannot upload')
+
+  const fd = new FormData()
+  fd.append('_id', formId)
+  fd.append('relatedFormId', relatedFormId)
+  fd.append('attach[0]', new Blob([file.buffer], { type: file.mime || 'image/jpeg' }), file.name)
+
+  const res = await fetch(`${ROOT}/formSubmission/formSubmissionEditImage`, {
+    method: 'POST',
+    headers: { 'authtoken': typeof session === 'string' ? session : session.token, 'filetoken': fileToken },
+    body: fd,
+  })
+  const text = await res.text()
+  let data
+  try { data = JSON.parse(text) } catch { data = { raw: text } }
+  if (!res.ok || data?.response_code !== 200) {
+    throw new Error(`formSubmissionEditImage failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+  return data
+}
+
 // Share a form submission with employees — Teammate emails them (the same as the
 // UI "Share form" action). employeeIds = array of Teammate employee _ids.
 // Returns { notifiedCount }.
@@ -148,4 +186,4 @@ async function shareSubmission(formId, employeeIds, message, session) {
   return { notifiedCount: res?.response_data?.notifiedCount ?? null }
 }
 
-module.exports = { haveCreds, signIn, getSubmission, getSubmissionEnvelope, populateSubmission, shareSubmission, internal, ORIGIN }
+module.exports = { haveCreds, signIn, getSubmission, getSubmissionEnvelope, populateSubmission, uploadFieldFile, shareSubmission, internal, ORIGIN }

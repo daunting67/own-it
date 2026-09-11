@@ -4,6 +4,7 @@ const db = require('../lib/supabase')
 const form = require('../lib/prestartForm')
 const { saveBriefing, getBriefing, listBriefingsForDay, addSignOn } = require('../lib/prestartStore')
 const { savePlan, listPlans, getPlan, deletePlan } = require('../lib/prestartPlanStore')
+const { submitPrestart } = require('../lib/teammatePrestart')
 const { nzDateString } = require('../lib/nzDay')
 
 const router = Router()
@@ -137,6 +138,52 @@ router.post('/briefings/:day/:id/signon', async (req, res) => {
     res.json(record)
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not add the sign-on' })
+  }
+})
+
+// File a completed briefing into Teammate as the permanent record.
+//
+// The portal's own copy stays the working record; Teammate is the one that has
+// to survive. Guarded against double submission, because a second click would
+// file a duplicate safety record rather than update the first.
+router.post('/briefings/:day/:id/submit-teammate', async (req, res) => {
+  try {
+    const record = await getBriefing(req.params.day, req.params.id)
+    if (!record) return res.status(404).json({ error: 'Briefing not found' })
+    if (record.status !== 'complete') {
+      return res.status(400).json({ error: 'Only a completed briefing can be filed to Teammate' })
+    }
+    if (record.teammateSubmissionId) {
+      return res.status(409).json({
+        error: 'This briefing has already been filed to Teammate',
+        teammateSubmissionId: record.teammateSubmissionId,
+        teammateNumber: record.teammateNumber || null,
+      })
+    }
+
+    const result = await submitPrestart(record, form, req.user?.name)
+
+    record.teammateSubmissionId = result.submissionId
+    record.teammateNumber = result.number
+    record.teammateSubmittedAt = new Date().toISOString()
+    record.teammateSubmittedBy = result.submittedBy
+
+    // The sign-on photos and the site diagram live inside this JSON record —
+    // they are not separate Storage objects — so "delete the portal's copy"
+    // means dropping them here. Only do it once EVERY photo is confirmed in
+    // Teammate: a partial upload means Teammate is not yet a complete record,
+    // and these are the only other copies in existence.
+    const allPhotosLanded = result.photos.attempted > 0 && result.photos.failed.length === 0
+    if (allPhotosLanded) {
+      record.values = { ...(record.values || {}), vmpDiagram: null }
+      record.signOns = (record.signOns || []).map(s => ({ ...s, photo: null }))
+      record.photosMovedToTeammate = true
+    }
+
+    await saveBriefing(record, req.user)
+    res.json({ ...result, photosCleanedUp: allPhotosLanded, briefing: record })
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not file the briefing to Teammate' })
   }
 })
 
