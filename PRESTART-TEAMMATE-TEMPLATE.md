@@ -102,3 +102,26 @@ was run through the iPad flow, filed, and checked in Teammate: 19 fields, the
 foreman and crew resolved to real employees, both checkbox groups, the permit
 numbers, and both photos (the 124KB TMP aerial and a sign-on photo) intact.
 Test record deleted afterwards.
+
+## The two old pre-start templates — retired 11 Sep 2026
+
+Two superseded templates existed, both long dormant:
+
+| Template | Id | Fields | Submissions | Last used |
+|---|---|---|---|---|
+| `Daily  PRESTART` | `646bce7a2442241182ea946f` | 3 | 3 | Jul 2023 |
+| `Daily Pre-Start` | `64546d0f09ddc9ca959c877c` | 13 | 1 | Jun 2024 |
+
+They were **not deleted**. Teammate has no separate archive action — its only
+retire control is Delete, which warns "this action cannot be undone" and has
+no restore button (it sets `isDelete: 'yes'` and moves the template to
+`listArchivedFormTemplate`; historical submissions do survive that, confirmed
+against the already-archived "Project Documents Form").
+
+Rather than take an irreversible action in the compliance system, both had
+their **user group access removed** (`userGroup: []` via `editFormTemplate`).
+Nobody can start a new one, the templates and all four historical records stay
+exactly where they are, and it is fully reversible.
+
+**To restore either:** set `userGroup` back to `["66334c42519ca3cc0d124c7a"]`
+("All Users") — that is what both carried before.
