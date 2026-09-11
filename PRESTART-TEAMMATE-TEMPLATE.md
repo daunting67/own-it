@@ -85,7 +85,20 @@ contentEditor, weblink, supplier. There is **no image type**, but `file` is
 already used elsewhere for photos ("Please take a photo of the induction
 form"), so the site diagram and the sign-on photos both use `file`.
 
-Consequence for `teammatePrestart.js`: those two fields are NOT filled by
-`populateSubmission`. They need a real upload via `/api/fileUpload`, and the
-Supabase photo deletion must wait on that upload confirming — not on the form
-create returning 200.
+Consequence for `teammatePrestart.js`: those two fields are not part of
+`formValue` at all. Their uploads live on the submission's top-level
+`attachment[]`, tagged with the field id as `relatedFormId`, and the ONLY
+route that writes them is `POST /formSubmission/formSubmissionEditImage`
+(multipart, keyed on `_id`, plain `authtoken`). `addFormSubmission` and
+`formSubmissionEdit` both accept an `attachment` array, return 200, and
+silently drop it.
+
+So the Supabase photo deletion waits on `formSubmissionEditImage` confirming
+— not on the form create returning 200. See the notes in
+`server/src/lib/teammatePrestartFields.js`.
+
+**Status: shipped and verified end to end on 11 Sep 2026** — a full briefing
+was run through the iPad flow, filed, and checked in Teammate: 19 fields, the
+foreman and crew resolved to real employees, both checkbox groups, the permit
+numbers, and both photos (the 124KB TMP aerial and a sign-on photo) intact.
+Test record deleted afterwards.
