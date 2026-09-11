@@ -155,6 +155,57 @@ function drawPlant(ctx, item) {
   label(ctx, item.text || '', 20)
 }
 
+
+function drawExcavator(ctx, item) {
+  // Side-on rather than plan-view: a foreman reads a machine silhouette
+  // instantly, and the boom direction is what actually matters on a TMP —
+  // rotate the symbol so the boom points where the machine will be slewing.
+  shadow(ctx, true)
+  // Tracks.
+  outlined(ctx, () => {
+    ctx.moveTo(-16, 5); ctx.lineTo(15, 5); ctx.lineTo(17, 10); ctx.lineTo(-18, 10); ctx.closePath()
+  }, '#2b3138', BLACK, 1.3)
+  shadow(ctx, false)
+  outlined(ctx, () => { ctx.arc(-12, 7.5, 2, 0, Math.PI * 2) }, '#616c77', BLACK, 0.7)
+  outlined(ctx, () => { ctx.arc(11, 7.5, 2, 0, Math.PI * 2) }, '#616c77', BLACK, 0.7)
+  // Slew body and cab.
+  outlined(ctx, () => { ctx.rect(-14, -3, 24, 8) }, '#f0b429', BLACK, 1.3)
+  outlined(ctx, () => { ctx.rect(-13, -13, 12, 10) }, '#f0b429', BLACK, 1.3)
+  outlined(ctx, () => { ctx.rect(-11.5, -11.5, 6, 5.5) }, '#2b3138', BLACK, 0.8)
+  // Boom, dipper and bucket, reaching forward.
+  outlined(ctx, () => {
+    ctx.moveTo(-1, -4); ctx.lineTo(11, -15); ctx.lineTo(14, -12); ctx.lineTo(2, -1); ctx.closePath()
+  }, '#f0b429', BLACK, 1.2)
+  outlined(ctx, () => {
+    ctx.moveTo(11.5, -14); ctx.lineTo(21, -4); ctx.lineTo(18, -1.5); ctx.lineTo(8.5, -11.5); ctx.closePath()
+  }, '#f0b429', BLACK, 1.2)
+  outlined(ctx, () => {
+    ctx.moveTo(17, -3); ctx.lineTo(24, -1); ctx.lineTo(23, 5); ctx.lineTo(16, 2); ctx.closePath()
+  }, '#d9861f', BLACK, 1.2)
+  label(ctx, item.text || '', 20)
+}
+
+function drawTipTruck(ctx, item) {
+  // Bin shown tipped, so it cannot be mistaken for the generic plant box.
+  shadow(ctx, true)
+  outlined(ctx, () => { ctx.rect(-20, 1, 38, 5) }, '#3a424b', BLACK, 1.2)
+  shadow(ctx, false)
+  // Cab.
+  outlined(ctx, () => {
+    ctx.moveTo(-20, 1); ctx.lineTo(-20, -8); ctx.lineTo(-13, -8); ctx.lineTo(-10, -1); ctx.lineTo(-10, 1); ctx.closePath()
+  }, '#f0b429', BLACK, 1.3)
+  outlined(ctx, () => { ctx.rect(-18.5, -6.5, 5, 4.5) }, '#2b3138', BLACK, 0.8)
+  // Raised bin.
+  outlined(ctx, () => {
+    ctx.moveTo(-8, 0); ctx.lineTo(14, -11); ctx.lineTo(19, -3); ctx.lineTo(-7, -3); ctx.closePath()
+  }, '#d9861f', BLACK, 1.3)
+  // Wheels.
+  outlined(ctx, () => { ctx.arc(-14, 7, 4, 0, Math.PI * 2) }, BLACK, BLACK, 0.8)
+  outlined(ctx, () => { ctx.arc(7, 7, 4, 0, Math.PI * 2) }, BLACK, BLACK, 0.8)
+  outlined(ctx, () => { ctx.arc(15, 7, 4, 0, Math.PI * 2) }, BLACK, BLACK, 0.8)
+  label(ctx, item.text || '', 18)
+}
+
 function drawNote(ctx, item) {
   const text = item.text || 'Note'
   ctx.font = '700 11px system-ui, -apple-system, sans-serif'
@@ -367,6 +418,8 @@ export const SYMBOLS = {
   arrow:       { kind: 'point', label: 'Direction arrow', group: 'Movement', draw: drawArrow, rotatable: true },
   entry:       { kind: 'point', label: 'Site entry', group: 'Movement', draw: (c, i) => drawGate(c, i, GREEN, 'ENTRY'), rotatable: true, editable: true },
   exit:        { kind: 'point', label: 'Site exit', group: 'Movement', draw: (c, i) => drawGate(c, i, RED, 'EXIT'), rotatable: true, editable: true },
+  excavator:   { kind: 'point', label: 'Excavator', group: 'Movement', draw: drawExcavator, rotatable: true, editable: true },
+  tipTruck:    { kind: 'point', label: 'Tip truck', group: 'Movement', draw: drawTipTruck, rotatable: true, editable: true },
   plant:       { kind: 'point', label: 'Plant / vehicle', group: 'Movement', draw: drawPlant, rotatable: true, editable: true },
   speed:       { kind: 'point', label: 'Speed limit', group: 'Signage', draw: drawSpeed, editable: true, defaultText: '30' },
   sign:        { kind: 'point', label: 'Warning sign', group: 'Signage', draw: drawSign, editable: true, defaultText: 'ROAD WORKS' },
