@@ -75,7 +75,12 @@ function Chip({ label, onRemove }) {
 function CompetencyMatcher({ dataVersion = 0 }) {
   const [options, setOptions] = useState([])
   const [loadingOptions, setLoadingOptions] = useState(true)
+  // `selected` is what is ticked right now; `applied` is what the results below
+  // actually reflect. They are separate because ticking four boxes used to fire
+  // four searches, three of them thrown away before anyone read them — the
+  // search runs once, when the list is closed.
   const [selected, setSelected] = useState([])
+  const [applied, setApplied] = useState([])
   const [filterText, setFilterText] = useState('')
   const [open, setOpen] = useState(false)
   const [matches, setMatches] = useState(null)
@@ -100,19 +105,38 @@ function CompetencyMatcher({ dataVersion = 0 }) {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
+  // Closing the list is what commits the choice — whether that was the Done
+  // button or a click outside. Deliberately keyed on `open` alone so that
+  // ticking while it is open changes nothing below.
   useEffect(() => {
-    if (!selected.length) { setMatches(null); return }
+    if (!open) setApplied(selected)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  useEffect(() => {
+    if (!applied.length) { setMatches(null); return }
     setLoading(true)
     setError(null)
-    api.getTrainingMatches(selected)
+    api.getTrainingMatches(applied)
       .then(res => setMatches(res.matches))
       .catch(err => setError(err.message || 'Could not search Teammate'))
       .finally(() => setLoading(false))
-  }, [selected, dataVersion])
+  }, [applied, dataVersion])
 
   function toggle(name) {
     setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
   }
+
+  // The chips sit outside the dropdown, so removing one is a finished action —
+  // it searches straight away rather than waiting for a list that isn't open.
+  function removeSelection(name) {
+    const next = selected.filter(n => n !== name)
+    setSelected(next)
+    setApplied(next)
+  }
+
+  const pendingSelection =
+    selected.length !== applied.length || selected.some(n => !applied.includes(n))
 
   const filtered = options.filter(o => o.name.toLowerCase().includes(filterText.toLowerCase()))
   const groups = ['Competency', 'Qualification', 'Training']
@@ -208,7 +232,7 @@ function CompetencyMatcher({ dataVersion = 0 }) {
       {selected.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '12px 0' }}>
           {selected.map(name => (
-            <Chip key={name} label={name} onRemove={() => toggle(name)} />
+            <Chip key={name} label={name} onRemove={() => removeSelection(name)} />
           ))}
         </div>
       )}
@@ -225,6 +249,12 @@ function CompetencyMatcher({ dataVersion = 0 }) {
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Select at least one to see who qualifies.</div>
       )}
 
+      {pendingSelection && selected.length > 0 && !error && (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          {selected.length} selected — close the list to search.
+        </div>
+      )}
+
       {loading && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Searching…</div>}
 
       {!loading && !error && matches !== null && (
@@ -234,14 +264,14 @@ function CompetencyMatcher({ dataVersion = 0 }) {
               <thead>
                 <tr>
                   <th>Employee</th>
-                  {selected.map(name => <th key={name}>{name}</th>)}
+                  {applied.map(name => <th key={name}>{name}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {matches.map(m => (
                   <tr key={m.employee}>
                     <td>{m.employee}</td>
-                    {selected.map(name => {
+                    {applied.map(name => {
                       const d = m.details.find(x => x.competency === name)
                       return (
                         <td key={name} style={d?.expired ? { color: 'var(--danger)' } : undefined}>
@@ -262,7 +292,7 @@ function CompetencyMatcher({ dataVersion = 0 }) {
           </div>
         ) : (
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            No one currently holds all of: {selected.join(', ')}.
+            No one currently holds all of: {applied.join(', ')}.
           </div>
         )
       )}
