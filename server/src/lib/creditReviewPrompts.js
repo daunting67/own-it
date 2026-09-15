@@ -16,6 +16,7 @@
 // and propose an amendment to it.
 
 const mammoth = require('mammoth')
+const { PDFDocument } = require('pdf-lib')
 const {
   isReadable,
   unreadableReason,
@@ -98,7 +99,61 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
 }
 Use an empty array for any section this document has nothing to say about. Do not pad.`
 
-async function digestDocument({ filename, buffer }) {
+// A terms-of-trade document quoted in full is a lot of output. 8000 (what the tender and
+// contract-review digests use) was not enough for the first real credit application put
+// through this module — the response was cut off mid-clause. This is the whole budget for
+// one read, thinking included.
+const DIGEST_MAX_TOKENS = 16000
+
+// Merge two digests of DIFFERENT PAGE RANGES of the same document. Scalars come from
+// whichever half saw them first (the document's identity is usually stated on page 1);
+// every list is concatenated, because a clause in the second half is not a competing
+// answer to a clause in the first, it is an additional one.
+function mergeDigests(a, b) {
+  if (!a) return b
+  if (!b) return a
+  const cat = k => [...(a[k] || []), ...(b[k] || [])]
+  return {
+    filename: a.filename,
+    read: true,
+    pages: (a.pages || 0) + (b.pages || 0) || null,
+    documentType: a.documentType ?? b.documentType ?? null,
+    supplierName: a.supplierName ?? b.supplierName ?? null,
+    templateSource: a.templateSource ?? b.templateSource ?? null,
+    summary: [a.summary, b.summary].filter(Boolean).join(' '),
+    keyFacts: cat('keyFacts'),
+    clauses: cat('clauses'),
+    signatureRequirements: cat('signatureRequirements'),
+    incorporatedReferences: cat('incorporatedReferences'),
+    risks: cat('risks'),
+    gaps: cat('gaps')
+  }
+}
+
+// Split a PDF down the middle by page count. Returns null when there is nothing left to
+// split (a single page), which is the point at which the caller has to give up.
+async function splitPdfInHalf(buffer) {
+  let src
+  try {
+    src = await PDFDocument.load(buffer, { ignoreEncryption: true })
+  } catch {
+    return null
+  }
+  const total = src.getPageCount()
+  if (total < 2) return null
+  const mid = Math.ceil(total / 2)
+  const ranges = [[...Array(mid).keys()], [...Array(total - mid).keys()].map(i => i + mid)]
+  const halves = []
+  for (const indices of ranges) {
+    const out = await PDFDocument.create()
+    const copied = await out.copyPages(src, indices)
+    copied.forEach(pg => out.addPage(pg))
+    halves.push(Buffer.from(await out.save()))
+  }
+  return halves
+}
+
+async function digestDocument({ filename, buffer, depth = 0, partLabel = null, asText = false }) {
   if (!isReadable(filename)) {
     return { filename, read: false, reason: unreadableReason(filename) }
   }
@@ -108,9 +163,12 @@ async function digestDocument({ filename, buffer }) {
 
   const content = []
   let pages = null
-  const isPdf = PDF.test(filename)
-  const isDocx = DOCX.test(filename)
-  const isXlsx = XLSX.test(filename)
+  let sourceText = null
+  // asText marks a slice already extracted from this file (see digestText) — the slice is
+  // plain text even when the filename still says .pdf/.docx.
+  const isPdf = !asText && PDF.test(filename)
+  const isDocx = !asText && DOCX.test(filename)
+  const isXlsx = !asText && XLSX.test(filename)
 
   if (buffer.length > MAX_DOCUMENT_BYTES) {
     return {
@@ -156,6 +214,7 @@ async function digestDocument({ filename, buffer }) {
       // problem from an unsupported type — say which, or the user re-uploads the same file.
       return { filename, read: false, reason: 'No readable text in this file — if it is a scan, save it as a PDF and re-upload (PDF scans are read as images, this format is not)' }
     }
+    sourceText = text
     content.push({
       type: 'text',
       text: text.length > MAX_TEXT_CHARS
@@ -166,13 +225,48 @@ async function digestDocument({ filename, buffer }) {
 
   content.push({
     type: 'text',
-    text: `The document above is the file "${filename}" from the credit application pack. Produce the digest JSON as specified.`
+    text: `The document above is ${partLabel || `the file "${filename}"`} from the credit application pack. `
+      + `Produce the digest JSON as specified.`
   })
 
-  let digest
   try {
-    digest = await callClaude({ system: DIGEST_SYSTEM, content, maxTokens: 8000, effort: 'medium' })
+    const digest = await callClaude({ system: DIGEST_SYSTEM, content, maxTokens: DIGEST_MAX_TOKENS, effort: 'medium' })
+    return { filename, read: true, pages, ...digest }
   } catch (err) {
+    // Ran out of room mid-answer. The document is fine — there is simply more in it than
+    // one read can hold, which is exactly what a terms-of-trade document quoted clause by
+    // clause looks like. Halve it and read each half, rather than reporting a perfectly
+    // good document as unreadable (which is what the first real run did).
+    if (err.isMaxTokens && depth < 4) {
+      if (isPdf) {
+        const halves = await splitPdfInHalf(buffer)
+        if (halves) {
+          const [a, b] = await Promise.all([
+            digestDocument({ filename, buffer: halves[0], depth: depth + 1, partLabel: `pages 1-${Math.ceil((pages || 2) / 2)} of "${filename}"` }),
+            digestDocument({ filename, buffer: halves[1], depth: depth + 1, partLabel: `the second half of "${filename}"` })
+          ])
+          if (a.read || b.read) return mergeDigests(a.read ? a : null, b.read ? b : null)
+        }
+      } else if (sourceText && sourceText.length > 4000) {
+        // Same halving for a text-based document, split on a paragraph break near the
+        // middle so a clause is less likely to be cut in two.
+        const mid = sourceText.indexOf('\n', Math.floor(sourceText.length / 2))
+        const cut = mid === -1 ? Math.floor(sourceText.length / 2) : mid
+        const [a, b] = await Promise.all([
+          digestText({ filename, text: sourceText.slice(0, cut), depth: depth + 1, partLabel: `the first half of "${filename}"` }),
+          digestText({ filename, text: sourceText.slice(cut), depth: depth + 1, partLabel: `the second half of "${filename}"` })
+        ])
+        if (a.read || b.read) return mergeDigests(a.read ? a : null, b.read ? b : null)
+      }
+      return {
+        filename,
+        read: false,
+        reason: 'This document holds more detail than can be read even one page at a time — it may need to be split up and re-uploaded'
+      }
+    }
+    if (err.isBadJson) {
+      return { filename, read: false, reason: `${err.message} — worth simply running it again; if it repeats, re-export the file` }
+    }
     if (isPdf) {
       throw new Error(
         `${err.message} — this PDF opened normally but was rejected by the AI's reader. ` +
@@ -182,8 +276,12 @@ async function digestDocument({ filename, buffer }) {
     }
     throw err
   }
+}
 
-  return { filename, read: true, pages, ...digest }
+// Re-read an already-extracted slice of text (the halving path above) without going back
+// through format detection — the buffer it came from may not exist any more.
+async function digestText({ filename, text, depth, partLabel }) {
+  return digestDocument({ filename, buffer: Buffer.from(text, 'utf8'), depth, partLabel, asText: true })
 }
 
 // ---------------------------------------------------------------- stage two
@@ -259,12 +357,27 @@ async function buildReview({ supplierName, notes, digests }) {
     'Produce the credit application review JSON as specified.'
   ].filter(v => v !== null).join('\n')
 
-  return callClaude({
-    system: REVIEW_SYSTEM,
-    content: [{ type: 'text', text: brief }],
-    maxTokens: 20000,
-    effort: 'high'
-  })
+  try {
+    return await callClaude({
+      system: REVIEW_SYSTEM,
+      content: [{ type: 'text', text: brief }],
+      maxTokens: 20000,
+      effort: 'high'
+    })
+  } catch (err) {
+    // Stage 2 can run out of room too, on a pack with a lot of clauses. Non-streaming
+    // requests can't safely go much above this budget (streaming is what the bigger
+    // ceilings need, and nothing else in this codebase streams), so say plainly what
+    // happened and what to do — not a raw JSON parse error.
+    if (err.isMaxTokens) {
+      throw new Error('There were more clauses in this pack than fit in one review. '
+        + 'Try running the terms & conditions on their own, or split the pack and review it in parts.')
+    }
+    if (err.isBadJson) {
+      throw new Error(`${err.message} — worth simply running it again`)
+    }
+    throw err
+  }
 }
 
 module.exports = { isReadable, unreadableReason, digestDocument, buildReview, RECURRING_RISKS }

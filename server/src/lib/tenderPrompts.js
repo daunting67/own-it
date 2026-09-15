@@ -142,7 +142,25 @@ async function callClaude({ system, content, maxTokens, effort }) {
   }
   const raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
   if (!raw.trim()) throw new Error('Claude returned an empty response — try again')
-  return JSON.parse(stripFences(raw))
+  // A response that ran out of budget is cut off MID-STRING, so JSON.parse fails with
+  // "Unterminated string in JSON at position ..." — which reads like a corrupt document
+  // and sent at least one real credit application review (Franklin Smith's terms of
+  // business, 16 Sep 2026) back to the user blaming its PDF. It is neither: the document
+  // read fine, there was just more detail in it than the budget allowed. Flag it as its
+  // own condition so callers can split the document and retry, the way the fuel
+  // reconciliation already does (see costControl.js's extractReceiptsBatch).
+  if (data.stop_reason === 'max_tokens') {
+    const err = new Error('The response was cut off before it finished — this document holds more detail than fits in one read')
+    err.isMaxTokens = true
+    throw err
+  }
+  try {
+    return JSON.parse(stripFences(raw))
+  } catch (parseErr) {
+    const err = new Error(`Claude's response was not valid JSON (${parseErr.message})`)
+    err.isBadJson = true
+    throw err
+  }
 }
 
 // ---------------------------------------------------------------- stage one
