@@ -165,7 +165,13 @@ router.patch('/:id', async (req, res) => {
   const { data: existing } = await db.from('Staff').select('*').eq('id', req.params.id).single()
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const updates = { updatedAt: new Date().toISOString() }
-  if (name !== undefined) updates.name = name
+  // The name is how a record is found in the list at all — blanking one would
+  // strand it. The CSV import writes straight to the table and bypasses this,
+  // so the guard is here rather than only in the modal.
+  if (name !== undefined) {
+    if (!String(name).trim()) return res.status(400).json({ error: 'Name cannot be empty' })
+    updates.name = String(name).trim()
+  }
   if (hireType !== undefined) updates.hireType = hireType
   if (siteId !== undefined) updates.siteId = siteId || null
   if (position !== undefined) updates.position = position

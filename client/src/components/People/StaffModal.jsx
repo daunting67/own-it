@@ -53,6 +53,7 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
 
   function detailsFrom(m) {
     return {
+      name: m.name || '',
       hireType: canonicalHireType(m.hireType) || 'Direct Hire',
       position: m.position || '',
       siteId: m.siteId || '',
@@ -68,6 +69,10 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
   function setDetail(field, value) { setDetails(d => ({ ...d, [field]: value })) }
 
   async function saveDetails() {
+    if (!details.name.trim()) {
+      setDetailsError('Name cannot be empty')
+      return
+    }
     setDetailsSaving(true)
     setDetailsError('')
     try {
@@ -200,6 +205,16 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
 
           {tab === 'details' && (
             <div>
+              <div className="form-group" style={{ marginBottom: 14 }}>
+                <label className="form-label">Name</label>
+                <input
+                  className="form-input"
+                  value={details.name}
+                  onChange={e => setDetail('name', e.target.value)}
+                  placeholder="Full name"
+                />
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="form-group">
                   <label className="form-label">Hire type</label>
