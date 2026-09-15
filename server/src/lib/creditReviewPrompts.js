@@ -393,7 +393,9 @@ async function digestText({ filename, text, depth, partLabel }) {
 
 // ---------------------------------------------------------------- stage two
 
-const REVIEW_SYSTEM = `Act as P&I's company lawyer: a senior New Zealand commercial solicitor
+// The lawyer's brief, shared by every stage-2 call so each piece of the review is written
+// in the same voice, to the same standing positions, as the others.
+const REVIEW_PREAMBLE = `Act as P&I's company lawyer: a senior New Zealand commercial solicitor
 experienced in trade credit, the Personal Property Securities Act 1999, personal guarantees and
 indemnities, the Credit Contracts and Consumer Finance Act, the Fair Trading Act, the Privacy Act
 2020, and normal credit terms in the NZ civil construction supply chain.
@@ -401,25 +403,73 @@ indemnities, the Credit Contracts and Consumer Finance Act, the Fair Trading Act
 ${COMPANY_CONTEXT}
 
 You are reviewing a supplier credit application BEFORE P&I's directors sign it, and advising on the
-legal and commercial implications for the company and for the directors personally. You have been
-given per-document notes taken from every document in the pack (not the raw documents — another step
-already read those and preserved the clause wording).
+legal and commercial implications for the company and for the directors personally. You are working
+from notes another step took while reading the pack — including the clause wording it preserved —
+not from the raw documents.
 
-Do not merely summarise the terms — analyse the practical consequence of each material clause for
-P&I, and for each concerning clause give a negotiation angle P&I can actually put to the supplier.
-Where the notes do not cover something needed for a full assessment, say so rather than guessing.
-Never invent a clause, figure or wording the notes do not support.
+Do not merely summarise the terms — give the practical consequence for P&I, and for each concerning
+clause a negotiation angle P&I can actually put to the supplier. Where the notes do not cover
+something needed for a full assessment, say so rather than guessing. Never invent a clause, figure
+or wording the notes do not support.
 
-${RECURRING_RISKS}
+${RECURRING_RISKS}`
 
-Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
+// Stage 2 is built in PIECES, not in one answer. Asking for the whole review at once —
+// every clause analysed, the six-risk checklist, director exposure, the summary — put a
+// hard ceiling on how many clauses a pack could contain: Franklin Smith's terms of
+// business (16 Sep 2026) had more, and the run failed outright, with nothing to show for
+// the reading that had already succeeded. Telling the user to split the pack by hand was
+// not a fix.
+//
+// So the clauses are analysed in batches, and each remaining section gets its own call.
+// Nothing here scales with the size of the pack except the NUMBER of calls, so there is
+// no pack big enough to overflow a single response. It also reads better: the summary and
+// the overall recommendation are written last, with the finished clause analysis in front
+// of them, rather than everything being produced in one pass.
+
+const CLAUSES_PER_BATCH = 10
+
+const CLAUSE_SYSTEM = `${REVIEW_PREAMBLE}
+
+You are analysing ONE BATCH of clauses from the pack — not the whole review. Another step
+writes the summary and the overall recommendation from your analysis and the other batches.
+
+Analyse every clause you are given. Do not skip one because it looks routine: routine wording is
+where risk hides in a credit application. If two clauses in the batch work together (a guarantee
+and the indemnity that backs it), say so in whyItMatters.
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{
+  "clauseAnalysis": [ { "clauseRef": "<clause number / title, as given>", "riskRating": "<high | medium | low>", "plainEnglish": "<one or two sentences: what it means>", "whyItMatters": "<the commercial or director impact on P&I specifically>", "recommendedPosition": "<accept | amend | reject>", "negotiationAngle": "<the actual amendment to ask for; null if accepting as is>" } ]
+}
+One entry per clause given, in the order given.`
+
+const CHECKLIST_SYSTEM = `${REVIEW_PREAMBLE}
+
+You are answering P&I's standing risk checklist against this pack — not writing the whole review.
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{
+  "standingRiskChecklist": [ { "risk": "<unlimited personal guarantee | EC Credit Control template | general PPSA charge | real property / land charge | default interest | defect or dispute notification window>", "present": true, "detail": "<what this supplier's pack actually does about it, quoting the clause reference; if not present, say so plainly>", "riskRating": "<high | medium | low | not applicable>" } ],
+  "templateSource": "<the terms template publisher if identifiable, e.g. 'EC Credit Control', else null>"
+}
+Exactly six entries, one per checklist item, in the order listed above. Use "present": false and
+riskRating "not applicable" for any this supplier does not impose — that is a finding, not a gap.`
+
+const SUMMARY_SYSTEM = `${REVIEW_PREAMBLE}
+
+The clause-by-clause analysis and the standing risk checklist are already done and are given to
+you below. Your job is the parts that depend on seeing the whole picture: the plain-English
+summary a director reads first, their personal exposure, anything inconsistent with normal NZ
+construction practice, and the overall recommendation.
+
+Work only from the analysis and notes given. Never introduce a clause or figure that is not in them.
+
+Return ONLY valid JSON (no markdown fences, no explanation):
 {
   "supplierName": "<the supplier as named in the pack>",
-  "supplierTrade": "<what this supplier supplies, in a few words, e.g. 'Timber, hardware, building supplies'>",
-  "templateSource": "<the terms template publisher if identifiable, e.g. 'EC Credit Control', else null>",
-  "keyClausesSummary": "<2-4 paragraphs of plain-English narrative covering the key commercial and legal clauses: credit limit and payment terms, title and risk, security, guarantee, interest and recovery costs, disputes. Written for a director, not a lawyer.>",
-  "clauseAnalysis": [ { "clauseRef": "<clause number / title>", "riskRating": "<high | medium | low>", "plainEnglish": "<one or two sentences: what it means>", "whyItMatters": "<the commercial or director impact on P&I specifically>", "recommendedPosition": "<accept | amend | reject>", "negotiationAngle": "<what to put to the supplier — the actual amendment to ask for; null if accepting as is>" } ],
-  "standingRiskChecklist": [ { "risk": "<the checklist item, using the names above: unlimited personal guarantee | EC Credit Control template | general PPSA charge | real property / land charge | default interest | defect or dispute notification window>", "present": true, "detail": "<what this supplier's pack actually does about it, quoting the clause reference; if not present, say so plainly>", "riskRating": "<high | medium | low | not applicable>" } ],
+  "supplierTrade": "<what this supplier supplies, in a few words>",
+  "keyClausesSummary": "<2-4 paragraphs of plain-English narrative covering credit limit and payment terms, title and risk, security, guarantee, interest and recovery costs, disputes. Written for a director, not a lawyer.>",
   "directorExposure": {
     "guaranteeRequired": true,
     "summary": "<what the directors are personally on the hook for if they sign as drafted>",
@@ -431,12 +481,72 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
     "topRisks": [ "<top commercial risk 1>", "<2>", "<3>" ],
     "positioning": "<standard | firm but not unusual | unusually aggressive>",
     "positioningReason": "<one or two sentences supporting that assessment>",
-    "recommendation": "<one of: 'accept_as_is', 'accept_with_amendment', 'do_not_sign'>",
+    "recommendation": "<accept_as_is | accept_with_amendment | do_not_sign>",
     "recommendationReason": "<one paragraph: what the directors should do and why>"
   }
+}`
+
+function packContext({ supplierName, notes, read, unread }) {
+  return [
+    supplierName ? `Supplier (as given by the user): ${supplierName}` : null,
+    'Applicant: Pipelines & Infrastructure (North) Limited',
+    notes ? `Notes from the user: ${notes}` : null,
+    '',
+    `Documents read (${read.length}):`,
+    ...read.map(d => `- ${d.filename}${d.pages ? ` (${d.pages} pages)` : ''} — ${d.documentType || 'unclassified'}`),
+    unread.length
+      ? `\nDocuments NOT read (${unread.length}) — do not assume what they contained:\n${unread.map(d => `- ${d.filename}: ${d.reason}`).join('\n')}`
+      : '\nEvery uploaded document was read.',
+    '',
+    'Key facts taken from the pack:',
+    JSON.stringify(read.flatMap(d => d.keyFacts || []), null, 2)
+  ].filter(v => v !== null).join('\n')
 }
-standingRiskChecklist MUST contain an entry for all six checklist items, with "present": false and
-riskRating "not applicable" for any this supplier does not impose. Do not pad any other array.`
+
+// One batch of clauses, halving itself if even that batch overruns — the same treatment
+// the reading stage gets, for the same reason.
+async function analyseClauseBatch(context, clauses, depth = 0) {
+  if (!clauses.length) return []
+  const brief = [
+    context,
+    '',
+    `Analyse these ${clauses.length} clause(s):`,
+    JSON.stringify(clauses, null, 2),
+    '',
+    'Produce the clauseAnalysis JSON as specified.'
+  ].join('\n')
+  try {
+    const out = await callClaude({
+      system: CLAUSE_SYSTEM,
+      content: [{ type: 'text', text: brief }],
+      maxTokens: 16000,
+      effort: 'max'
+    })
+    return Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
+  } catch (err) {
+    if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
+      const mid = Math.ceil(clauses.length / 2)
+      const [a, b] = await Promise.all([
+        analyseClauseBatch(context, clauses.slice(0, mid), depth + 1),
+        analyseClauseBatch(context, clauses.slice(mid), depth + 1)
+      ])
+      return [...a, ...b]
+    }
+    if (err.isMaxTokens || err.isBadJson) {
+      // One clause alone could not be analysed. Losing it silently would leave a review
+      // that looks complete — surface it as a row the reader can see and chase.
+      return clauses.map(c => ({
+        clauseRef: c.clauseRef || 'Unidentified clause',
+        riskRating: 'high',
+        plainEnglish: 'This clause could not be analysed automatically.',
+        whyItMatters: 'It is in the pack but is not covered by this review — read it yourself before signing.',
+        recommendedPosition: 'amend',
+        negotiationAngle: null
+      }))
+    }
+    throw err
+  }
+}
 
 async function buildReview({ supplierName, notes, digests }) {
   const read = digests.filter(d => d.read)
@@ -446,47 +556,76 @@ async function buildReview({ supplierName, notes, digests }) {
     throw new Error('None of the uploaded documents could be read — nothing to build a review from')
   }
 
-  const brief = [
-    supplierName ? `Supplier (as given by the user): ${supplierName}` : null,
-    'Applicant: Pipelines & Infrastructure (North) Limited',
-    notes ? `Notes from the user: ${notes}` : null,
-    '',
-    `Documents read (${read.length}):`,
-    ...read.map(d => `- ${d.filename}${d.pages ? ` (${d.pages} pages)` : ''} — ${d.documentType || 'unclassified'}`),
-    '',
-    unread.length
-      ? `Documents NOT read (${unread.length}) — say so explicitly in keyClausesSummary, and do not assume what they contained:\n${unread.map(d => `- ${d.filename}: ${d.reason}`).join('\n')}`
-      : 'Every uploaded document was read.',
-    '',
-    'Per-document notes follow as JSON.',
-    JSON.stringify(read, null, 2),
-    '',
-    'Produce the credit application review JSON as specified.'
-  ].filter(v => v !== null).join('\n')
+  const context = packContext({ supplierName, notes, read, unread })
 
-  try {
-    return await callClaude({
-      system: REVIEW_SYSTEM,
-      content: [{ type: 'text', text: brief }],
-      maxTokens: 20000,
-      // The most thorough setting available. A credit application review is read once,
-      // before directors sign personally — a missed guarantee clause costs more than any
-      // amount of time or tokens this saves.
+  // Every clause the reading stage found, tagged with the document it came from.
+  const clauses = read.flatMap(d => (d.clauses || []).map(c => ({ ...c, document: d.documentType || d.filename })))
+  const batches = []
+  for (let i = 0; i < clauses.length; i += CLAUSES_PER_BATCH) {
+    batches.push(clauses.slice(i, i + CLAUSES_PER_BATCH))
+  }
+
+  // Clause batches and the checklist do not depend on each other, so they run together.
+  const clauseContext = `${context}\n\nClause wording was taken from: ${read.map(d => d.filename).join(', ')}.`
+  const [clauseResults, checklistOut] = await Promise.all([
+    Promise.all(batches.map(b => analyseClauseBatch(clauseContext, b))),
+    callClaude({
+      system: CHECKLIST_SYSTEM,
+      content: [{
+        type: 'text',
+        text: [
+          context,
+          '',
+          'Every clause found in the pack, as read:',
+          JSON.stringify(clauses, null, 2),
+          '',
+          'Produce the standingRiskChecklist JSON as specified.'
+        ].join('\n')
+      }],
+      maxTokens: 8000,
       effort: 'max'
+    }).catch(err => {
+      if (err.isMaxTokens || err.isBadJson) return { standingRiskChecklist: [], templateSource: null }
+      throw err
     })
-  } catch (err) {
-    // Stage 2 can run out of room too, on a pack with a lot of clauses. Non-streaming
-    // requests can't safely go much above this budget (streaming is what the bigger
-    // ceilings need, and nothing else in this codebase streams), so say plainly what
-    // happened and what to do — not a raw JSON parse error.
-    if (err.isMaxTokens) {
-      throw new Error('There were more clauses in this pack than fit in one review. '
-        + 'Try running the terms & conditions on their own, or split the pack and review it in parts.')
-    }
-    if (err.isBadJson) {
-      throw new Error(`${err.message} — worth simply running it again`)
-    }
-    throw err
+  ])
+  const clauseAnalysis = clauseResults.flat()
+
+  // The summary is written LAST, reading the finished analysis rather than the raw pack —
+  // it only needs the shape of each finding, not the full wording again.
+  const summary = await callClaude({
+    system: SUMMARY_SYSTEM,
+    content: [{
+      type: 'text',
+      text: [
+        context,
+        '',
+        `Clause-by-clause analysis (${clauseAnalysis.length} clauses):`,
+        JSON.stringify(clauseAnalysis.map(c => ({
+          clauseRef: c.clauseRef, riskRating: c.riskRating,
+          plainEnglish: c.plainEnglish, whyItMatters: c.whyItMatters,
+          recommendedPosition: c.recommendedPosition
+        })), null, 2),
+        '',
+        'Standing risk checklist:',
+        JSON.stringify(checklistOut?.standingRiskChecklist || [], null, 2),
+        '',
+        'Risks and gaps noted while reading:',
+        JSON.stringify({ risks: read.flatMap(d => d.risks || []), gaps: read.flatMap(d => d.gaps || []) }, null, 2),
+        '',
+        'Produce the summary JSON as specified.'
+      ].join('\n')
+    }],
+    maxTokens: 12000,
+    effort: 'max'
+  })
+
+  return {
+    ...summary,
+    supplierName: summary?.supplierName || supplierName || read.find(d => d.supplierName)?.supplierName || 'Supplier',
+    templateSource: checklistOut?.templateSource || read.find(d => d.templateSource)?.templateSource || null,
+    clauseAnalysis,
+    standingRiskChecklist: checklistOut?.standingRiskChecklist || []
   }
 }
 
