@@ -1,4 +1,4 @@
-export default function Topbar({ title, saveState, pendingCount, onAlert }) {
+export default function Topbar({ title, saveState }) {
   const dateLine = new Date().toLocaleDateString('en-NZ', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
@@ -13,11 +13,6 @@ export default function Topbar({ title, saveState, pendingCount, onAlert }) {
         {saveState === 'saving' && 'Saving…'}
         {saveState === 'saved' && 'Saved'}
       </span>
-      {pendingCount > 0 && (
-        <button className="btn-orange" onClick={onAlert}>
-          ⚠ {pendingCount} pending invoice{pendingCount !== 1 ? 's' : ''}
-        </button>
-      )}
     </header>
   )
 }

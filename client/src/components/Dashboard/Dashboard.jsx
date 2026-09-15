@@ -17,16 +17,13 @@ const hasDept = (user, dept) => !!user?.admin || (user?.departments || []).inclu
 export default function Dashboard({ onNavigate }) {
   const { user } = useAuth()
   const [staff, setStaff] = useState(null)
-  const [invoices, setInvoices] = useState(null)
   const [runs, setRuns] = useState(null)
 
   const canPeople = hasDept(user, 'people')
-  const canPayroll = hasDept(user, 'payroll')
   const canRuns = user?.admin || ['meetings', 'hs', 'prestart', 'people'].some(d => hasDept(user, d))
 
   useEffect(() => {
     api.getStaff().then(setStaff).catch(() => setStaff([]))
-    api.getInvoices().then(setInvoices).catch(() => setInvoices([]))
     api.getProcessRuns().then(setRuns).catch(() => setRuns([]))
   }, [])
 
@@ -36,21 +33,10 @@ export default function Dashboard({ onNavigate }) {
 
   const people = (staff || []).filter(s => !isNotAPerson(s.name))
   const onboarding = people.filter(s => calcProgress(s.checklist) < 100)
-  const pending = (invoices || []).filter(i => i.status === 'pending')
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
   const runsThisWeek = (runs || []).filter(r => new Date(r.createdAt).getTime() > weekAgo)
 
   const tasks = [
-    ...(canPayroll ? pending.map(inv => ({
-      key: `inv-${inv.id}`,
-      name: `Invoice ${inv.invNumber || '—'}${inv.supplier?.name ? ` — ${inv.supplier.name}` : ''}`,
-      dept: 'Payroll',
-      due: 'Review',
-      urgent: true,
-      status: 'Needs Input',
-      tagClass: 'tag-needsinput',
-      nav: 'payroll',
-    })) : []),
     ...(canPeople ? onboarding.map(s => ({
       key: `staff-${s.id}`,
       name: `Onboarding — ${s.name}`,
@@ -63,12 +49,11 @@ export default function Dashboard({ onNavigate }) {
     })) : []),
   ].slice(0, 8)
 
-  const attention = (canPayroll ? pending.length : 0) + (canPeople ? onboarding.length : 0)
-  const loading = staff === null || invoices === null || runs === null
+  const attention = canPeople ? onboarding.length : 0
+  const loading = staff === null || runs === null
 
   const metrics = [
     canPeople && { kicker: 'Staff Records', num: people.length, meta: `${onboarding.length} onboarding` },
-    canPayroll && { kicker: 'Pending Invoices', num: pending.length, meta: pending.length > 0 ? 'needs review' : 'all clear', urgent: pending.length > 0 },
     canPeople && { kicker: 'Onboarding Open', num: onboarding.length, meta: `of ${people.length} staff` },
     canRuns && { kicker: 'Runs This Week', num: runsThisWeek.length, meta: `${(runs || []).length} all time` },
   ].filter(Boolean)

@@ -46,14 +46,7 @@ export default function App() {
   const { user, loading } = useAuth()
   const [dept, setDept] = useState('dashboard')
   const [saveState, setSaveState] = useState('')
-  const [pendingCount, setPendingCount] = useState(0)
 
-  useEffect(() => {
-    if (!user) return
-    api.getInvoices()
-      .then(invs => setPendingCount(invs.filter(i => i.status === 'pending').length))
-      .catch(() => setPendingCount(0))
-  }, [user, dept])
 
   if (loading) {
     return (
@@ -79,8 +72,6 @@ export default function App() {
         <Topbar
           title={VIEW_TITLES[dept] || dept}
           saveState={saveState}
-          pendingCount={pendingCount}
-          onAlert={() => setDept('payroll')}
         />
         <div className="content">
           <div className={`content-inner${WIDE_VIEWS.has(dept) ? ' content-inner-wide' : ''}${FULL_VIEWS.has(dept) ? ' content-inner-full' : ''}`}>

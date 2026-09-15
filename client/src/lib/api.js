@@ -46,12 +46,6 @@ export const api = {
   updateSupplier: (id, data) => request(`/api/suppliers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteSupplier: (id) => request(`/api/suppliers/${id}`, { method: 'DELETE' }),
 
-  // Invoices
-  getInvoices: () => request('/api/invoices'),
-  createInvoice: (data) => request('/api/invoices', { method: 'POST', body: JSON.stringify(data) }),
-  updateInvoice: (id, data) => request(`/api/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteInvoice: (id) => request(`/api/invoices/${id}`, { method: 'DELETE' }),
-
   // QuickBooks Time — upcoming leave
   getQbtLeave: () => request('/api/qbt/leave'),
   getQbtLeaveDocument: () => request('/api/qbt/leave/document'),
