@@ -105,6 +105,59 @@ Use an empty array for any section this document has nothing to say about. Do no
 // one read, thinking included.
 const DIGEST_MAX_TOKENS = 16000
 
+// Read long documents in SMALL PIECES BY DEFAULT, rather than one pass over the whole
+// thing that only gets split after it visibly fails. Truncation is the loud failure and
+// is now handled; the quiet one matters more here — asked to cover 25 pages of terms in a
+// single answer, a reader summarises to fit, and the clause that gets compressed into
+// "standard recovery costs provisions apply" is exactly the clause this review exists to
+// catch. Several focused reads over a few pages each stay specific, and each one still
+// halves further if it overruns. Set for thoroughness over speed, at Tony's direction.
+const CHUNK_PAGES = 6
+const CHUNK_CHARS = 60_000
+
+// Split a PDF into fixed-size page chunks. Returns null if it is already small enough or
+// cannot be parsed (in which case it is read whole, as before).
+async function splitPdfIntoChunks(buffer, size = CHUNK_PAGES) {
+  let src
+  try {
+    src = await PDFDocument.load(buffer, { ignoreEncryption: true })
+  } catch {
+    return null
+  }
+  const total = src.getPageCount()
+  if (total <= size) return null
+  const chunks = []
+  for (let start = 0; start < total; start += size) {
+    const out = await PDFDocument.create()
+    const indices = []
+    for (let i = start; i < Math.min(start + size, total); i++) indices.push(i)
+    const copied = await out.copyPages(src, indices)
+    copied.forEach(pg => out.addPage(pg))
+    chunks.push({ buffer: Buffer.from(await out.save()), from: start + 1, to: Math.min(start + size, total) })
+  }
+  return chunks
+}
+
+// Same idea for a text-based document, cut on paragraph boundaries so a clause is less
+// likely to be split down the middle. Replaces the old behaviour of truncating anything
+// past MAX_TEXT_CHARS with a "[truncated]" marker — which silently dropped the tail of a
+// long Word document, and the guarantee is as often at the end as the start.
+function splitTextIntoChunks(text, size = CHUNK_CHARS) {
+  if (text.length <= size) return null
+  const chunks = []
+  let start = 0
+  while (start < text.length) {
+    let end = Math.min(start + size, text.length)
+    if (end < text.length) {
+      const brk = text.lastIndexOf('\n\n', end)
+      if (brk > start + size / 2) end = brk
+    }
+    chunks.push(text.slice(start, end))
+    start = end
+  }
+  return chunks
+}
+
 // Merge two digests of DIFFERENT PAGE RANGES of the same document. Scalars come from
 // whichever half saw them first (the document's identity is usually stated on page 1);
 // every list is concatenated, because a clause in the second half is not a competing
@@ -187,6 +240,35 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
         reason: `${pages} pages — too long to read in one pass. Split it into parts under ${MAX_PDF_PAGES} pages and re-upload`
       }
     }
+    // Long document → read it in page chunks, in parallel, and merge. Each chunk is a
+    // full digest in its own right and can still halve itself if it overruns.
+    if (!partLabel) {
+      const chunks = await splitPdfIntoChunks(buffer)
+      if (chunks) {
+        const digests = await Promise.all(chunks.map(c => digestDocument({
+          filename,
+          buffer: c.buffer,
+          depth,
+          partLabel: `pages ${c.from}-${c.to} of "${filename}"`
+        })))
+        const readChunks = digests.filter(d => d.read)
+        if (readChunks.length) {
+          const merged = readChunks.reduce((a, b) => mergeDigests(a, b))
+          const failed = digests.filter(d => !d.read)
+          return {
+            ...merged,
+            pages,
+            // A chunk that could not be read is a hole in the middle of a document that
+            // otherwise looks completely read. Carry it through to the review rather than
+            // letting the merged digest imply full coverage.
+            gaps: [
+              ...(merged.gaps || []),
+              ...failed.map(f => `Part of this document could not be read (${f.reason}) — those pages are not covered by this review`)
+            ]
+          }
+        }
+      }
+    }
     content.push({
       type: 'document',
       source: { type: 'base64', media_type: 'application/pdf', data: buffer.toString('base64') }
@@ -215,8 +297,33 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
       return { filename, read: false, reason: 'No readable text in this file — if it is a scan, save it as a PDF and re-upload (PDF scans are read as images, this format is not)' }
     }
     sourceText = text
+    if (!partLabel) {
+      const chunks = splitTextIntoChunks(text)
+      if (chunks) {
+        const digests = await Promise.all(chunks.map((chunk, i) => digestText({
+          filename,
+          text: chunk,
+          depth,
+          partLabel: `part ${i + 1} of ${chunks.length} of "${filename}"`
+        })))
+        const readChunks = digests.filter(d => d.read)
+        if (readChunks.length) {
+          const merged = readChunks.reduce((a, b) => mergeDigests(a, b))
+          const failed = digests.filter(d => !d.read)
+          return {
+            ...merged,
+            gaps: [
+              ...(merged.gaps || []),
+              ...failed.map(f => `Part of this document could not be read (${f.reason}) — that section is not covered by this review`)
+            ]
+          }
+        }
+      }
+    }
     content.push({
       type: 'text',
+      // A slice is sent whole. MAX_TEXT_CHARS only ever applies to a document that could
+      // not be chunked at all, and is now a last resort rather than the normal path.
       text: text.length > MAX_TEXT_CHARS
         ? `${text.slice(0, MAX_TEXT_CHARS)}\n\n[truncated — document continues beyond this point]`
         : text
@@ -230,7 +337,7 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
   })
 
   try {
-    const digest = await callClaude({ system: DIGEST_SYSTEM, content, maxTokens: DIGEST_MAX_TOKENS, effort: 'medium' })
+    const digest = await callClaude({ system: DIGEST_SYSTEM, content, maxTokens: DIGEST_MAX_TOKENS, effort: 'high' })
     return { filename, read: true, pages, ...digest }
   } catch (err) {
     // Ran out of room mid-answer. The document is fine — there is simply more in it than
@@ -362,7 +469,10 @@ async function buildReview({ supplierName, notes, digests }) {
       system: REVIEW_SYSTEM,
       content: [{ type: 'text', text: brief }],
       maxTokens: 20000,
-      effort: 'high'
+      // The most thorough setting available. A credit application review is read once,
+      // before directors sign personally — a missed guarantee clause costs more than any
+      // amount of time or tokens this saves.
+      effort: 'max'
     })
   } catch (err) {
     // Stage 2 can run out of room too, on a pack with a lot of clauses. Non-streaming
