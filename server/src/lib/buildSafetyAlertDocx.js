@@ -466,6 +466,16 @@ async function buildSafetyAlertDocx(alert) {
     if (!ok) missing.push(needle)
   }
 
+  // "[FirstName]" sits inside larger sentences ("...get in touch with
+  // [FirstName] directly", "You can reach [FirstName] at...") rather than
+  // being a whole run on its own, so replaceRunText's whole-run match can't
+  // find it — a plain substring swap instead. Safe as a blind replace
+  // because "[FirstName]" (with the brackets) doesn't collide with anything
+  // else in the template, unlike the bare word "them" it replaced (which is
+  // also a substring of "theme"/"eastAsiaTheme" elsewhere in the document).
+  const firstName = String(alert.reportedBy || '').trim().split(/\s+/)[0] || ''
+  xml = xml.split('[FirstName]').join(firstName)
+
   for (const [needle, key] of BODY_SUBSTITUTIONS) {
     let ok
     ;[xml, ok] = replaceRunText(xml, needle, alert[key] || '')
