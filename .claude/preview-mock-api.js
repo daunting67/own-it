@@ -5,6 +5,7 @@
 const http = require('http')
 const PROCESSES = require('../server/src/lib/processDefinitions')
 const { buildMeetingNotesDocx, meetingNotesFilename } = require('../server/src/lib/buildMeetingNotesDocx')
+const { buildCreditReviewDocx, creditReviewFilename } = require('../server/src/lib/buildCreditReviewDocx')
 
 const PORT = 3002
 
@@ -129,6 +130,41 @@ async function runMeetingNotes(res) {
     output += `\n\n⚠️ Could not build the Word document: ${e.message}`
   }
   send(res, 200, { id: 'mock-run-' + Date.now(), output, status: 'completed', document, filename })
+}
+
+let CREDIT_RUNS = []
+const MOCK_CREDIT_REVIEW = {
+  supplierName: 'Timberworld (East Tamaki)',
+  supplierTrade: 'Timber, hardware, building supplies',
+  templateSource: 'EC Credit Control',
+  keyClausesSummary: 'Timberworld trades on 20th-of-the-following-month terms with a $25,000 credit limit, secured by a general security interest under the PPSA and an unlimited personal guarantee from each director.\n\nTitle in goods does not pass until payment in full, and Timberworld may enter any site to retake goods. Default interest runs at 2.5% per month compounding (roughly 34.5% p.a.), plus all recovery costs on a solicitor-client basis.',
+  clauseAnalysis: [
+    { clauseRef: 'cl 20 — Deed of Guarantee', riskRating: 'high', plainEnglish: 'Each director personally guarantees everything P&I ever owes Timberworld, without limit and without end.', whyItMatters: 'Directors are personally liable for the whole account, not just the $25,000 limit, and stay liable after leaving the company.', recommendedPosition: 'amend', negotiationAngle: 'Cap the guarantee at the approved credit limit, add release at nil balance, delete the principal-debtor wording.' },
+    { clauseRef: 'cl 12 — Security interest (PPSA)', riskRating: 'high', plainEnglish: 'Timberworld takes a security interest over all of P&I\u2019s present and after-acquired property.', whyItMatters: 'A general charge over plant and receivables cuts across P&I\u2019s bank security and may breach the facility terms.', recommendedPosition: 'amend', negotiationAngle: 'Reduce to a PMSI over unpaid supplied goods only.' },
+    { clauseRef: 'cl 9 — Default interest', riskRating: 'medium', plainEnglish: '2.5% per month compounding on overdue amounts.', whyItMatters: 'About 34.5% p.a. — well above anything P&I has accepted elsewhere.', recommendedPosition: 'amend', negotiationAngle: 'Bring to 12% p.a. simple, in line with the Colas position.' },
+  ],
+  standingRiskChecklist: [
+    { risk: 'unlimited personal guarantee', present: true, detail: 'cl 20 — unlimited, continuing, joint and several, with principal debtor clause', riskRating: 'high' },
+    { risk: 'EC Credit Control template', present: true, detail: 'Clause structure and PPSA wording match the EC Credit Control template — Colas amendment positions apply', riskRating: 'high' },
+    { risk: 'general PPSA charge', present: true, detail: 'cl 12 — all present and after-acquired property', riskRating: 'high' },
+    { risk: 'real property / land charge', present: false, detail: 'No mechanism to register a charge or caveat over land in this pack', riskRating: 'not applicable' },
+    { risk: 'default interest', present: true, detail: 'cl 9 — 2.5% per month compounding (~34.5% p.a.)', riskRating: 'medium' },
+    { risk: 'defect or dispute notification window', present: true, detail: 'cl 7 — claims must be made within 7 days of delivery', riskRating: 'medium' },
+  ],
+  directorExposure: {
+    guaranteeRequired: true,
+    summary: 'Each signing director is personally liable, without limit, for everything P&I owes Timberworld now or in the future — including after they cease to be a director.',
+    priorityAmendments: ['Cap the guarantee at the approved credit limit', 'Release on nil balance and on written notice', 'Delete the principal debtor clause'],
+    independentAdviceRecommended: true,
+  },
+  nonStandardPractice: ['A 7-day defect window is well short of normal civil construction practice, where latent defects routinely surface after backfill.'],
+  overallRisk: {
+    topRisks: ['Unlimited personal exposure for the directors', 'General PPSA charge conflicting with the bank security', 'Compounding default interest at ~34.5% p.a.'],
+    positioning: 'unusually aggressive',
+    positioningReason: 'The combination of an uncapped guarantee, a general charge and 34.5% default interest sits at the harsher end of the seven packs reviewed.',
+    recommendation: 'accept_with_amendment',
+    recommendationReason: 'The account is worth opening, but not on these terms as drafted. Put the three priority amendments to Timberworld before any director signs the guarantee.',
+  },
 }
 
 const server = http.createServer(async (req, res) => {
@@ -256,6 +292,40 @@ const server = http.createServer(async (req, res) => {
   if (briefingMatch && req.method === 'GET') {
     const record = BRIEFINGS.find(b => b.id === briefingMatch[2])
     return record ? send(res, 200, record) : send(res, 404, { error: 'Briefing not found' })
+  }
+
+  // Cost Control — credit application review. The mock returns a canned review so the
+  // card, the on-screen checklist and the .docx can be exercised without Anthropic keys.
+  if (path === '/api/credit-review/runs' && req.method === 'GET') return send(res, 200, CREDIT_RUNS)
+  if (path === '/api/credit-review/upload-url' && req.method === 'POST') {
+    const body = await readJson(req)
+    return send(res, 200, { path: `mock/${body.filename}`, signedUrl: '/api/mock-upload' })
+  }
+  if (path === '/api/mock-upload') return send(res, 200, { ok: true })
+  if (path === '/api/credit-review/read' && req.method === 'POST') {
+    const body = await readJson(req)
+    const filename = String(body.path || '').split('/').pop()
+    if (/unreadable/i.test(filename)) return send(res, 200, { filename, path: body.path, read: false, reason: 'No readable text in this file' })
+    return send(res, 200, { filename, path: body.path, read: true, pages: 12, documentType: 'Terms and Conditions of Trade' })
+  }
+  if (path === '/api/credit-review/review' && req.method === 'POST') {
+    const body = await readJson(req)
+    const review = { ...MOCK_CREDIT_REVIEW, supplierName: body.supplierName || MOCK_CREDIT_REVIEW.supplierName }
+    const buf = await buildCreditReviewDocx(review, { documents: (body.digests || []).map(d => ({ filename: d.filename, read: !!d.read, reason: d.reason })) })
+    const id = 'mock-credit-' + Date.now()
+    const output = [
+      `${review.supplierName} — Accept with amendment.`,
+      '2 high-risk clause(s) · terms template: EC Credit Control · positioning: unusually aggressive.',
+      '⚠️ A personal guarantee is required — the directors are personally exposed. See section 4 before anyone signs.',
+      'Download the .docx below — section 3 is the standing risk checklist, section 4 is the director exposure.',
+    ].join('\n')
+    CREDIT_RUNS.unshift({ id, input: `${review.supplierName} · ${review.supplierTrade}`, output, status: 'completed', runBy: 'tony@pipelines.nz', createdAt: new Date().toISOString() })
+    return send(res, 200, { id, output, review, document: buf.toString('base64'), filename: creditReviewFilename(review) })
+  }
+  const creditDocMatch = path.match(/^\/api\/credit-review\/runs\/([^/]+)\/document$/)
+  if (creditDocMatch && req.method === 'GET') {
+    const buf = await buildCreditReviewDocx(MOCK_CREDIT_REVIEW, { documents: [] })
+    return send(res, 200, { filename: creditReviewFilename(MOCK_CREDIT_REVIEW), document: buf.toString('base64') })
   }
 
   send(res, 404, { error: `No mock for ${req.method} ${path}` })

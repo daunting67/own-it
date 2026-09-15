@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../../lib/api'
 import ReconciliationCard from './ReconciliationCard'
+import CreditReviewCard from './CreditReviewCard'
 
 const TABS = [
   {
@@ -39,6 +40,13 @@ const TABS = [
       },
     },
   },
+  {
+    key: 'credit',
+    label: '📑 Credit Application Review',
+    // Not a reconciliation — a different card entirely (one upload zone, a written legal
+    // review out, no source/receipts pairing), so it renders its own component.
+    render: () => <CreditReviewCard />,
+  },
 ]
 
 export default function CostControlModule() {
@@ -47,7 +55,7 @@ export default function CostControlModule() {
 
   return (
     <div style={{ maxWidth: 800, margin: '32px auto', padding: '0 16px' }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         {TABS.map(t => (
           <button
             key={t.key}
@@ -58,7 +66,9 @@ export default function CostControlModule() {
           </button>
         ))}
       </div>
-      <ReconciliationCard key={active.key} {...active.props} />
+      {active.render
+        ? <div key={active.key}>{active.render()}</div>
+        : <ReconciliationCard key={active.key} {...active.props} />}
     </div>
   )
 }
