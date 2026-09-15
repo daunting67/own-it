@@ -1,3 +1,5 @@
+import JseaBuilderCard from './JseaBuilderCard'
+
 const PO_TOOL_URL = 'http://5.78.210.250'
 
 // Schedule of Quantities used to be a tab here. It moved to the Tenders module,
@@ -35,6 +37,8 @@ export default function ProjectManagementModule() {
           Open PO Tool →
         </a>
       </div>
+
+      <JseaBuilderCard />
 
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
         Looking for the Schedule of Quantities? It's now in <strong>Tenders</strong>.
