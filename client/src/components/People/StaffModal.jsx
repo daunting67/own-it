@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { calcProgress, getStatus, getProgressCls, hireBadgeClass, getTeammateItem, getPayrollItem, markChecklistComplete, HIRE_TYPES, canonicalHireType, isLabourHire } from '../../lib/checklists'
+import { findRateRow } from '../../lib/rateMatch'
 
 
 function fmtDate(d) {
@@ -12,9 +13,8 @@ function fmtDate(d) {
 function TeammatePanel({ member }) {
   const [copied, setCopied] = useState(false)
   const rateInfo = (() => {
-    if (!isLabourHire(member.hireType) || !member.supplier || !member.role) return null
-    const rates = member.supplier.rates || []
-    return rates.find(r => r.role?.toLowerCase() === member.role?.toLowerCase()) || null
+    if (!isLabourHire(member.hireType) || !member.supplier) return null
+    return findRateRow(member.supplier.rates, member.name).row
   })()
 
   const text = [
@@ -26,7 +26,7 @@ function TeammatePanel({ member }) {
     `Email: ${member.email || '—'}`,
     `Start date: ${fmtDate(member.startDate)}`,
     isLabourHire(member.hireType) ? `Supplier: ${member.supplier?.name || '—'}` : '',
-    rateInfo ? `\nRate card (${rateInfo.role}):\n  Ordinary: $${rateInfo.ordinary}/hr` : '',
+    rateInfo ? `\nRate card (${[rateInfo.firstName, rateInfo.surname].filter(Boolean).join(' ')}${rateInfo.role ? `, ${rateInfo.role}` : ''}):\n  Ordinary: $${rateInfo.ordinary}/hr` : '',
   ].filter(Boolean).join('\n')
 
   function copy() {
@@ -128,11 +128,12 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
     onClose()
   }
 
-  const rateCard = (() => {
-    if (!isLabourHire(member.hireType) || !member.supplier || !member.role) return null
-    const rates = member.supplier.rates || []
-    return rates.find(r => r.role?.toLowerCase() === member.role?.toLowerCase()) || null
-  })()
+  // Matched on the person, never the role — see lib/rateMatch.js. Two workers
+  // in the same role are routinely on different rates, so a role match is a
+  // colleague's number wearing this person's name.
+  const rateMatch = isLabourHire(member.hireType) && member.supplier
+    ? findRateRow(member.supplier.rates, member.name)
+    : null
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -185,14 +186,34 @@ export default function StaffModal({ member, sites = [], suppliers = [], onClose
             </div>
           )}
 
-          {/* Rate card */}
-          {rateCard && (
+          {/* Rate card — matched by person. Whose row it used is shown, because
+              a rate that is silently the wrong person's cannot be spotted. */}
+          {rateMatch?.status === 'found' && (
             <div className="metric-grid">
               <div className="metric-card">
                 <div className="metric-label">Ordinary</div>
-                <div className="metric-value">${rateCard.ordinary}</div>
+                <div className="metric-value">${rateMatch.row.ordinary}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>/hr</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  {member.supplier.name} rate card ·{' '}
+                  {[rateMatch.row.firstName, rateMatch.row.surname].filter(Boolean).join(' ') || 'unnamed row'}
+                </div>
               </div>
+            </div>
+          )}
+
+          {rateMatch?.status === 'none' && (
+            <div className="banner banner-warning">
+              No rate on file for {member.name} on {member.supplier.name}'s rate card.
+              Add them under <strong>Payroll → Suppliers</strong>, or correct the spelling
+              if they are on there under a different one.
+            </div>
+          )}
+
+          {rateMatch?.status === 'ambiguous' && (
+            <div className="banner banner-warning">
+              More than one row on {member.supplier.name}'s rate card could be {member.name},
+              so no rate is shown. Tidy the duplicates under <strong>Payroll → Suppliers</strong>.
             </div>
           )}
 
