@@ -36,9 +36,14 @@ function checkSignOnPhoto(photo) {
 }
 
 // The Vehicle Movement Plan diagram is a photo, not a finger-drawn signature,
-// so it's allowed far more room — base64 inflates size by ~1/3, so 3MB of
-// photo is roughly 4MB of data URL.
-const MAX_PHOTO_CHARS = 4 * 1024 * 1024
+// so it's allowed far more room. The iPad caps the FILE at 3MB; base64
+// inflates that by 4/3 and the `data:image/jpeg;base64,` prefix adds a couple
+// of dozen characters on top, so a 3MB photo arrives as 4,194,327 characters —
+// 23 over a flat 4MB and rejected, after the iPad had already accepted it.
+// The headroom leaves the client's 3MB the limit that actually decides, with
+// this as a backstop against a runaway payload rather than a second, stricter
+// limit the foreman can't see.
+const MAX_PHOTO_CHARS = 4.5 * 1024 * 1024
 
 function checkPhoto(photo) {
   if (!photo) return null

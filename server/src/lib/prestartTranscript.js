@@ -111,6 +111,8 @@ function renderPrestartText(p, values, briefing) {
     "TODAY'S MISSION", values.mission || 'Not discussed in this pre-start.',
     '', 'DESCRIPTION OF WORKS', values.worksDescription || 'Not discussed in this pre-start.',
     '', 'SUCCESS BY END OF DAY', values.successLooksLike || 'Not discussed in this pre-start.',
+    '', 'WHAT THE TEAM NEEDS TO MAKE IT HAPPEN', values.teamNeeds || 'Not discussed in this pre-start.',
+    '', 'ANYTHING THAT COULD GET IN THE WAY', values.inTheWay || 'Not discussed in this pre-start.',
     '', 'HAZARDS AND CONTROLS',
     rows(values.hazards, h => `• ${h.hazard || 'Not captured'} — ${h.control || 'No control recorded'}`),
     '', 'LIFE SAVING RULES THAT APPLY TODAY',

@@ -100,7 +100,17 @@ export default function PreStartModule() {
   }
 
   function resumeDraft() {
-    setCurrent(draft)
+    // Resume on top of the copy the server already holds, not instead of it.
+    // Completing a briefing files `values` wholesale, so anything the server
+    // has that the draft doesn't would otherwise be wiped on resume — the
+    // Vehicle Movement Plan photo (deliberately left out of the draft, it is
+    // far too big for localStorage — see BriefingRunner), and any field a
+    // transcript merged in while the iPad had the briefing open.
+    // The draft still wins for every field it carries, including ones the
+    // foreman deliberately cleared.
+    const saved = [...(data?.today?.briefings || []), ...(data?.yesterday?.briefings || [])]
+      .find(b => b.id === draft.id)
+    setCurrent(saved ? { ...saved, ...draft, values: { ...(saved.values || {}), ...(draft.values || {}) } } : draft)
     setMode('run')
   }
 
