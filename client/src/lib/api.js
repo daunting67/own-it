@@ -144,6 +144,9 @@ export const api = {
   getContractReviewUploadUrl: (filename) => request('/api/contract-review/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
   readContractDocument: (path) => request('/api/contract-review/read', { method: 'POST', body: JSON.stringify({ path }) }),
   buildContractReview: (payload) => request('/api/contract-review/review', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // JSEA
+  generateJsea: (payload) => request('/api/jsea/generate', { method: 'POST', body: JSON.stringify(payload) }),
 }
 
 // Upload a File straight to Supabase Storage via a signed upload URL (bypasses the

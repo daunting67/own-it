@@ -93,7 +93,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
     "jseaNumber": "<JSEA number, or 'TBA' if not given>",
     "reviewCycle": "<one of: 24-hrs, 7-day, 14-day, 21-day, Monthly, 3-mth>",
     "preparedBy": "<name>",
-    "preparedDate": "<DD-MM-YYYY, today's date unless stated otherwise>"
+    "preparedDate": "<DD-MM-YYYY — copy the 'Today's date' value given in the brief verbatim; never guess it>"
   },
   "supervisors": ["<responsible supervisor name(s)>"],
   "personnelConsulted": [ { "name": "<name>", "position": "<position>" } ],
@@ -161,20 +161,38 @@ async function callClaude({ system, content, maxTokens, effort }) {
   return JSON.parse(stripFences(raw))
 }
 
+// DD-MM-YYYY in NZ time. The model has no clock — asked for "today's date" it
+// answers from its training data (it produced 12-06-2025 on a 2026 run), so the
+// date is supplied in the brief AND overwritten on the way out. The overwrite is
+// what actually guarantees it; the brief line just stops the document body and
+// the header disagreeing with each other.
+function todayNZ() {
+  const [d, m, y] = new Intl.DateTimeFormat('en-NZ', {
+    timeZone: 'Pacific/Auckland', day: '2-digit', month: '2-digit', year: 'numeric'
+  }).format(new Date()).split('/')
+  return `${d}-${m}-${y}`
+}
+
 async function buildJseaData(input) {
+  const today = todayNZ()
   const brief = [
+    `Today's date: ${today}`,
+    '',
     'Job details supplied by the requester:',
     JSON.stringify(input, null, 2),
     '',
     'Produce the complete JSEA JSON as specified.'
   ].join('\n')
 
-  return callClaude({
+  const jsea = await callClaude({
     system: JSEA_SYSTEM,
     content: [{ type: 'text', text: brief }],
     maxTokens: 20000,
     effort: 'high'
   })
+
+  if (jsea.project) jsea.project.preparedDate = today
+  return jsea
 }
 
-module.exports = { MODEL, RISK_MATRIX, buildJseaData }
+module.exports = { MODEL, RISK_MATRIX, buildJseaData, todayNZ }
