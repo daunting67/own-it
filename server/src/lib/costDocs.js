@@ -1,8 +1,9 @@
 const db = require('./supabase')
 
-// Private Supabase Storage bucket holding the generated Fuel Reconciliation .xlsx per
-// run, stored as {runId}/{filename}. Created on first use — no dashboard setup needed.
-// Mirrors soqDocs.js.
+// Private Supabase Storage bucket holding the generated document per Cost Control run,
+// stored as {runId}/{filename}. Created on first use — no dashboard setup needed.
+// Mirrors soqDocs.js. Most runs here are reconciliation workbooks (.xlsx); Credit
+// Application Review files a Word document, hence the caller-supplied content type.
 const BUCKET = 'cost-docs'
 
 async function ensureBucket() {
@@ -10,12 +11,11 @@ async function ensureBucket() {
   if (error && !/already exists/i.test(error.message)) throw error
 }
 
-async function saveCostDoc(runId, filename, buffer) {
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+async function saveCostDoc(runId, filename, buffer, contentType = XLSX_TYPE) {
   const path = `${runId}/${filename}`
-  const opts = {
-    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    upsert: true
-  }
+  const opts = { contentType, upsert: true }
   let { error } = await db.storage.from(BUCKET).upload(path, buffer, opts)
   if (error && /bucket not found/i.test(error.message)) {
     await ensureBucket()
@@ -35,4 +35,4 @@ async function getCostDoc(runId) {
   return { filename, document: buf.toString('base64') }
 }
 
-module.exports = { saveCostDoc, getCostDoc }
+module.exports = { saveCostDoc, getCostDoc, XLSX_TYPE }

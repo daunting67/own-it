@@ -122,6 +122,14 @@ export const api = {
   runDebitCardRecon: (statementPaths, receiptPaths) =>
     request('/api/cost-control-debit/run', { method: 'POST', body: JSON.stringify({ invoicePaths: statementPaths, receiptPaths }) }),
 
+  // Cost Control — supplier credit application review (documents are read one request at
+  // a time, then the review is built from the digests — see routes/creditReview.js)
+  getCreditReviewRuns: () => request('/api/credit-review/runs'),
+  getCreditReviewRunDocument: (id) => request(`/api/credit-review/runs/${id}/document`),
+  getCreditReviewUploadUrl: (filename) => request('/api/credit-review/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
+  readCreditReviewDocument: (path) => request('/api/credit-review/read', { method: 'POST', body: JSON.stringify({ path }) }),
+  buildCreditReview: (payload) => request('/api/credit-review/review', { method: 'POST', body: JSON.stringify(payload) }),
+
   // Tenders
   getTenders: () => request('/api/tenders'),
   getTender: (id) => request(`/api/tenders/${id}`),

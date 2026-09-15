@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { uploadToSignedUrl } from '../../lib/api'
+import FileDropZone from './FileDropZone'
 
 function saveDocFile(doc) {
   const bytes = atob(doc.document)
@@ -41,12 +42,6 @@ export default function ReconciliationCard({
     api.getRuns().then(setHistory).catch(() => {})
   }, [api])
 
-  function onSourceChosen(e) {
-    setSourceFile(e.target.files?.[0] || null)
-  }
-  function onReceiptsChosen(e) {
-    setReceiptFiles(f => [...f, ...Array.from(e.target.files || [])])
-  }
   function removeReceipt(i) {
     setReceiptFiles(f => f.filter((_, idx) => idx !== i))
   }
@@ -119,59 +114,28 @@ export default function ReconciliationCard({
       </div>
 
       <div style={{ display: 'grid', gap: 14, margin: '18px 0 20px' }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            {sourceLabel}
-          </label>
-          <input
-            key={`source-${resetKey}`}
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={onSourceChosen}
-            disabled={running}
-            style={{ width: '100%', fontSize: 13 }}
-          />
-          {sourceHint && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sourceHint}</div>}
-          {sourceFile && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{sourceFile.name}</div>
-          )}
-        </div>
+        <FileDropZone
+          key={`source-${resetKey}`}
+          label={sourceLabel}
+          hint={sourceHint}
+          accept="application/pdf,.pdf"
+          disabled={running}
+          files={sourceFile ? [sourceFile] : []}
+          onFiles={f => setSourceFile(f[0] || null)}
+          onRemove={() => setSourceFile(null)}
+        />
 
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-            {receiptsLabel}
-          </label>
-          <input
-            key={`receipts-${resetKey}`}
-            type="file"
-            accept="application/pdf,.pdf,image/png,image/jpeg,.jpg,.jpeg,.png"
-            multiple
-            onChange={onReceiptsChosen}
-            disabled={running}
-            style={{ width: '100%', fontSize: 13 }}
-          />
-          {receiptsHint && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{receiptsHint}</div>}
-          {receiptFiles.length > 0 && (
-            <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
-              {receiptFiles.map((f, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)' }}>
-                  <span>{f.name}</span>
-                  {!running && (
-                    <button
-                      onClick={() => removeReceipt(i)}
-                      style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 12 }}
-                    >
-                      ✕ remove
-                    </button>
-                  )}
-                </div>
-              ))}
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                {receiptFiles.length} file{receiptFiles.length === 1 ? '' : 's'}
-              </div>
-            </div>
-          )}
-        </div>
+        <FileDropZone
+          key={`receipts-${resetKey}`}
+          label={receiptsLabel}
+          hint={receiptsHint}
+          accept="application/pdf,.pdf,image/png,image/jpeg,.jpg,.jpeg,.png"
+          multiple
+          disabled={running}
+          files={receiptFiles}
+          onFiles={f => setReceiptFiles(prev => [...prev, ...f])}
+          onRemove={removeReceipt}
+        />
       </div>
 
       <button
