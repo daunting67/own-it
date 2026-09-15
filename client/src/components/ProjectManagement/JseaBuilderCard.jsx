@@ -161,6 +161,15 @@ export default function JseaBuilderCard() {
               Cancel
             </button>
           </div>
+
+          {/* A measured run took 105 seconds. Without this the button sits on
+              "Generating JSEA…" long enough that people assume it has hung and
+              reload the page, losing the work. */}
+          {running && (
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
+              This takes up to two minutes — the whole JSEA is being written. Leave the page open.
+            </div>
+          )}
         </form>
       )}
     </div>
