@@ -97,27 +97,69 @@ function stripFences(text) {
   return text.replace(/^```(json)?/m, '').replace(/```\s*$/m, '').trim()
 }
 
-async function callClaude({ system, content, maxTokens, effort }) {
+// Transient failures that are worth waiting out rather than failing a whole run for:
+// 429 (rate limited — which a big pack causes for itself, by firing many reads at once),
+// 529 (overloaded), and the 5xx family. Everything else is a real error and fails fast.
+const RETRYABLE = new Set([429, 500, 502, 503, 504, 529])
+const MAX_ATTEMPTS = 5
+
+function backoffMs(attempt, retryAfterHeader) {
+  const retryAfter = Number(retryAfterHeader)
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 30_000)
+  // 1s, 2s, 4s, 8s, plus jitter so a batch of parallel calls doesn't retry in lockstep
+  // and rate-limit itself all over again.
+  return Math.min(1000 * 2 ** attempt, 16_000) + Math.floor(Math.random() * 500)
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+async function callClaude(args) {
+  let lastErr
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callClaudeOnce(args)
+    } catch (err) {
+      // A truncated or unparseable response is not a transport failure — the caller
+      // handles those by splitting the work, and retrying the same oversized request
+      // would just burn time to fail identically.
+      if (err.isMaxTokens || err.isBadJson || !err.retryable) throw err
+      lastErr = err
+      if (attempt === MAX_ATTEMPTS - 1) break
+      await sleep(backoffMs(attempt, err.retryAfter))
+    }
+  }
+  throw lastErr
+}
+
+async function callClaudeOnce({ system, content, maxTokens, effort }) {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured')
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      // Thinking is on by default on this model; max_tokens caps thinking plus
-      // response text together, so the budgets above are generous on purpose.
-      output_config: { effort },
-      system,
-      messages: [{ role: 'user', content }]
+  let response
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: maxTokens,
+        // Thinking is on by default on this model; max_tokens caps thinking plus
+        // response text together, so the budgets above are generous on purpose.
+        output_config: { effort },
+        system,
+        messages: [{ role: 'user', content }]
+      })
     })
-  })
+  } catch (netErr) {
+    // A dropped connection mid-run used to lose everything. It is retryable.
+    const err = new Error(`Could not reach Claude (${netErr.message})`)
+    err.retryable = true
+    throw err
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
@@ -133,7 +175,10 @@ async function callClaude({ system, content, maxTokens, effort }) {
     console.error('Claude API error, full body:', JSON.stringify(err), 'request-id:', requestId)
     const detail = err.error?.type ? ` (${err.error.type})` : ''
     const idSuffix = requestId ? ` [ref: ${requestId}]` : ''
-    throw new Error((err.error?.message || `Claude API error ${response.status}`) + detail + idSuffix)
+    const wrapped = new Error((err.error?.message || `Claude API error ${response.status}`) + detail + idSuffix)
+    wrapped.retryable = RETRYABLE.has(response.status)
+    wrapped.retryAfter = response.headers.get('retry-after')
+    throw wrapped
   }
 
   const data = await response.json()

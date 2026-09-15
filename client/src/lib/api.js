@@ -128,6 +128,7 @@ export const api = {
   getCreditReviewRunDocument: (id) => request(`/api/credit-review/runs/${id}/document`),
   getCreditReviewUploadUrl: (filename) => request('/api/credit-review/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
   readCreditReviewDocument: (path) => request('/api/credit-review/read', { method: 'POST', body: JSON.stringify({ path }) }),
+  analyseCreditReviewClauses: (payload) => request('/api/credit-review/clauses', { method: 'POST', body: JSON.stringify(payload) }),
   buildCreditReview: (payload) => request('/api/credit-review/review', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Tenders

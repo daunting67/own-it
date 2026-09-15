@@ -113,6 +113,27 @@ const DIGEST_MAX_TOKENS = 16000
 // catch. Several focused reads over a few pages each stay specific, and each one still
 // halves further if it overruns. Set for thoroughness over speed, at Tony's direction.
 const CHUNK_PAGES = 6
+
+// How many model calls one request may have in flight. Promise.all over every chunk of a
+// 100-page pack fires 17 calls at once, which rate-limits itself and (now that 429s are
+// retried) spends the whole time backing off. Six at a time keeps a big pack moving
+// without tripping the limit.
+const MAX_PARALLEL = 6
+
+// Promise.all with a ceiling. Results come back in input order, as Promise.all does.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      results[i] = await fn(items[i], i)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
 const CHUNK_CHARS = 60_000
 
 // Split a PDF into fixed-size page chunks. Returns null if it is already small enough or
@@ -245,12 +266,12 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
     if (!partLabel) {
       const chunks = await splitPdfIntoChunks(buffer)
       if (chunks) {
-        const digests = await Promise.all(chunks.map(c => digestDocument({
+        const digests = await mapLimit(chunks, MAX_PARALLEL, c => digestDocument({
           filename,
           buffer: c.buffer,
           depth,
           partLabel: `pages ${c.from}-${c.to} of "${filename}"`
-        })))
+        }))
         const readChunks = digests.filter(d => d.read)
         if (readChunks.length) {
           const merged = readChunks.reduce((a, b) => mergeDigests(a, b))
@@ -300,12 +321,12 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
     if (!partLabel) {
       const chunks = splitTextIntoChunks(text)
       if (chunks) {
-        const digests = await Promise.all(chunks.map((chunk, i) => digestText({
+        const digests = await mapLimit(chunks, MAX_PARALLEL, (chunk, i) => digestText({
           filename,
           text: chunk,
           depth,
           partLabel: `part ${i + 1} of ${chunks.length} of "${filename}"`
-        })))
+        }))
         const readChunks = digests.filter(d => d.read)
         if (readChunks.length) {
           const merged = readChunks.reduce((a, b) => mergeDigests(a, b))
@@ -486,7 +507,9 @@ Return ONLY valid JSON (no markdown fences, no explanation):
   }
 }`
 
-function packContext({ supplierName, notes, read, unread }) {
+function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }) {
+  const read = documents.filter(d => d.read)
+  const unread = documents.filter(d => !d.read)
   return [
     supplierName ? `Supplier (as given by the user): ${supplierName}` : null,
     'Applicant: Pipelines & Infrastructure (North) Limited',
@@ -499,8 +522,23 @@ function packContext({ supplierName, notes, read, unread }) {
       : '\nEvery uploaded document was read.',
     '',
     'Key facts taken from the pack:',
-    JSON.stringify(read.flatMap(d => d.keyFacts || []), null, 2)
+    JSON.stringify(keyFacts, null, 2)
   ].filter(v => v !== null).join('\n')
+}
+
+// One batch of clauses, as its own unit of work. The route calls this once per HTTP
+// request so that no single request grows with the size of the pack — a 300-clause pack
+// is 30 short requests, not one long one that a serverless function kills halfway
+// through, losing every batch that had already succeeded.
+async function analyseClauses({ supplierName, notes, documents, keyFacts, clauses }) {
+  const context = buildPackContext({ supplierName, notes, documents, keyFacts })
+  return analyseClauseBatch(context, clauses || [])
+}
+
+function batchClauses(clauses, size = CLAUSES_PER_BATCH) {
+  const batches = []
+  for (let i = 0; i < (clauses || []).length; i += size) batches.push(clauses.slice(i, i + size))
+  return batches
 }
 
 // One batch of clauses, halving itself if even that batch overruns — the same treatment
@@ -548,7 +586,11 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
   }
 }
 
-async function buildReview({ supplierName, notes, digests }) {
+// The last two calls: the standing checklist, and the summary written from the finished
+// clause analysis. Both are fixed-size regardless of how big the pack was — the checklist
+// is always six rows, and the summary reads the analysis rather than the raw pack — so
+// this request does not grow with the pack either.
+async function buildReview({ supplierName, notes, digests, clauseAnalysis = [] }) {
   const read = digests.filter(d => d.read)
   const unread = digests.filter(d => !d.read)
 
@@ -556,43 +598,39 @@ async function buildReview({ supplierName, notes, digests }) {
     throw new Error('None of the uploaded documents could be read — nothing to build a review from')
   }
 
-  const context = packContext({ supplierName, notes, read, unread })
+  const documents = digests.map(d => ({
+    filename: d.filename, read: !!d.read, reason: d.reason || null,
+    documentType: d.documentType || null, pages: d.pages || null
+  }))
+  const keyFacts = read.flatMap(d => d.keyFacts || [])
+  const context = buildPackContext({ supplierName, notes, documents, keyFacts })
 
-  // Every clause the reading stage found, tagged with the document it came from.
-  const clauses = read.flatMap(d => (d.clauses || []).map(c => ({ ...c, document: d.documentType || d.filename })))
-  const batches = []
-  for (let i = 0; i < clauses.length; i += CLAUSES_PER_BATCH) {
-    batches.push(clauses.slice(i, i + CLAUSES_PER_BATCH))
-  }
+  // The checklist is answered against the ANALYSED clauses, not the raw wording — by this
+  // point every clause has been read closely once already, and the analysis is a fraction
+  // of the size, so this call stays small however big the pack was.
+  const checklistOut = await callClaude({
+    system: CHECKLIST_SYSTEM,
+    content: [{
+      type: 'text',
+      text: [
+        context,
+        '',
+        `Every clause in the pack, as analysed (${clauseAnalysis.length}):`,
+        JSON.stringify(clauseAnalysis, null, 2),
+        '',
+        'Clause topics noted while reading:',
+        JSON.stringify(read.flatMap(d => (d.clauses || []).map(c => ({ clauseRef: c.clauseRef, topic: c.topic }))), null, 2),
+        '',
+        'Produce the standingRiskChecklist JSON as specified.'
+      ].join('\n')
+    }],
+    maxTokens: 8000,
+    effort: 'max'
+  }).catch(err => {
+    if (err.isMaxTokens || err.isBadJson) return { standingRiskChecklist: [], templateSource: null }
+    throw err
+  })
 
-  // Clause batches and the checklist do not depend on each other, so they run together.
-  const clauseContext = `${context}\n\nClause wording was taken from: ${read.map(d => d.filename).join(', ')}.`
-  const [clauseResults, checklistOut] = await Promise.all([
-    Promise.all(batches.map(b => analyseClauseBatch(clauseContext, b))),
-    callClaude({
-      system: CHECKLIST_SYSTEM,
-      content: [{
-        type: 'text',
-        text: [
-          context,
-          '',
-          'Every clause found in the pack, as read:',
-          JSON.stringify(clauses, null, 2),
-          '',
-          'Produce the standingRiskChecklist JSON as specified.'
-        ].join('\n')
-      }],
-      maxTokens: 8000,
-      effort: 'max'
-    }).catch(err => {
-      if (err.isMaxTokens || err.isBadJson) return { standingRiskChecklist: [], templateSource: null }
-      throw err
-    })
-  ])
-  const clauseAnalysis = clauseResults.flat()
-
-  // The summary is written LAST, reading the finished analysis rather than the raw pack —
-  // it only needs the shape of each finding, not the full wording again.
   const summary = await callClaude({
     system: SUMMARY_SYSTEM,
     content: [{
@@ -629,4 +667,8 @@ async function buildReview({ supplierName, notes, digests }) {
   }
 }
 
-module.exports = { isReadable, unreadableReason, digestDocument, buildReview, RECURRING_RISKS }
+module.exports = {
+  isReadable, unreadableReason, digestDocument,
+  analyseClauses, batchClauses, buildReview,
+  CLAUSES_PER_BATCH, RECURRING_RISKS
+}

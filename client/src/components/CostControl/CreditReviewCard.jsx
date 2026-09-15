@@ -4,6 +4,11 @@ import FileDropZone from './FileDropZone'
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+// Kept in step with CLAUSES_PER_BATCH in server/src/lib/creditReviewPrompts.js — the
+// server halves a batch further if it overruns, so this only has to be a sane starting size.
+const CLAUSES_PER_BATCH = 10
+const BATCHES_IN_FLIGHT = 3
+
 function saveDocFile(doc) {
   const bytes = atob(doc.document)
   const arr = new Uint8Array(bytes.length)
@@ -63,7 +68,7 @@ export default function CreditReviewCard() {
 
       const digests = []
       for (let i = 0; i < paths.length; i++) {
-        setProgress(`Reading ${paths[i].split('/').pop()} (${i + 1}/${paths.length})…`)
+        setProgress(`Reading ${paths[i].split('/').pop()} (${i + 1} of ${paths.length})…`)
         digests.push(await api.readCreditReviewDocument(paths[i]))
       }
       // Every document unreadable means there is nothing to review — say that here rather
@@ -72,8 +77,41 @@ export default function CreditReviewCard() {
         throw new Error(`None of the uploaded files could be read: ${digests.map(d => `${d.filename} (${d.reason})`).join('; ')}`)
       }
 
-      setProgress('Reviewing the clauses and writing the report… (can take a couple of minutes)')
-      const res = await api.buildCreditReview({ supplierName: supplierName.trim(), notes: notes.trim(), digests })
+      // Clauses are analysed a batch at a time, one request each, so a big pack is many
+      // short requests instead of one long one that a serverless function kills halfway
+      // through. Progress is per batch, so a 300-clause pack visibly moves.
+      const read = digests.filter(d => d.read)
+      const documents = digests.map(d => ({
+        filename: d.filename, read: !!d.read, reason: d.reason || null,
+        documentType: d.documentType || null, pages: d.pages || null,
+      }))
+      const keyFacts = read.flatMap(d => d.keyFacts || [])
+      const clauses = read.flatMap(d => (d.clauses || []).map(c => ({ ...c, document: d.documentType || d.filename })))
+
+      const batches = []
+      for (let i = 0; i < clauses.length; i += CLAUSES_PER_BATCH) batches.push(clauses.slice(i, i + CLAUSES_PER_BATCH))
+
+      const clauseAnalysis = []
+      let done = 0
+      // A few at a time: enough to keep a long pack moving, few enough not to trip the
+      // API's rate limit and spend the whole run backing off.
+      for (let i = 0; i < batches.length; i += BATCHES_IN_FLIGHT) {
+        const group = batches.slice(i, i + BATCHES_IN_FLIGHT)
+        const results = await Promise.all(group.map(async batch => {
+          const out = await api.analyseCreditReviewClauses({
+            supplierName: supplierName.trim(), notes: notes.trim(), documents, keyFacts, clauses: batch,
+          })
+          done += batch.length
+          setProgress(`Analysing clauses… ${done} of ${clauses.length}`)
+          return out.clauseAnalysis || []
+        }))
+        results.forEach(r => clauseAnalysis.push(...r))
+      }
+
+      setProgress('Writing the review and the recommendation…')
+      const res = await api.buildCreditReview({
+        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis,
+      })
       setResult(res)
       setFiles([])
       setSupplierName('')

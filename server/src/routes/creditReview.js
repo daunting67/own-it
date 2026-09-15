@@ -4,7 +4,9 @@ const db = require('../lib/supabase')
 const { requireAuth, requireDept } = require('../middleware/auth')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/costUploads')
 const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
-const { isReadable, unreadableReason, digestDocument, buildReview } = require('../lib/creditReviewPrompts')
+const {
+  isReadable, unreadableReason, digestDocument, analyseClauses, buildReview
+} = require('../lib/creditReviewPrompts')
 const { buildCreditReviewDocx, creditReviewFilename } = require('../lib/buildCreditReviewDocx')
 
 const PROCESS_ID = 'cost-control-credit-review'
@@ -77,11 +79,34 @@ router.post('/read', async (req, res) => {
   }
 })
 
-// Step 3: combine the digests into the review, render the branded .docx, file the run.
+// Step 3: analyse ONE batch of clauses. The browser drives this once per batch so that
+// no single request grows with the size of the pack — a 300-clause pack is 30 short
+// requests, not one long one that gets killed halfway through with every finished batch
+// lost. A batch that cannot be analysed comes back marked, never dropped.
+router.post('/clauses', async (req, res) => {
+  const clauses = Array.isArray(req.body?.clauses) ? req.body.clauses : []
+  if (!clauses.length) return res.status(400).json({ error: 'No clauses supplied' })
+  try {
+    const clauseAnalysis = await analyseClauses({
+      supplierName: (req.body?.supplierName || '').trim(),
+      notes: (req.body?.notes || '').trim(),
+      documents: Array.isArray(req.body?.documents) ? req.body.documents : [],
+      keyFacts: Array.isArray(req.body?.keyFacts) ? req.body.keyFacts : [],
+      clauses
+    })
+    res.json({ clauseAnalysis })
+  } catch (err) {
+    console.error('Credit review clause batch failed:', err)
+    res.status(500).json({ error: err.message || 'Could not analyse these clauses' })
+  }
+})
+
+// Step 4: the checklist and the summary, then render the branded .docx and file the run.
 router.post('/review', async (req, res) => {
   const supplierName = (req.body?.supplierName || '').trim()
   const notes = (req.body?.notes || '').trim()
   const digests = Array.isArray(req.body?.digests) ? req.body.digests : []
+  const clauseAnalysis = Array.isArray(req.body?.clauseAnalysis) ? req.body.clauseAnalysis : []
   if (!digests.length) return res.status(400).json({ error: 'Upload the credit application first' })
 
   const paths = digests.map(d => d.path).filter(Boolean)
@@ -98,7 +123,7 @@ router.post('/review', async (req, res) => {
   })
 
   try {
-    const review = await buildReview({ supplierName, notes, digests })
+    const review = await buildReview({ supplierName, notes, digests, clauseAnalysis })
     // The supplier name the model read off the document beats whatever was typed into the
     // box — but an empty/missing one must not wipe out what the user gave us.
     review.supplierName = review.supplierName || supplierName || 'Supplier'
