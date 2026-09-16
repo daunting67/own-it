@@ -733,9 +733,7 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], 
   if (!read.length) throw new Error('None of the uploaded documents could be read — nothing to build a review from')
 
   const standingRiskChecklist = checklist?.standingRiskChecklist || []
-  const summary = await callClaude({
-    system: SUMMARY_SYSTEM,
-    content: [{
+  const content = [{
       type: 'text',
       text: [
         reviewContext({ supplierName, notes, digests }),
@@ -755,10 +753,53 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], 
         '',
         'Produce the summary JSON as specified.'
       ].join('\n')
-    }],
-    maxTokens: 12000,
-    effort: 'max'
-  })
+  }]
+
+  // The last step, and the one with the most to weigh up: it reads every analysed clause
+  // and the checklist before writing. At effort max with a 12000 budget it ran out of room
+  // and failed — which threw away a completed reading and clause analysis that had taken
+  // half an hour (measured on the real Franklin Smith pack, 16 Sep 2026). Nothing about
+  // that is an acceptable way to lose a review.
+  //
+  // So: a bigger budget, and if it still overruns, step the effort down rather than fail.
+  // A summary written with less deliberation is worth far more than no document at all,
+  // and the clause-by-clause table — the bulk of the value — is already finished either way.
+  let summary
+  for (const [effort, maxTokens] of [['high', 24000], ['medium', 24000], ['low', 16000]]) {
+    try {
+      summary = await callClaude({ system: SUMMARY_SYSTEM, content, maxTokens, effort })
+      break
+    } catch (err) {
+      if (!(err.isMaxTokens || err.isBadJson)) throw err
+      console.warn(`Credit review summary overran at effort ${effort} — stepping down`)
+    }
+  }
+  if (!summary) {
+    // Every attempt overran. Rather than lose the whole review, say plainly in the
+    // document that this section could not be written — the clause table, the checklist
+    // and the director exposure carry the findings regardless.
+    const high = clauseAnalysis.filter(c => String(c.riskRating).toLowerCase() === 'high')
+    summary = {
+      keyClausesSummary: 'The plain-English summary could not be generated for this pack — there was more '
+        + 'in it than could be weighed up in one pass. The clause-by-clause table in section 2 and the '
+        + 'standing risk checklist in section 3 are complete and carry the findings; read those directly.',
+      directorExposure: {
+        guaranteeRequired: standingRiskChecklist.some(r => /guarantee/i.test(r.risk) && r.present),
+        summary: 'Not assessed automatically — see the guarantee and indemnity rows in the clause table.',
+        priorityAmendments: high.map(c => `${c.clauseRef}: ${c.negotiationAngle || c.recommendedPosition}`).slice(0, 6),
+        independentAdviceRecommended: true
+      },
+      nonStandardPractice: [],
+      overallRisk: {
+        topRisks: high.slice(0, 3).map(c => `${c.clauseRef} — ${c.whyItMatters}`),
+        positioning: 'not assessed',
+        positioningReason: 'The overall assessment could not be generated; the clause table is complete.',
+        recommendation: high.length ? 'accept_with_amendment' : 'accept_as_is',
+        recommendationReason: `Derived from the clause analysis: ${high.length} clause(s) were rated high risk `
+          + 'and are listed above. A lawyer should read section 2 before the directors sign.'
+      }
+    }
+  }
 
   return {
     ...summary,
