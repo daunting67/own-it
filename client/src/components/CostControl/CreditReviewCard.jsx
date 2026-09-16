@@ -7,9 +7,11 @@ const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 
 // Kept in step with CLAUSES_PER_BATCH in server/src/lib/creditReviewPrompts.js — the
 // server halves a batch further if it overruns, so this only has to be a sane starting size.
-const CLAUSES_PER_BATCH = 10
-const BATCHES_IN_FLIGHT = 3
-const PARTS_IN_FLIGHT = 3
+// How often to ask the server how the job is getting on, and how long to keep watching a
+// single step before calling it stalled. Steps here run 1-4 minutes; 12 is generous
+// enough that a slow one is never mistaken for a dead one.
+const POLL_MS = 4000
+const STEP_TIMEOUT_MS = 12 * 60 * 1000
 
 function saveDocFile(doc) {
   const bytes = atob(doc.document)
@@ -47,125 +49,87 @@ export default function CreditReviewCard() {
   const [historyDocFetching, setHistoryDocFetching] = useState(null)
   const [historyError, setHistoryError] = useState(null)
   const [resetKey, setResetKey] = useState(0)
+  const [jobId, setJobId] = useState(null)
 
   useEffect(() => {
     api.getCreditReviewRuns().then(setHistory).catch(() => {})
   }, [])
 
   async function run() {
-    if (!files.length) return
+    if (!files.length && !jobId) return
     setRunning(true)
     setResult(null)
     setError(null)
     setStartedAt(Date.now())
-    let step = 0
-    let steps = null
-    const say = (label, note) => setProgress({ label, note, done: step, total: steps })
+    const say = (label, note, done, total) => setProgress({ label, note, done, total })
     try {
-      const empty = files.find(f => f.size === 0)
-      if (empty) {
-        throw new Error(`"${empty.name}" is empty (0 bytes). If it's stored in iCloud/OneDrive, open it once so it fully downloads, then try again.`)
-      }
-
-      say(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`)
-      const paths = []
-      for (let i = 0; i < files.length; i++) {
-        say(`Uploading ${files[i].name}`, `${i + 1} of ${files.length}`)
-        const { path, signedUrl } = await api.getCreditReviewUploadUrl(files[i].name)
-        await uploadToSignedUrl(signedUrl, files[i])
-        paths.push(path)
-      }
-
-      // Each document is read a few pages at a time, one request per piece, so no single
-      // request's lifetime depends on how long the document is. The server plans the
-      // pieces first (a page count, no reading), then we ask for them.
-      say('Sizing up the pack…')
-      const digests = []
-      const plans = []
-      for (const p of paths) plans.push(await api.planCreditReviewDocument(p))
-
-      const jobs = []
-      for (const plan of plans) {
-        if (plan.read === false || !plan.parts?.length) {
-          digests.push({ filename: plan.filename, path: plan.path, read: false, reason: plan.reason || 'Could not be read' })
-          continue
+      let job
+      if (jobId) {
+        // Picking up a run that stalled or was interrupted. Every finished step is already
+        // recorded server-side, so this carries on from there rather than paying for the
+        // whole pack again.
+        say('Picking up where it stopped…')
+        job = await api.getCreditReviewJob(jobId)
+        if (job.status === 'complete') {
+          setResult({ id: job.runId, output: job.output, filename: job.filename, review: job.review })
+          setJobId(null)
+          return
         }
-        for (const part of plan.parts) jobs.push({ plan, part })
+        // A job that failed on a step is retried from that same step.
+        if (job.status === 'failed') job = await api.getCreditReviewJob(jobId)
+      } else {
+        const empty = files.find(f => f.size === 0)
+        if (empty) {
+          throw new Error(`"${empty.name}" is empty (0 bytes). If it's stored in iCloud/OneDrive, open it once so it fully downloads, then try again.`)
+        }
+
+        say(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`)
+        const paths = []
+        for (let i = 0; i < files.length; i++) {
+          say('Uploading', `${files[i].name} — ${i + 1} of ${files.length}`)
+          const { path, signedUrl } = await api.getCreditReviewUploadUrl(files[i].name)
+          await uploadToSignedUrl(signedUrl, files[i])
+          paths.push(path)
+        }
+
+        say('Opening the pack…')
+        job = await api.startCreditReviewJob({
+          paths, supplierName: supplierName.trim(), notes: notes.trim(),
+        })
+        if (job.status === 'failed') throw new Error(job.error || 'Could not read anything in this pack')
+        setJobId(job.id)
       }
 
-      // Now we know how much reading there is. Clause batches are not known until the
-      // reading is done, so they are estimated from the page count and corrected below —
-      // a bar that moves steadily and adjusts once beats no bar at all.
-      steps = jobs.length + Math.max(1, Math.ceil(jobs.length * 0.6)) + 2
-      let readDone = 0
-      for (let i = 0; i < jobs.length; i += PARTS_IN_FLIGHT) {
-        const group = jobs.slice(i, i + PARTS_IN_FLIGHT)
-        const results = await Promise.all(group.map(async ({ plan, part }) => {
-          const d = await api.readCreditReviewDocument(plan.path, part)
-          readDone++
-          step++
-          say('Reading the pack', jobs.length > 1
-            ? `${readDone} of ${jobs.length} sections · ${plan.filename}`
-            : plan.filename)
-          // A piece keeps its file's page count only on the first piece, so the document
-          // list doesn't report the same pages several times over.
-          return { ...d, pages: part === plan.parts[0] ? plan.pages : null }
-        }))
-        digests.push(...results)
-      }
-      // Every document unreadable means there is nothing to review — say that here rather
-      // than letting the server build a review out of nothing but the filenames.
-      if (!digests.some(d => d.read)) {
-        const why = [...new Set(digests.map(d => `${d.filename} (${d.reason})`))].join('; ')
-        throw new Error(`None of the uploaded files could be read: ${why}`)
-      }
+      // Each step is one Claude call, minutes long. Kick it off and DON'T wait on the
+      // reply — the server finishes it and writes the result down either way. We watch
+      // the job record instead, so no request the browser is holding open can time out.
+      while (job.status === 'running' || job.status === 'failed') {
+        if (job.status === 'failed') job = await api.resumeCreditReviewJob(job.id)
+        if (job.status !== 'running') break
+        const startedStep = job.done
+        api.kickCreditReviewStep(job.id).catch(() => {})
 
-      // Clauses are analysed a batch at a time, one request each, so a big pack is many
-      // short requests instead of one long one that a serverless function kills halfway
-      // through. Progress is per batch, so a 300-clause pack visibly moves.
-      const read = digests.filter(d => d.read)
-      const documents = digests.map(d => ({
-        filename: d.filename, read: !!d.read, reason: d.reason || null,
-        documentType: d.documentType || null, pages: d.pages || null,
-      }))
-      const keyFacts = read.flatMap(d => d.keyFacts || [])
-      const clauses = read.flatMap(d => (d.clauses || []).map(c => ({ ...c, document: d.documentType || d.filename })))
-
-      const batches = []
-      for (let i = 0; i < clauses.length; i += CLAUSES_PER_BATCH) batches.push(clauses.slice(i, i + CLAUSES_PER_BATCH))
-
-      const clauseAnalysis = []
-      let done = 0
-      // Reading is finished, so the real number of clause batches is known now.
-      steps = jobs.length + batches.length + 2
-      say('Analysing the clauses', `${clauses.length} clause${clauses.length === 1 ? '' : 's'} found`)
-      // A few at a time: enough to keep a long pack moving, few enough not to trip the
-      // API's rate limit and spend the whole run backing off.
-      for (let i = 0; i < batches.length; i += BATCHES_IN_FLIGHT) {
-        const group = batches.slice(i, i + BATCHES_IN_FLIGHT)
-        const results = await Promise.all(group.map(async batch => {
-          const out = await api.analyseCreditReviewClauses({
-            supplierName: supplierName.trim(), notes: notes.trim(), documents, keyFacts, clauses: batch,
-          })
-          done += batch.length
-          step++
-          say('Analysing the clauses', `${done} of ${clauses.length} · risk, meaning and negotiating position for each`)
-          return out.clauseAnalysis || []
-        }))
-        results.forEach(r => clauseAnalysis.push(...r))
+        // Poll until the step is recorded. Deliberately patient: a slow step is normal
+        // here, and the indicator on screen keeps proving the page is alive.
+        let waited = 0
+        while (waited < STEP_TIMEOUT_MS) {
+          await new Promise(r => setTimeout(r, POLL_MS))
+          waited += POLL_MS
+          try {
+            job = await api.getCreditReviewJob(job.id)
+          } catch { /* a dropped poll is not a failed run — keep watching */ }
+          if (job.current) say(job.current.label, job.current.note, job.done, job.total)
+          if (job.status !== 'running' || job.done > startedStep) break
+        }
+        if (job.status === 'failed') throw new Error(job.error || 'The review failed partway through')
+        if (job.done === startedStep && job.status === 'running') {
+          throw new Error('This step is taking longer than expected and may have stalled. '
+            + 'Your place is saved — press Review again to pick it up from where it stopped.')
+        }
       }
 
-      say('Checking the pack against the standing risk list', 'guarantee · PPSA · land charge · interest · defect window')
-      const checklist = await api.buildCreditReviewChecklist({
-        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis,
-      })
-
-      step++
-      say('Writing the review and the recommendation', 'the last step — usually the longest')
-      const res = await api.buildCreditReview({
-        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis, checklist,
-      })
-      setResult(res)
+      setResult({ id: job.runId, output: job.output, filename: job.filename, review: job.review })
+      setJobId(null)
       setFiles([])
       setSupplierName('')
       setNotes('')
@@ -192,7 +156,7 @@ export default function CreditReviewCard() {
     }
   }
 
-  const canRun = files.length > 0 && !running
+  const canRun = (files.length > 0 || jobId) && !running
   const review = result?.review
 
   return (
@@ -257,7 +221,7 @@ export default function CreditReviewCard() {
         disabled={!canRun}
         style={{ opacity: canRun ? 1 : 0.6, cursor: canRun ? 'pointer' : 'not-allowed' }}
       >
-        {running ? 'Working…' : 'Review →'}
+        {running ? 'Working…' : jobId ? 'Resume review →' : 'Review →'}
       </button>
 
       {running && (

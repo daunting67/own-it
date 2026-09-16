@@ -127,11 +127,13 @@ export const api = {
   getCreditReviewRuns: () => request('/api/credit-review/runs'),
   getCreditReviewRunDocument: (id) => request(`/api/credit-review/runs/${id}/document`),
   getCreditReviewUploadUrl: (filename) => request('/api/credit-review/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
-  planCreditReviewDocument: (path) => request('/api/credit-review/plan', { method: 'POST', body: JSON.stringify({ path }) }),
-  readCreditReviewDocument: (path, part) => request('/api/credit-review/read', { method: 'POST', body: JSON.stringify({ path, part }) }),
-  buildCreditReviewChecklist: (payload) => request('/api/credit-review/checklist', { method: 'POST', body: JSON.stringify(payload) }),
-  analyseCreditReviewClauses: (payload) => request('/api/credit-review/clauses', { method: 'POST', body: JSON.stringify(payload) }),
-  buildCreditReview: (payload) => request('/api/credit-review/review', { method: 'POST', body: JSON.stringify(payload) }),
+  // The review runs as a job: start it, kick each step off without waiting for it, and
+  // poll. A step is one Claude call and can take minutes — far longer than a browser will
+  // hold a request open (Safari gives up around 60s with "Load failed").
+  startCreditReviewJob: (payload) => request('/api/credit-review/jobs', { method: 'POST', body: JSON.stringify(payload) }),
+  getCreditReviewJob: (id) => request(`/api/credit-review/jobs/${id}`),
+  kickCreditReviewStep: (id) => request(`/api/credit-review/jobs/${id}/step`, { method: 'POST', body: '{}' }),
+  resumeCreditReviewJob: (id) => request(`/api/credit-review/jobs/${id}/resume`, { method: 'POST', body: '{}' }),
 
   // Tenders
   getTenders: () => request('/api/tenders'),
