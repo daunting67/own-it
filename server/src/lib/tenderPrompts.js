@@ -113,6 +113,20 @@ function backoffMs(attempt, retryAfterHeader) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// Opus 5, per million tokens. Cache reads are a tenth of the input rate and cache writes
+// a quarter more than it — the standard Anthropic multipliers.
+const PRICING = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
+
+function usageCost(u) {
+  if (!u) return 0
+  return (
+    ((u.input_tokens || 0) * PRICING.input) +
+    ((u.output_tokens || 0) * PRICING.output) +
+    ((u.cache_read_input_tokens || 0) * PRICING.cacheRead) +
+    ((u.cache_creation_input_tokens || 0) * PRICING.cacheWrite)
+  ) / 1_000_000
+}
+
 async function callClaude(args) {
   let lastErr
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -131,7 +145,7 @@ async function callClaude(args) {
   throw lastErr
 }
 
-async function callClaudeOnce({ system, content, maxTokens, effort }) {
+async function callClaudeOnce({ system, content, maxTokens, effort, onUsage }) {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured')
 
@@ -147,10 +161,17 @@ async function callClaudeOnce({ system, content, maxTokens, effort }) {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: maxTokens,
+        // The system prompt is identical across every call in a run — the lawyer's brief,
+        // the standing risk list, the schema — and a credit review makes a dozen calls.
+        // Caching it bills those repeats at a tenth of the input rate. It is a byte-for-byte
+        // reuse of the same prompt, so it changes what a run costs and nothing about what
+        // it produces.
+        system: typeof system === 'string'
+          ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+          : system,
         // Thinking is on by default on this model; max_tokens caps thinking plus
         // response text together, so the budgets above are generous on purpose.
         output_config: { effort },
-        system,
         messages: [{ role: 'user', content }]
       })
     })
@@ -194,6 +215,9 @@ async function callClaudeOnce({ system, content, maxTokens, effort }) {
   }
 
   const data = await response.json()
+  // Recorded before any early return, so a run's cost includes the calls that failed —
+  // a truncated answer is billed like any other.
+  if (onUsage && data.usage) onUsage(data.usage)
   if (data.stop_reason === 'refusal') {
     throw new Error('Claude declined to process this document. Check its contents and try again.')
   }
@@ -439,6 +463,8 @@ async function buildDebrief({ name, client, deadline, notes, digests }) {
 
 module.exports = {
   MODEL,
+  PRICING,
+  usageCost,
   isReadable,
   unreadableReason,
   digestDocument,

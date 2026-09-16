@@ -7,7 +7,7 @@ const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
 const { saveJob, getJob, patchJob } = require('../lib/creditReviewJobs')
 const {
   isReadable, unreadableReason, planDocument, digestPart,
-  analyseClauses, batchClauses, buildChecklist, buildReview
+  analyseClauses, batchClauses, buildChecklist, buildReview, withUsage
 } = require('../lib/creditReviewPrompts')
 const { buildCreditReviewDocx, creditReviewFilename } = require('../lib/buildCreditReviewDocx')
 
@@ -184,8 +184,27 @@ router.post('/jobs/:id/step', async (req, res) => {
   if (!step) return res.json(publicJob(job))
 
   try {
-    const patch = await runStep(job, step)
-    const updated = await patchJob(job.id, { ...patch, stepIndex: job.stepIndex + 1 })
+    const { result: patch, usage } = await withUsage(() => runStep(job, step))
+    const totals = job.usage || { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 }
+    const merged = {
+      calls: totals.calls + usage.calls,
+      inputTokens: totals.inputTokens + usage.inputTokens,
+      outputTokens: totals.outputTokens + usage.outputTokens,
+      cacheReadTokens: totals.cacheReadTokens + usage.cacheReadTokens,
+      cacheWriteTokens: totals.cacheWriteTokens + usage.cacheWriteTokens,
+      cost: totals.cost + usage.cost
+    }
+    let updated = await patchJob(job.id, { ...patch, usage: merged, stepIndex: job.stepIndex + 1 })
+
+    // Only now, with the last step's own usage counted, does the run know what it cost.
+    if (updated.status === 'complete' && updated.output) {
+      const line = costLine(updated)
+      if (line) {
+        const output = `${updated.output}\n${line}`
+        updated = await patchJob(job.id, { output })
+        await db.from('ProcessRun').update({ output }).eq('id', updated.runId)
+      }
+    }
     res.json(publicJob(updated))
   } catch (err) {
     console.error(`Credit review step ${step.kind} failed:`, err)
@@ -238,6 +257,16 @@ async function runStep(job, step) {
   }
 
   return finishJob(job)
+}
+
+// What the run cost, in the run's own record. An AI feature whose bill only shows up on
+// a card statement is one nobody can make decisions about.
+function costLine(job) {
+  const u = job.usage
+  if (!u?.calls) return null
+  const cached = u.cacheReadTokens ? `, ${(u.cacheReadTokens / 1000).toFixed(0)}k of it reused from cache` : ''
+  return `Cost: about $${u.cost.toFixed(2)} USD — ${u.calls} Claude calls, `
+    + `${((u.inputTokens + u.cacheReadTokens) / 1000).toFixed(0)}k in${cached}, ${(u.outputTokens / 1000).toFixed(0)}k out.`
 }
 
 // The last step: write the review, render the .docx, file the run.

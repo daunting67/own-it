@@ -15,13 +15,17 @@
 // from preserved wording rather than a summary is what lets stage 2 quote a clause back
 // and propose an amendment to it.
 
+const { createHash } = require('crypto')
 const mammoth = require('mammoth')
 const { PDFDocument } = require('pdf-lib')
+const db = require('./supabase')
 const {
+  MODEL,
   isReadable,
   unreadableReason,
   extractXlsxText,
-  callClaude,
+  callClaude: rawCallClaude,
+  usageCost,
   pdfPageCount,
   MAX_DOCUMENT_BYTES,
   MAX_PDF_PAGES,
@@ -37,6 +41,33 @@ const {
 // instead of only flagging whichever the supplier happened to make obvious. This is the
 // whole point of running the series through one place — the eighth review applies the
 // same amendment positions as the first seven.
+// Every call in this module records what it cost. A review is a dozen calls at high
+// effort and the bill is not obvious from the outside — so the run reports its own, rather
+// than the first anyone hears of it being a declined API key mid-review (16 Sep 2026).
+let usageSink = null
+function callClaude(args) {
+  return rawCallClaude({ ...args, onUsage: u => { if (usageSink) usageSink(u) } })
+}
+
+// Collect the usage of everything `fn` does. Returns { result, usage }.
+async function withUsage(fn) {
+  const totals = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 }
+  const previous = usageSink
+  usageSink = u => {
+    totals.calls++
+    totals.inputTokens += u.input_tokens || 0
+    totals.outputTokens += u.output_tokens || 0
+    totals.cacheReadTokens += u.cache_read_input_tokens || 0
+    totals.cacheWriteTokens += u.cache_creation_input_tokens || 0
+    totals.cost += usageCost(u)
+  }
+  try {
+    return { result: await fn(), usage: totals }
+  } finally {
+    usageSink = previous
+  }
+}
+
 const RECURRING_RISKS = `P&I's standing risk checklist, drawn from seven completed supplier credit
 application reviews. Address EVERY one of these explicitly in a review, including the ones this
 supplier does NOT impose (say so — "no personal guarantee sought" is a material finding, not a gap):
@@ -357,8 +388,15 @@ async function digestDocument({ filename, buffer, depth = 0, partLabel = null, a
       + `Produce the digest JSON as specified.`
   })
 
+  const cacheKey = readCacheKey(buffer, partLabel)
+  const cached = await readCacheGet(cacheKey)
+  if (cached) return { filename, read: true, pages, ...cached, fromCache: true }
+
   try {
     const digest = await callClaude({ system: DIGEST_SYSTEM, content, maxTokens: DIGEST_MAX_TOKENS, effort: 'high' })
+    // Only a productive read is cached. Caching an empty one would freeze a one-off
+    // failure in place for good — the lesson the fuel reconciliation already paid for.
+    if (digest?.clauses?.length || digest?.keyFacts?.length) await readCachePut(cacheKey, digest)
     return { filename, read: true, pages, ...digest }
   } catch (err) {
     // Ran out of room mid-answer. The document is fine — there is simply more in it than
@@ -527,6 +565,51 @@ function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }
     'Key facts taken from the pack:',
     JSON.stringify(keyFacts, null, 2)
   ].filter(v => v !== null).join('\n')
+}
+
+
+// ---------------------------------------------------------------- read cache
+//
+// Reading a document is the most expensive thing this module does and the most repeatable:
+// the same pages, the same prompt, the same model give the same digest. Yet the Franklin
+// Smith pack was read from scratch on every attempt — four times over the course of one
+// afternoon of getting the pipeline working, at roughly half a dollar and two minutes a
+// read, every time. Re-running after a fix, or after an interrupted run, should not cost
+// what the first run cost.
+//
+// Keyed on the prompt, the model and the bytes of the pages actually sent, so any change
+// to what we ask or what we send is a different key and a genuine re-read. Same pattern as
+// the fuel reconciliation's extraction cache (costControl.js), including its central
+// lesson: NEVER cache an empty or failed read, or a one-off failure becomes permanent.
+const READ_CACHE_BUCKET = 'credit-review-read-cache'
+
+function readCacheKey(buffer, partLabel) {
+  return createHash('sha256')
+    .update(DIGEST_SYSTEM).update('\n--\n')
+    .update(MODEL).update('\n--\n')
+    .update(String(partLabel || '')).update('\n--\n')
+    .update(buffer)
+    .digest('hex')
+}
+
+async function readCacheGet(key) {
+  try {
+    const { data, error } = await db.storage.from(READ_CACHE_BUCKET).download(`${key}.json`)
+    if (error || !data) return null
+    return JSON.parse(Buffer.from(await data.arrayBuffer()).toString('utf8'))
+  } catch { return null }
+}
+
+async function readCachePut(key, value) {
+  try {
+    const body = Buffer.from(JSON.stringify(value), 'utf8')
+    const opts = { contentType: 'application/json', upsert: true }
+    let { error } = await db.storage.from(READ_CACHE_BUCKET).upload(`${key}.json`, body, opts)
+    if (error && /bucket not found|resource does not exist/i.test(error.message)) {
+      await db.storage.createBucket(READ_CACHE_BUCKET, { public: false }).catch(() => {})
+      await db.storage.from(READ_CACHE_BUCKET).upload(`${key}.json`, body, opts)
+    }
+  } catch { /* a cache that cannot be written must never fail the run */ }
 }
 
 // Plan the reading of one document WITHOUT calling the model: how many pieces it needs to
@@ -811,7 +894,7 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], 
 }
 
 module.exports = {
-  isReadable, unreadableReason, digestDocument, planDocument, digestPart,
+  isReadable, unreadableReason, digestDocument, planDocument, digestPart, withUsage,
   analyseClauses, batchClauses, buildChecklist, buildReview,
   CLAUSES_PER_BATCH, RECURRING_RISKS
 }
