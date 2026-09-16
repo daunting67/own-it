@@ -10,12 +10,30 @@ export default function FileDropZone({
   files = [], onFiles, onRemove,
 }) {
   const [over, setOver] = useState(false)
+  const [duplicateNote, setDuplicateNote] = useState('')
   const inputRef = useRef(null)
 
   function take(list) {
     const picked = Array.from(list || [])
     if (!picked.length) return
-    onFiles(multiple ? picked : picked.slice(0, 1))
+    // Drop the same file twice and it used to be READ twice — on the first real credit
+    // application review (Franklin Smith, 16 Sep 2026) that meant the terms of business
+    // was analysed end to end twice over, producing 55 clauses where there were 28, a
+    // table full of near-duplicate rows, and double the time and cost. Nothing downstream
+    // can tell an intentional duplicate from a slip, so it is caught here.
+    const seen = new Set(files.map(f => `${f.name}:${f.size}`))
+    const fresh = picked.filter(f => {
+      const key = `${f.name}:${f.size}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    const skipped = picked.length - fresh.length
+    setDuplicateNote(skipped
+      ? `${skipped === 1 ? 'That file is' : `${skipped} of those files are`} already in the list — added once, not twice.`
+      : '')
+    if (!fresh.length) return
+    onFiles(multiple ? fresh : fresh.slice(0, 1))
   }
 
   function onDrop(e) {
@@ -77,6 +95,9 @@ export default function FileDropZone({
         />
       </div>
       {hint && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{hint}</div>}
+      {duplicateNote && (
+        <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4, fontWeight: 600 }}>{duplicateNote}</div>
+      )}
       {files.length > 0 && (
         <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
           {files.map((f, i) => (

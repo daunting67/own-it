@@ -116,7 +116,11 @@ function headerTable(supplierName, reviewDate) {
 function detailsTable(r, documents, reviewDate) {
   const labelCell = t => cell(new Paragraph({ children: [runsText(t, { bold: true, color: NAVY, size: 19 })] }), LABEL_BG, 2200)
   const valueCell = t => cell(para(t || '—', { size: 19 }), null, 3500)
-  const docList = documents.map(d => `${d.filename}${d.read ? '' : ` (NOT READ — ${d.reason})`}`).join('; ')
+  // One entry per FILE, not per piece read — a long document read in six sections used to
+  // print its own name six times over.
+  const docList = [...new Map(documents.map(d =>
+    [d.filename, `${d.filename}${d.read ? '' : ` (NOT READ — ${d.reason})`}`]
+  )).values()].join('; ')
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     borders: gridBorders(),
