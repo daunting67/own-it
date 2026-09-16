@@ -448,7 +448,10 @@ ${RECURRING_RISKS}`
 // the overall recommendation are written last, with the finished clause analysis in front
 // of them, rather than everything being produced in one pass.
 
-const CLAUSES_PER_BATCH = 10
+// Ten clauses at a time at maximum effort was measured taking 236s and then returning
+// nothing at all — the whole token budget went on thinking. Five at high effort is the
+// same total work in more, shorter calls, which is the trade this module keeps making.
+const CLAUSES_PER_BATCH = 5
 
 const CLAUSE_SYSTEM = `${REVIEW_PREAMBLE}
 
@@ -646,7 +649,7 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
       system: CLAUSE_SYSTEM,
       content: [{ type: 'text', text: brief }],
       maxTokens: 16000,
-      effort: 'max'
+      effort: 'high'
     })
     return Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
   } catch (err) {
