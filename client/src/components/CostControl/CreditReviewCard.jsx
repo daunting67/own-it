@@ -8,6 +8,7 @@ const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 // server halves a batch further if it overruns, so this only has to be a sane starting size.
 const CLAUSES_PER_BATCH = 10
 const BATCHES_IN_FLIGHT = 3
+const PARTS_IN_FLIGHT = 3
 
 function saveDocFile(doc) {
   const bytes = atob(doc.document)
@@ -66,15 +67,42 @@ export default function CreditReviewCard() {
         paths.push(path)
       }
 
+      // Each document is read a few pages at a time, one request per piece, so no single
+      // request's lifetime depends on how long the document is. The server plans the
+      // pieces first (a page count, no reading), then we ask for them.
       const digests = []
-      for (let i = 0; i < paths.length; i++) {
-        setProgress(`Reading ${paths[i].split('/').pop()} (${i + 1} of ${paths.length})…`)
-        digests.push(await api.readCreditReviewDocument(paths[i]))
+      const plans = []
+      for (const p of paths) plans.push(await api.planCreditReviewDocument(p))
+
+      const jobs = []
+      for (const plan of plans) {
+        if (plan.read === false || !plan.parts?.length) {
+          digests.push({ filename: plan.filename, path: plan.path, read: false, reason: plan.reason || 'Could not be read' })
+          continue
+        }
+        for (const part of plan.parts) jobs.push({ plan, part })
+      }
+
+      let readDone = 0
+      for (let i = 0; i < jobs.length; i += PARTS_IN_FLIGHT) {
+        const group = jobs.slice(i, i + PARTS_IN_FLIGHT)
+        const results = await Promise.all(group.map(async ({ plan, part }) => {
+          const d = await api.readCreditReviewDocument(plan.path, part)
+          readDone++
+          setProgress(jobs.length > 1
+            ? `Reading the pack… ${readDone} of ${jobs.length} sections`
+            : `Reading ${plan.filename}…`)
+          // A piece keeps its file's page count only on the first piece, so the document
+          // list doesn't report the same pages several times over.
+          return { ...d, pages: part === plan.parts[0] ? plan.pages : null }
+        }))
+        digests.push(...results)
       }
       // Every document unreadable means there is nothing to review — say that here rather
       // than letting the server build a review out of nothing but the filenames.
       if (!digests.some(d => d.read)) {
-        throw new Error(`None of the uploaded files could be read: ${digests.map(d => `${d.filename} (${d.reason})`).join('; ')}`)
+        const why = [...new Set(digests.map(d => `${d.filename} (${d.reason})`))].join('; ')
+        throw new Error(`None of the uploaded files could be read: ${why}`)
       }
 
       // Clauses are analysed a batch at a time, one request each, so a big pack is many
@@ -108,9 +136,14 @@ export default function CreditReviewCard() {
         results.forEach(r => clauseAnalysis.push(...r))
       }
 
+      setProgress('Checking the pack against the standing risk list…')
+      const checklist = await api.buildCreditReviewChecklist({
+        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis,
+      })
+
       setProgress('Writing the review and the recommendation…')
       const res = await api.buildCreditReview({
-        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis,
+        supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis, checklist,
       })
       setResult(res)
       setFiles([])

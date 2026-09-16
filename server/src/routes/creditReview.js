@@ -5,7 +5,8 @@ const { requireAuth, requireDept } = require('../middleware/auth')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/costUploads')
 const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
 const {
-  isReadable, unreadableReason, digestDocument, analyseClauses, buildReview
+  isReadable, unreadableReason, planDocument, digestPart,
+  analyseClauses, buildChecklist, buildReview
 } = require('../lib/creditReviewPrompts')
 const { buildCreditReviewDocx, creditReviewFilename } = require('../lib/buildCreditReviewDocx')
 
@@ -60,22 +61,38 @@ router.post('/upload-url', async (req, res) => {
   }
 })
 
-// Step 2: one request per document. A credit application pack is usually small, but the
-// terms & conditions document on its own can be 20+ dense pages, and reading the whole
-// pack plus writing the review in a single serverless request is what times out — so the
-// reads are split the same way the contract review splits them. A document that cannot be
-// read comes back marked, never dropped: the review then says so in writing.
-router.post('/read', async (req, res) => {
+// Step 2a: work out how many pieces a document needs to be read in. No model call — just
+// a page count — so this is fast whatever the document.
+router.post('/plan', async (req, res) => {
   const path = typeof req.body?.path === 'string' ? req.body.path : ''
   if (!path) return res.status(400).json({ error: 'No document path supplied' })
   const filename = path.split('/').pop()
   try {
+    const plan = await planDocument({ filename, buffer: await downloadUpload(path) })
+    res.json({ ...plan, path })
+  } catch (err) {
+    console.error(`Credit review plan failed for ${filename}:`, err)
+    res.json({ filename, path, read: false, reason: err.message || 'Could not be opened' })
+  }
+})
+
+// Step 2b: read ONE piece of a document — one model call per request. Every request in
+// this module is deliberately this shape: a request's lifetime never depends on the size
+// of the pack, so nothing here can be killed at the platform timeout half-done. A piece
+// that cannot be read comes back marked, never dropped.
+router.post('/read', async (req, res) => {
+  const path = typeof req.body?.path === 'string' ? req.body.path : ''
+  if (!path) return res.status(400).json({ error: 'No document path supplied' })
+  const filename = path.split('/').pop()
+  const part = req.body?.part || null
+
+  try {
     const buffer = await downloadUpload(path)
-    const digest = await digestDocument({ filename, buffer })
-    res.json({ ...digest, path })
+    const digest = await digestPart({ filename, buffer, part })
+    res.json({ ...digest, path, part })
   } catch (err) {
     console.error(`Credit review read failed for ${filename}:`, err)
-    res.json({ filename, path, read: false, reason: err.message || 'Could not be read' })
+    res.json({ filename, path, part, read: false, reason: err.message || 'Could not be read' })
   }
 })
 
@@ -101,7 +118,25 @@ router.post('/clauses', async (req, res) => {
   }
 })
 
-// Step 4: the checklist and the summary, then render the branded .docx and file the run.
+// Step 4: the standing risk checklist — again, one model call.
+router.post('/checklist', async (req, res) => {
+  const digests = Array.isArray(req.body?.digests) ? req.body.digests : []
+  if (!digests.length) return res.status(400).json({ error: 'Nothing to check' })
+  try {
+    const checklist = await buildChecklist({
+      supplierName: (req.body?.supplierName || '').trim(),
+      notes: (req.body?.notes || '').trim(),
+      digests,
+      clauseAnalysis: Array.isArray(req.body?.clauseAnalysis) ? req.body.clauseAnalysis : []
+    })
+    res.json(checklist)
+  } catch (err) {
+    console.error('Credit review checklist failed:', err)
+    res.status(500).json({ error: err.message || 'Could not build the risk checklist' })
+  }
+})
+
+// Step 5: the summary and recommendation, then render the branded .docx and file the run.
 router.post('/review', async (req, res) => {
   const supplierName = (req.body?.supplierName || '').trim()
   const notes = (req.body?.notes || '').trim()
@@ -123,7 +158,7 @@ router.post('/review', async (req, res) => {
   })
 
   try {
-    const review = await buildReview({ supplierName, notes, digests, clauseAnalysis })
+    const review = await buildReview({ supplierName, notes, digests, clauseAnalysis, checklist: req.body?.checklist || null })
     // The supplier name the model read off the document beats whatever was typed into the
     // box — but an empty/missing one must not wipe out what the user gave us.
     review.supplierName = review.supplierName || supplierName || 'Supplier'

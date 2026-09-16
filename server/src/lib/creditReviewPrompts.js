@@ -526,6 +526,94 @@ function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }
   ].filter(v => v !== null).join('\n')
 }
 
+// Plan the reading of one document WITHOUT calling the model: how many pieces it needs to
+// be read in, so the browser can ask for them one request at a time.
+//
+// The pieces used to be read inside a single /read request. That made reading a 25-page
+// terms document five or six model calls deep in one HTTP request — which is precisely
+// the shape that gets a serverless function killed at the platform timeout, and it took
+// the whole run with it ("Load failed" in the browser, 16 Sep 2026). Every request in
+// this module now does at most ONE model call, so no request's lifetime depends on how
+// big the document is.
+async function planDocument({ filename, buffer }) {
+  if (!isReadable(filename)) return { filename, read: false, reason: unreadableReason(filename) }
+  if (!buffer || buffer.length === 0) return { filename, read: false, reason: 'File arrived empty — re-upload it' }
+  if (buffer.length > MAX_DOCUMENT_BYTES) {
+    return { filename, read: false, reason: `Too large to read in one pass (${Math.round(buffer.length / 1024 / 1024)}MB) — split it and re-upload` }
+  }
+
+  if (PDF.test(filename)) {
+    const pages = await pdfPageCount(buffer)
+    if (pages !== null && pages > MAX_PDF_PAGES) {
+      return { filename, read: false, reason: `${pages} pages — too long to read in one pass. Split it into parts under ${MAX_PDF_PAGES} pages and re-upload` }
+    }
+    const total = pages || 1
+    const parts = []
+    for (let from = 1; from <= total; from += CHUNK_PAGES) {
+      parts.push({ kind: 'pdf', from, to: Math.min(from + CHUNK_PAGES - 1, total) })
+    }
+    return { filename, pages: total, parts }
+  }
+
+  let text
+  try {
+    text = DOCX.test(filename) ? (await mammoth.extractRawText({ buffer })).value
+      : XLSX.test(filename) ? await extractXlsxText(buffer)
+      : buffer.toString('utf8')
+  } catch (err) {
+    return { filename, read: false, reason: `Could not read this file (${err.message}) — try re-saving it as a PDF and re-upload` }
+  }
+  if (!text.trim()) {
+    return { filename, read: false, reason: 'No readable text in this file — if it is a scan, save it as a PDF and re-upload (PDF scans are read as images, this format is not)' }
+  }
+  const chunks = splitTextIntoChunks(text) || [text]
+  return { filename, pages: null, parts: chunks.map((_, i) => ({ kind: 'text', index: i, of: chunks.length })) }
+}
+
+// Read ONE piece of a document — a single model call (plus the halving fallback, which
+// only fires on a piece dense enough to overrun even at this size).
+async function digestPart({ filename, buffer, part }) {
+  if (!part || part.kind === 'pdf') {
+    const { from, to } = part || {}
+    let slice = buffer
+    let label = null
+    if (from && to) {
+      const src = await PDFDocument.load(buffer, { ignoreEncryption: true })
+      const total = src.getPageCount()
+      // A one-piece document is read whole rather than copied page-for-page into an
+      // identical new PDF.
+      if (!(from === 1 && to >= total)) {
+        const out = await PDFDocument.create()
+        const indices = []
+        for (let i = from - 1; i < Math.min(to, total); i++) indices.push(i)
+        const copied = await out.copyPages(src, indices)
+        copied.forEach(pg => out.addPage(pg))
+        slice = Buffer.from(await out.save())
+      }
+      label = total > to || from > 1 ? `pages ${from}-${to} of "${filename}"` : null
+    }
+    return digestDocument({ filename, buffer: slice, partLabel: label })
+  }
+
+  let text
+  try {
+    text = DOCX.test(filename) ? (await mammoth.extractRawText({ buffer })).value
+      : XLSX.test(filename) ? await extractXlsxText(buffer)
+      : buffer.toString('utf8')
+  } catch (err) {
+    return { filename, read: false, reason: `Could not read this file (${err.message})` }
+  }
+  const chunks = splitTextIntoChunks(text) || [text]
+  const chunk = chunks[part.index] ?? ''
+  if (!chunk.trim()) return { filename, read: false, reason: 'This section of the file had no readable text' }
+  return digestDocument({
+    filename,
+    buffer: Buffer.from(chunk, 'utf8'),
+    asText: true,
+    partLabel: chunks.length > 1 ? `part ${part.index + 1} of ${chunks.length} of "${filename}"` : null
+  })
+}
+
 // One batch of clauses, as its own unit of work. The route calls this once per HTTP
 // request so that no single request grows with the size of the pack — a 300-clause pack
 // is 30 short requests, not one long one that a serverless function kills halfway
@@ -590,53 +678,64 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
 // clause analysis. Both are fixed-size regardless of how big the pack was — the checklist
 // is always six rows, and the summary reads the analysis rather than the raw pack — so
 // this request does not grow with the pack either.
-async function buildReview({ supplierName, notes, digests, clauseAnalysis = [] }) {
-  const read = digests.filter(d => d.read)
-  const unread = digests.filter(d => !d.read)
-
-  if (!read.length) {
-    throw new Error('None of the uploaded documents could be read — nothing to build a review from')
-  }
-
+function reviewContext({ supplierName, notes, digests }) {
   const documents = digests.map(d => ({
     filename: d.filename, read: !!d.read, reason: d.reason || null,
     documentType: d.documentType || null, pages: d.pages || null
   }))
-  const keyFacts = read.flatMap(d => d.keyFacts || [])
-  const context = buildPackContext({ supplierName, notes, documents, keyFacts })
+  const keyFacts = digests.filter(d => d.read).flatMap(d => d.keyFacts || [])
+  return buildPackContext({ supplierName, notes, documents, keyFacts })
+}
 
-  // The checklist is answered against the ANALYSED clauses, not the raw wording — by this
-  // point every clause has been read closely once already, and the analysis is a fraction
-  // of the size, so this call stays small however big the pack was.
-  const checklistOut = await callClaude({
-    system: CHECKLIST_SYSTEM,
-    content: [{
-      type: 'text',
-      text: [
-        context,
-        '',
-        `Every clause in the pack, as analysed (${clauseAnalysis.length}):`,
-        JSON.stringify(clauseAnalysis, null, 2),
-        '',
-        'Clause topics noted while reading:',
-        JSON.stringify(read.flatMap(d => (d.clauses || []).map(c => ({ clauseRef: c.clauseRef, topic: c.topic }))), null, 2),
-        '',
-        'Produce the standingRiskChecklist JSON as specified.'
-      ].join('\n')
-    }],
-    maxTokens: 8000,
-    effort: 'max'
-  }).catch(err => {
+// The standing six-risk checklist — its own request, its own single model call. Answered
+// against the ANALYSED clauses rather than the raw wording: by this point every clause has
+// been read closely once already, and the analysis is a fraction of the size, so this call
+// stays small however big the pack was.
+async function buildChecklist({ supplierName, notes, digests, clauseAnalysis = [] }) {
+  const read = digests.filter(d => d.read)
+  if (!read.length) throw new Error('None of the uploaded documents could be read — nothing to build a review from')
+  try {
+    return await callClaude({
+      system: CHECKLIST_SYSTEM,
+      content: [{
+        type: 'text',
+        text: [
+          reviewContext({ supplierName, notes, digests }),
+          '',
+          `Every clause in the pack, as analysed (${clauseAnalysis.length}):`,
+          JSON.stringify(clauseAnalysis, null, 2),
+          '',
+          'Clause topics noted while reading:',
+          JSON.stringify(read.flatMap(d => (d.clauses || []).map(c => ({ clauseRef: c.clauseRef, topic: c.topic }))), null, 2),
+          '',
+          'Produce the standingRiskChecklist JSON as specified.'
+        ].join('\n')
+      }],
+      maxTokens: 8000,
+      effort: 'max'
+    })
+  } catch (err) {
+    // A missing checklist must not sink a review that is otherwise complete — the clause
+    // analysis is the bulk of the value. The document prints the checklist section empty,
+    // which is visibly missing rather than silently wrong.
     if (err.isMaxTokens || err.isBadJson) return { standingRiskChecklist: [], templateSource: null }
     throw err
-  })
+  }
+}
 
+// The last call: the summary, director exposure and recommendation, written from the
+// finished analysis. Fixed-size input whatever the pack was.
+async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], checklist }) {
+  const read = digests.filter(d => d.read)
+  if (!read.length) throw new Error('None of the uploaded documents could be read — nothing to build a review from')
+
+  const standingRiskChecklist = checklist?.standingRiskChecklist || []
   const summary = await callClaude({
     system: SUMMARY_SYSTEM,
     content: [{
       type: 'text',
       text: [
-        context,
+        reviewContext({ supplierName, notes, digests }),
         '',
         `Clause-by-clause analysis (${clauseAnalysis.length} clauses):`,
         JSON.stringify(clauseAnalysis.map(c => ({
@@ -646,7 +745,7 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [] }
         })), null, 2),
         '',
         'Standing risk checklist:',
-        JSON.stringify(checklistOut?.standingRiskChecklist || [], null, 2),
+        JSON.stringify(standingRiskChecklist, null, 2),
         '',
         'Risks and gaps noted while reading:',
         JSON.stringify({ risks: read.flatMap(d => d.risks || []), gaps: read.flatMap(d => d.gaps || []) }, null, 2),
@@ -661,14 +760,14 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [] }
   return {
     ...summary,
     supplierName: summary?.supplierName || supplierName || read.find(d => d.supplierName)?.supplierName || 'Supplier',
-    templateSource: checklistOut?.templateSource || read.find(d => d.templateSource)?.templateSource || null,
+    templateSource: checklist?.templateSource || read.find(d => d.templateSource)?.templateSource || null,
     clauseAnalysis,
-    standingRiskChecklist: checklistOut?.standingRiskChecklist || []
+    standingRiskChecklist
   }
 }
 
 module.exports = {
-  isReadable, unreadableReason, digestDocument,
-  analyseClauses, batchClauses, buildReview,
+  isReadable, unreadableReason, digestDocument, planDocument, digestPart,
+  analyseClauses, batchClauses, buildChecklist, buildReview,
   CLAUSES_PER_BATCH, RECURRING_RISKS
 }
