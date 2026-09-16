@@ -302,14 +302,37 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { path: `mock/${body.filename}`, signedUrl: '/api/mock-upload' })
   }
   if (path === '/api/mock-upload') return send(res, 200, { ok: true })
+  if (path === '/api/credit-review/plan' && req.method === 'POST') {
+    const body = await readJson(req)
+    const filename = String(body.path || '').split('/').pop()
+    if (/unreadable/i.test(filename)) return send(res, 200, { filename, path: body.path, read: false, reason: 'No readable text in this file' })
+    // 24 pages -> 4 parts, like a real terms document
+    const parts = [{ kind: 'pdf', from: 1, to: 6 }, { kind: 'pdf', from: 7, to: 12 }, { kind: 'pdf', from: 13, to: 18 }, { kind: 'pdf', from: 19, to: 24 }]
+    return send(res, 200, { filename, path: body.path, pages: 24, parts })
+  }
   if (path === '/api/credit-review/read' && req.method === 'POST') {
     const body = await readJson(req)
     const filename = String(body.path || '').split('/').pop()
     if (/unreadable/i.test(filename)) return send(res, 200, { filename, path: body.path, read: false, reason: 'No readable text in this file' })
-    return send(res, 200, { filename, path: body.path, read: true, pages: 12, documentType: 'Terms and Conditions of Trade' })
+    await new Promise(r => setTimeout(r, 2500))   // a real read takes seconds
+    return send(res, 200, { filename, path: body.path, read: true, pages: 24, documentType: 'Terms and Conditions of Trade',
+      keyFacts: [], risks: [], gaps: [],
+      clauses: Array.from({ length: 7 }, (_, i) => ({ clauseRef: `cl ${body.part?.from || 1}.${i}`, topic: 'personal guarantee', wording: 'w' })) })
+  }
+  if (path === '/api/credit-review/clauses' && req.method === 'POST') {
+    const body = await readJson(req)
+    await new Promise(r => setTimeout(r, 3000))
+    return send(res, 200, { clauseAnalysis: (body.clauses || []).map(c => ({ clauseRef: c.clauseRef, riskRating: 'high',
+      plainEnglish: 'x', whyItMatters: 'y', recommendedPosition: 'amend', negotiationAngle: 'z' })) })
+  }
+  if (path === '/api/credit-review/checklist' && req.method === 'POST') {
+    await readJson(req)
+    await new Promise(r => setTimeout(r, 2500))
+    return send(res, 200, { templateSource: 'EC Credit Control', standingRiskChecklist: MOCK_CREDIT_REVIEW.standingRiskChecklist })
   }
   if (path === '/api/credit-review/review' && req.method === 'POST') {
     const body = await readJson(req)
+    await new Promise(r => setTimeout(r, 3000))
     const review = { ...MOCK_CREDIT_REVIEW, supplierName: body.supplierName || MOCK_CREDIT_REVIEW.supplierName }
     const buf = await buildCreditReviewDocx(review, { documents: (body.digests || []).map(d => ({ filename: d.filename, read: !!d.read, reason: d.reason })) })
     const id = 'mock-credit-' + Date.now()

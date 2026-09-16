@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api, uploadToSignedUrl } from '../../lib/api'
 import FileDropZone from './FileDropZone'
+import WorkingIndicator from './WorkingIndicator'
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
@@ -36,7 +37,10 @@ export default function CreditReviewCard() {
   const [supplierName, setSupplierName] = useState('')
   const [notes, setNotes] = useState('')
   const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState('')
+  // { label, note, done, total } — total is null until planning tells us how many steps
+  // there actually are, at which point the bar switches from sweeping to filling.
+  const [progress, setProgress] = useState(null)
+  const [startedAt, setStartedAt] = useState(null)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [history, setHistory] = useState([])
@@ -53,15 +57,20 @@ export default function CreditReviewCard() {
     setRunning(true)
     setResult(null)
     setError(null)
+    setStartedAt(Date.now())
+    let step = 0
+    let steps = null
+    const say = (label, note) => setProgress({ label, note, done: step, total: steps })
     try {
       const empty = files.find(f => f.size === 0)
       if (empty) {
         throw new Error(`"${empty.name}" is empty (0 bytes). If it's stored in iCloud/OneDrive, open it once so it fully downloads, then try again.`)
       }
 
+      say(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`)
       const paths = []
       for (let i = 0; i < files.length; i++) {
-        setProgress(`Uploading ${files[i].name} (${i + 1}/${files.length})…`)
+        say(`Uploading ${files[i].name}`, `${i + 1} of ${files.length}`)
         const { path, signedUrl } = await api.getCreditReviewUploadUrl(files[i].name)
         await uploadToSignedUrl(signedUrl, files[i])
         paths.push(path)
@@ -70,6 +79,7 @@ export default function CreditReviewCard() {
       // Each document is read a few pages at a time, one request per piece, so no single
       // request's lifetime depends on how long the document is. The server plans the
       // pieces first (a page count, no reading), then we ask for them.
+      say('Sizing up the pack…')
       const digests = []
       const plans = []
       for (const p of paths) plans.push(await api.planCreditReviewDocument(p))
@@ -83,15 +93,20 @@ export default function CreditReviewCard() {
         for (const part of plan.parts) jobs.push({ plan, part })
       }
 
+      // Now we know how much reading there is. Clause batches are not known until the
+      // reading is done, so they are estimated from the page count and corrected below —
+      // a bar that moves steadily and adjusts once beats no bar at all.
+      steps = jobs.length + Math.max(1, Math.ceil(jobs.length * 0.6)) + 2
       let readDone = 0
       for (let i = 0; i < jobs.length; i += PARTS_IN_FLIGHT) {
         const group = jobs.slice(i, i + PARTS_IN_FLIGHT)
         const results = await Promise.all(group.map(async ({ plan, part }) => {
           const d = await api.readCreditReviewDocument(plan.path, part)
           readDone++
-          setProgress(jobs.length > 1
-            ? `Reading the pack… ${readDone} of ${jobs.length} sections`
-            : `Reading ${plan.filename}…`)
+          step++
+          say('Reading the pack', jobs.length > 1
+            ? `${readDone} of ${jobs.length} sections · ${plan.filename}`
+            : plan.filename)
           // A piece keeps its file's page count only on the first piece, so the document
           // list doesn't report the same pages several times over.
           return { ...d, pages: part === plan.parts[0] ? plan.pages : null }
@@ -121,6 +136,9 @@ export default function CreditReviewCard() {
 
       const clauseAnalysis = []
       let done = 0
+      // Reading is finished, so the real number of clause batches is known now.
+      steps = jobs.length + batches.length + 2
+      say('Analysing the clauses', `${clauses.length} clause${clauses.length === 1 ? '' : 's'} found`)
       // A few at a time: enough to keep a long pack moving, few enough not to trip the
       // API's rate limit and spend the whole run backing off.
       for (let i = 0; i < batches.length; i += BATCHES_IN_FLIGHT) {
@@ -130,18 +148,20 @@ export default function CreditReviewCard() {
             supplierName: supplierName.trim(), notes: notes.trim(), documents, keyFacts, clauses: batch,
           })
           done += batch.length
-          setProgress(`Analysing clauses… ${done} of ${clauses.length}`)
+          step++
+          say('Analysing the clauses', `${done} of ${clauses.length} · risk, meaning and negotiating position for each`)
           return out.clauseAnalysis || []
         }))
         results.forEach(r => clauseAnalysis.push(...r))
       }
 
-      setProgress('Checking the pack against the standing risk list…')
+      say('Checking the pack against the standing risk list', 'guarantee · PPSA · land charge · interest · defect window')
       const checklist = await api.buildCreditReviewChecklist({
         supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis,
       })
 
-      setProgress('Writing the review and the recommendation…')
+      step++
+      say('Writing the review and the recommendation', 'the last step — usually the longest')
       const res = await api.buildCreditReview({
         supplierName: supplierName.trim(), notes: notes.trim(), digests, clauseAnalysis, checklist,
       })
@@ -155,7 +175,8 @@ export default function CreditReviewCard() {
       setError(err.message)
     } finally {
       setRunning(false)
-      setProgress('')
+      setProgress(null)
+      setStartedAt(null)
     }
   }
 
@@ -236,8 +257,18 @@ export default function CreditReviewCard() {
         disabled={!canRun}
         style={{ opacity: canRun ? 1 : 0.6, cursor: canRun ? 'pointer' : 'not-allowed' }}
       >
-        {running ? (progress || 'Working…') : 'Review →'}
+        {running ? 'Working…' : 'Review →'}
       </button>
+
+      {running && (
+        <WorkingIndicator
+          label={progress?.label}
+          note={progress?.note}
+          done={progress?.done}
+          total={progress?.total}
+          startedAt={startedAt}
+        />
+      )}
 
       {error && (
         <div style={{ marginTop: 16, padding: 12, background: '#fdeaea', color: '#a33', borderRadius: 6, fontSize: 13 }}>

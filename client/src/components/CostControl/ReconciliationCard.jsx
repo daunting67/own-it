@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { uploadToSignedUrl } from '../../lib/api'
 import FileDropZone from './FileDropZone'
+import WorkingIndicator from './WorkingIndicator'
 
 function saveDocFile(doc) {
   const bytes = atob(doc.document)
@@ -31,6 +32,8 @@ export default function ReconciliationCard({
   const [receiptFiles, setReceiptFiles] = useState([])
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState('')
+  const [progressNote, setProgressNote] = useState('')
+  const [startedAt, setStartedAt] = useState(null)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [history, setHistory] = useState([])
@@ -58,22 +61,26 @@ export default function ReconciliationCard({
     setRunning(true)
     setResult(null)
     setError(null)
+    setStartedAt(Date.now())
     try {
       const empty = [sourceFile, ...receiptFiles].find(f => f.size === 0)
       if (empty) {
         throw new Error(`"${empty.name}" is empty (0 bytes). If it's stored in iCloud/OneDrive, open it once so it fully downloads, then try again.`)
       }
-      setProgress(`Uploading ${sourceFile.name}…`)
+      setProgress('Uploading')
+      setProgressNote(sourceFile.name)
       const sourcePaths = [await uploadOne(sourceFile, n => setProgress(`Uploading ${n}…`))]
 
       const receiptPaths = []
       for (let i = 0; i < receiptFiles.length; i++) {
         const f = receiptFiles[i]
-        setProgress(`Uploading ${f.name} (${i + 1}/${receiptFiles.length})…`)
+        setProgress('Uploading')
+        setProgressNote(`${f.name} — ${i + 1} of ${receiptFiles.length}`)
         receiptPaths.push(await uploadOne(f, () => {}))
       }
 
-      setProgress('Reading documents, matching transactions… (can take a minute)')
+      setProgress('Reading documents and matching transactions')
+      setProgressNote('this is the long step — usually around a minute')
       const res = await api.run(sourcePaths, receiptPaths)
       setResult(res)
       setSourceFile(null)
@@ -85,6 +92,8 @@ export default function ReconciliationCard({
     } finally {
       setRunning(false)
       setProgress('')
+      setProgressNote('')
+      setStartedAt(null)
     }
   }
 
@@ -144,8 +153,10 @@ export default function ReconciliationCard({
         disabled={!canRun}
         style={{ opacity: canRun ? 1 : 0.6, cursor: canRun ? 'pointer' : 'not-allowed' }}
       >
-        {running ? (progress || 'Working…') : 'Reconcile →'}
+        {running ? 'Working…' : 'Reconcile →'}
       </button>
+
+      {running && <WorkingIndicator label={progress} note={progressNote} startedAt={startedAt} />}
 
       {error && (
         <div style={{ marginTop: 16, padding: 12, background: '#fdeaea', color: '#a33', borderRadius: 6, fontSize: 13 }}>

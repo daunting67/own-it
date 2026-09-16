@@ -964,3 +964,51 @@ textarea.ps-input { min-height: 84px; line-height: 1.45; }
   font-size: 13px; line-height: 1.35;
 }
 .tmp-result:hover { background: rgba(0,0,0,.04); border-color: var(--pi-orange); }
+
+/* ---- "still working" indicator (Cost Control long-running processes) ----
+   A process here can sit on one step for a minute or more — reading a dense
+   page, thinking about a clause. Text alone looks identical to a hung page, so
+   every one of these is in constant motion: if it moves, it is alive. */
+@keyframes pi-work-pulse {
+  0%, 100% { transform: scale(.72); opacity: .35; }
+  50%      { transform: scale(1);   opacity: 1; }
+}
+@keyframes pi-work-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.pi-working {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; margin-top: 14px;
+  background: var(--pi-blue-tint); border-radius: 6px;
+  border-left: 3px solid var(--pi-orange);
+}
+.pi-working-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: var(--pi-orange);
+  animation: pi-work-pulse 1.1s ease-in-out infinite;
+}
+.pi-working-text { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.pi-working-sub { font-size: 11px; color: var(--pi-muted); font-weight: 500; }
+.pi-working-elapsed {
+  flex-shrink: 0; font-size: 12px; color: var(--pi-muted);
+  font-variant-numeric: tabular-nums; font-weight: 600;
+}
+.pi-working-bar {
+  position: relative; height: 5px; border-radius: 3px; margin-top: 8px;
+  background: rgba(0,0,0,.08); overflow: hidden;
+}
+.pi-working-fill {
+  height: 100%; border-radius: 3px; background: var(--pi-orange);
+  transition: width .4s ease;
+}
+/* No total to count towards yet — a sweeping bar still proves it is running. */
+.pi-working-fill-indeterminate {
+  position: absolute; top: 0; left: 0; width: 25%; height: 100%;
+  border-radius: 3px; background: var(--pi-orange);
+  animation: pi-work-sweep 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-working-dot { animation-duration: 2.4s; }
+  .pi-working-fill-indeterminate { animation-duration: 3s; }
+}
