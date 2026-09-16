@@ -372,8 +372,16 @@ function supplierShortName(r) {
   return (cut || raw).replace(/\s+/g, ' ').slice(0, 70) || 'Supplier'
 }
 
+// Named to match the seven reviews already in the series ("Timberworld - Credit
+// Application Review.docx"), minus the legal suffix — Tony: "the file name has to be as
+// short as possible". These get filed and emailed, so the supplier has to be the first
+// thing read and the name has to stay short enough to survive a mail client.
 function creditReviewFilename(r) {
-  const name = supplierShortName(r).replace(/[^A-Za-z0-9 &()-]/g, '').trim() || 'Supplier'
+  const name = supplierShortName(r)
+    .replace(/\s*\b(Limited|Ltd\.?|Pty\.? Ltd\.?|Incorporated|Inc\.?|Company|Co\.?|NZ|New Zealand)\b\.?/gi, ' ')
+    .replace(/[^A-Za-z0-9 &()-]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim() || 'Supplier'
   return `${name} - Credit Application Review.docx`
 }
 

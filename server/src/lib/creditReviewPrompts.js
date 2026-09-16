@@ -568,8 +568,12 @@ Return ONLY valid JSON (no markdown fences, no explanation):
     "recommendationReason": "<one short paragraph, written to sit at the TOP of the review as the first thing a director reads: the verdict and the two or three things that drive it>"
   }
 }
-topRisks must have exactly three entries. priorityAmendments should have as many as the pack
-genuinely needs, numbered from 1 in order of importance.`
+topRisks must have exactly three entries.
+
+priorityAmendments: AT MOST EIGHT, numbered from 1 in order of importance. This list is what P&I
+puts to the supplier, and a list of eighteen "priorities" is not a negotiating position — it is a
+wish list that gets ignored wholesale. Choose the ones that must change before a director signs
+and fold the rest into the clause table's Recommended Position column, where they already sit.`
 
 function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }) {
   const read = documents.filter(d => d.read)
