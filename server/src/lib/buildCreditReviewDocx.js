@@ -1,190 +1,109 @@
-const fs = require('fs')
-const path = require('path')
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-  WidthType, BorderStyle, AlignmentType, ImageRun, ShadingType, Footer
+  WidthType, BorderStyle, AlignmentType, ShadingType, Header, Footer, PageNumber
 } = require('docx')
 
-// The Credit Application Review as a P&I-branded Word document — the same deliverable
-// Chloe produced by hand for the first seven suppliers, in the same house style as the
-// other portal documents (see buildOutcomeDocx.js, from which the brand colours, header
-// table and A4 page setup are taken deliberately unchanged).
+// The Credit Application Review, in the house format.
 //
-// Section order follows the handover note's output-format checklist: header block,
-// key clauses summary, clause-by-clause table, standing risk checklist, director
-// exposure, overall risk summary, disclaimer.
+// This layout is not invented — it is a faithful reproduction of the reviews Chloe
+// produced by hand for the first seven suppliers, taken measurement by measurement from
+// `Timberworld - Credit Application Review.docx`: US Letter landscape, Arial, the same
+// page margins, the same six-column clause table (2200/1100/3100/3100/3380/800 twips), the
+// same navy headers and red recommendation banners, the same risk colours, the same
+// running header and page footer. Tony: "This is the output format we need - replicate
+// this." The point is that a review out of the portal is indistinguishable in form from
+// the seven already in the series, so the set reads as one body of work.
+//
+// Three things in that format are easy to miss and matter most:
+//   - the RECOMMENDATION is stated at the top, before any analysis, not buried at the end;
+//   - the clause table carries an empty "Yes / No" column, because a director signs the
+//     decision off clause by clause on paper;
+//   - the review closes by comparing the supplier against NZ industry norms, which is what
+//     turns "this clause is harsh" into "this clause is harsher than the market".
 
-const NAVY = '013365'
-const BAND = '1F497D'
-const ORANGE = 'CC3201'
-const GREY = '808080'
-const LIGHT = 'F2F5F9'
-const LABEL_BG = 'E8EFF7'
-const DARK = '1A1A1A'
+const NAVY = '1F3864'
+const DARKRED = '8B0000'
 const WHITE = 'FFFFFF'
-const RED = 'C00000'
-const AMBER = 'B26B00'
-const GREEN = '2E7D32'
+const GREY_TEXT = '595959'
+const GREY_LIGHT = '888888'
+const BODY = '404040'
+const ROW_TINT = 'F2F2F2'
+const RISK = {
+  high: { fill: 'FECCCC', text: 'C00000' },
+  medium: { fill: 'FFF2CD', text: 'B8860B' },
+  low: { fill: 'E2EFDA', text: '375623' }
+}
 
-const LOGO_PATH = path.join(__dirname, '..', 'assets', 'pi-logo.jpg')
+const CLAUSE_WIDTHS = [2200, 1100, 3100, 3100, 3380, 800]
+const RISK_WIDTHS = [600, 3000, 10080]
+const COMPARE_WIDTHS = [3200, 3500, 3800, 3180]
+const FULL_WIDTH = 13680
 
-function gridBorders() {
-  const line = { style: BorderStyle.SINGLE, size: 4, color: '000000' }
+function run(text, opts = {}) {
+  return new TextRun({ text: text == null ? '' : String(text), font: 'Arial', ...opts })
+}
+function para(text, opts = {}, paraOpts = {}) {
+  return new Paragraph({ ...paraOpts, children: [run(text, { size: 18, color: BODY, ...opts })] })
+}
+// The model writes narrative as several paragraphs; one TextRun would render them as a
+// single wall of text.
+function paragraphs(text, opts = {}) {
+  const parts = String(text || '').split(/\n\s*\n|\n/).map(s => s.trim()).filter(Boolean)
+  if (!parts.length) return [para('Not addressed in this review.', { italics: true, color: GREY_LIGHT })]
+  return parts.map(p => para(p, opts, { spacing: { after: 160 } }))
+}
+function gridBorders(color = 'BFBFBF') {
+  const line = { style: BorderStyle.SINGLE, size: 4, color }
   return { top: line, bottom: line, left: line, right: line, insideHorizontal: line, insideVertical: line }
 }
 function noBorders() {
-  const none = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }
+  const none = { style: BorderStyle.NONE, size: 0, color: WHITE }
   return { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none }
 }
-function runsText(text, opts = {}) {
-  return new TextRun({ text: text == null ? '' : String(text), ...opts })
-}
-function cell(children, bg, width) {
+function cell(children, { fill, width, span } = {}) {
   return new TableCell({
     children: Array.isArray(children) ? children : [children],
-    shading: bg ? { type: ShadingType.CLEAR, color: 'auto', fill: bg } : undefined,
+    shading: fill ? { type: ShadingType.CLEAR, color: 'auto', fill } : undefined,
     width: width ? { size: width, type: WidthType.DXA } : undefined,
-    margins: { top: 60, bottom: 60, left: 100, right: 100 }
+    columnSpan: span,
+    margins: { top: 80, bottom: 80, left: 110, right: 110 }
   })
 }
-function para(text, opts = {}) {
-  return new Paragraph({ children: [runsText(text, { color: DARK, size: 20, ...opts })] })
-}
-// A multi-paragraph string (the model writes keyClausesSummary as 2-4 paragraphs
-// separated by blank lines) has to become real Paragraphs — a single TextRun renders the
-// whole thing as one unbroken block of text in Word.
-function paragraphs(text, opts = {}) {
-  const parts = String(text || '').split(/\n\s*\n|\n/).map(s => s.trim()).filter(Boolean)
-  if (!parts.length) return [para('Not addressed in this review.', { italics: true, color: GREY })]
-  return parts.map(p => new Paragraph({ spacing: { after: 120 }, children: [runsText(p, { color: DARK, size: 20, ...opts })] }))
-}
-function heading(text) {
-  return new Paragraph({
-    spacing: { before: 280, after: 100 },
-    children: [runsText(text, { bold: true, color: NAVY, size: 26 })]
+function headerRow(labels, widths) {
+  return new TableRow({
+    tableHeader: true,
+    children: labels.map((label, i) => cell(
+      para(label, { bold: true, color: WHITE, size: 17 }),
+      { fill: NAVY, width: widths[i] }
+    ))
   })
 }
-function bulletList(items, emptyText) {
-  const list = (items || []).filter(Boolean)
-  if (!list.length) return [para(emptyText || 'None identified.', { italics: true, color: GREY })]
-  return list.map(i => new Paragraph({
-    bullet: { level: 0 },
-    spacing: { after: 60 },
-    children: [runsText(typeof i === 'string' ? i : JSON.stringify(i), { color: DARK, size: 20 })]
-  }))
-}
-function riskColour(rating) {
-  const r = String(rating || '').toLowerCase()
-  if (r === 'high') return RED
-  if (r === 'medium') return AMBER
-  if (r === 'low') return GREEN
-  return GREY
+function riskOf(rating) {
+  return RISK[String(rating || '').toLowerCase()] || { fill: ROW_TINT, text: GREY_TEXT }
 }
 const spacer = () => new Paragraph({ children: [] })
 
-function headerTable(supplierName, reviewDate) {
-  const left = new TableCell({
-    width: { size: 6192, type: WidthType.DXA },
-    children: [
-      new Paragraph({ children: [runsText('CREDIT APPLICATION REVIEW', { bold: true, color: NAVY, size: 40 })] }),
-      new Paragraph({ children: [runsText(supplierName || 'Supplier', { bold: true, color: ORANGE, size: 22 })] }),
-      new Paragraph({ children: [runsText(`Pipelines & Infrastructure (North) Limited | ${reviewDate}`, { color: GREY, size: 16 })] })
-    ]
+function sectionHeading(text) {
+  return new Paragraph({
+    spacing: { before: 320, after: 140 },
+    children: [run(text, { bold: true, size: 24, color: NAVY, font: 'Arial' })]
   })
-  const rightChildren = []
-  try {
-    if (fs.existsSync(LOGO_PATH)) {
-      rightChildren.push(new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        children: [new ImageRun({ type: 'jpg', data: fs.readFileSync(LOGO_PATH), transformation: { width: 210, height: 64 } })]
-      }))
-    }
-  } catch { /* fall back to text */ }
-  if (!rightChildren.length) {
-    rightChildren.push(new Paragraph({
-      alignment: AlignmentType.RIGHT,
-      children: [runsText('P&I (North) Ltd', { bold: true, color: NAVY, size: 28 })]
-    }))
-  }
+}
+
+// The banner the whole document is really about — stated before any analysis, so nobody
+// has to read to the end to learn whether to sign.
+function bannerBox(heading, bodyParagraphs) {
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: noBorders(),
-    rows: [new TableRow({ children: [left, new TableCell({ width: { size: 3744, type: WidthType.DXA }, children: rightChildren })] })]
+    columnWidths: [FULL_WIDTH],
+    width: { size: FULL_WIDTH, type: WidthType.DXA },
+    borders: gridBorders(DARKRED),
+    rows: [new TableRow({
+      children: [cell([
+        para(heading, { bold: true, size: 22, color: WHITE }),
+        ...bodyParagraphs.map(p => para(p, { color: WHITE, size: 18 }, { spacing: { before: 100 } }))
+      ], { fill: DARKRED, width: FULL_WIDTH })]
+    })]
   })
-}
-
-function detailsTable(r, documents, reviewDate) {
-  const labelCell = t => cell(new Paragraph({ children: [runsText(t, { bold: true, color: NAVY, size: 19 })] }), LABEL_BG, 2200)
-  const valueCell = t => cell(para(t || '—', { size: 19 }), null, 3500)
-  // One entry per FILE, not per piece read — a long document read in six sections used to
-  // print its own name six times over.
-  const docList = [...new Map(documents.map(d =>
-    [d.filename, `${d.filename}${d.read ? '' : ` (NOT READ — ${d.reason})`}`]
-  )).values()].join('; ')
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: gridBorders(),
-    rows: [
-      new TableRow({ children: [labelCell('Supplier:'), valueCell(r.supplierName), labelCell('Review date:'), valueCell(reviewDate)] }),
-      new TableRow({ children: [labelCell('Supplies:'), valueCell(r.supplierTrade), labelCell('Terms template:'), valueCell(r.templateSource || 'Not identified')] }),
-      new TableRow({ children: [labelCell('Documents reviewed:'), cell(para(docList || '—', { size: 19 }), null, 9200)] })
-    ]
-  })
-}
-
-const CLAUSE_WIDTHS = [1900, 1100, 2400, 2400, 1700]
-
-function clauseTable(clauses) {
-  const cols = ['Clause Reference', 'Risk', 'What It Means', 'Why It Matters to P&I', 'Recommended Position']
-  const rows = [new TableRow({
-    tableHeader: true,
-    children: cols.map((c, i) => cell(
-      new Paragraph({ children: [runsText(c, { bold: true, color: WHITE, size: 18 })] }), BAND, CLAUSE_WIDTHS[i]
-    ))
-  })]
-  const list = (clauses || []).filter(Boolean)
-  if (!list.length) {
-    rows.push(new TableRow({ children: [cell(para('No clauses of concern were identified.', { italics: true, color: GREY }), LIGHT, 9500)] }))
-    return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: gridBorders(), rows })
-  }
-  for (const c of list) {
-    const position = [c.recommendedPosition, c.negotiationAngle].filter(Boolean).join(' — ')
-    rows.push(new TableRow({
-      children: [
-        cell(para(c.clauseRef, { size: 18, bold: true }), null, CLAUSE_WIDTHS[0]),
-        cell(new Paragraph({ children: [runsText(String(c.riskRating || '').toUpperCase(), { bold: true, color: riskColour(c.riskRating), size: 18 })] }), null, CLAUSE_WIDTHS[1]),
-        cell(para(c.plainEnglish, { size: 18 }), null, CLAUSE_WIDTHS[2]),
-        cell(para(c.whyItMatters, { size: 18 }), null, CLAUSE_WIDTHS[3]),
-        cell(para(position, { size: 18 }), null, CLAUSE_WIDTHS[4])
-      ]
-    }))
-  }
-  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: gridBorders(), rows })
-}
-
-const CHECK_WIDTHS = [2600, 1300, 5600]
-
-// The six standing risks, in one table, every time — including the ones this supplier
-// does NOT impose. A checklist that only lists hits reads identically whether the risk
-// was absent or simply never looked for.
-function checklistTable(items) {
-  const cols = ['Standing Risk', 'Rating', 'What this supplier does']
-  const rows = [new TableRow({
-    tableHeader: true,
-    children: cols.map((c, i) => cell(
-      new Paragraph({ children: [runsText(c, { bold: true, color: WHITE, size: 18 })] }), BAND, CHECK_WIDTHS[i]
-    ))
-  })]
-  for (const it of (items || []).filter(Boolean)) {
-    rows.push(new TableRow({
-      children: [
-        cell(para(it.risk, { size: 18, bold: true }), it.present ? null : LIGHT, CHECK_WIDTHS[0]),
-        cell(new Paragraph({ children: [runsText(it.present ? String(it.riskRating || '').toUpperCase() : 'NOT PRESENT', { bold: true, color: it.present ? riskColour(it.riskRating) : GREEN, size: 18 })] }), null, CHECK_WIDTHS[1]),
-        cell(para(it.detail, { size: 18 }), null, CHECK_WIDTHS[2])
-      ]
-    }))
-  }
-  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: gridBorders(), rows })
 }
 
 const RECOMMENDATION_LABELS = {
@@ -192,98 +111,270 @@ const RECOMMENDATION_LABELS = {
   accept_with_amendment: 'ACCEPT WITH AMENDMENT',
   do_not_sign: 'RECOMMEND WE DO NOT SIGN'
 }
+function recommendationLabel(r) {
+  return RECOMMENDATION_LABELS[r] || String(r || 'Recommendation not stated').replace(/_/g, ' ').toUpperCase()
+}
 
-function recommendationBox(overall) {
-  const label = RECOMMENDATION_LABELS[overall?.recommendation] || String(overall?.recommendation || 'Recommendation not stated').toUpperCase()
-  const colour = overall?.recommendation === 'do_not_sign' ? RED
-    : overall?.recommendation === 'accept_as_is' ? GREEN : AMBER
+// Clauses are grouped by the document they came from — PART A is the application form and
+// its guarantee, PART B the terms of trade — because those are two different signatures
+// with two different risks, and a director reads them as separate decisions.
+function partsFromClauses(clauseAnalysis) {
+  const groups = new Map()
+  for (const c of clauseAnalysis || []) {
+    const key = c.document || c.part || 'Clauses'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(c)
+  }
+  const letters = 'ABCDEFGH'
+  return [...groups.entries()].map(([name, clauses], i) => ({
+    title: groups.size > 1 ? `PART ${letters[i] || i + 1} — ${name}` : name,
+    clauses
+  }))
+}
+
+function clauseTable(clauseAnalysis) {
+  const rows = [headerRow(
+    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Yes /\nNo'],
+    CLAUSE_WIDTHS
+  )]
+
+  const parts = partsFromClauses(clauseAnalysis)
+  if (!parts.length) {
+    rows.push(new TableRow({ children: [cell(para('No clauses of concern were identified.', { italics: true, color: GREY_LIGHT }), { fill: ROW_TINT, span: 6 })] }))
+  }
+
+  for (const part of parts) {
+    if (parts.length > 1 || part.title !== 'Clauses') {
+      rows.push(new TableRow({
+        children: [cell(para(part.title, { bold: true, color: WHITE, size: 17 }), { fill: NAVY, span: 6 })]
+      }))
+    }
+    for (const c of part.clauses) {
+      const r = riskOf(c.riskRating)
+      const position = [
+        c.recommendedPosition ? `${String(c.recommendedPosition).toUpperCase()}.` : null,
+        c.negotiationAngle
+      ].filter(Boolean).join(' ')
+      rows.push(new TableRow({
+        children: [
+          cell(para(c.clauseRef, { bold: true, size: 17 }), { width: CLAUSE_WIDTHS[0] }),
+          cell(para(String(c.riskRating || '').toUpperCase(), { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
+            { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
+          cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
+          cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
+          cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
+          // Left blank on purpose: the director ticks this column off by hand.
+          cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] })
+        ]
+      }))
+    }
+  }
+  return new Table({ columnWidths: CLAUSE_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function topRisksTable(topRisks) {
+  const rows = [headerRow(['#', 'Risk', 'Detail'], RISK_WIDTHS)]
+  const list = (topRisks || []).filter(Boolean)
+  if (!list.length) {
+    rows.push(new TableRow({ children: [cell(para('No overriding commercial risks were identified.', { italics: true, color: GREY_LIGHT }), { span: 3 })] }))
+  }
+  list.forEach((risk, i) => {
+    // Older reviews stored these as plain strings; newer ones as { title, detail }.
+    const title = typeof risk === 'string' ? risk.split(/[—:]/)[0].trim() : risk.title
+    const detail = typeof risk === 'string' ? risk.slice(title.length).replace(/^[\s—:]+/, '') : risk.detail
+    rows.push(new TableRow({
+      children: [
+        cell(para(String(i + 1), { bold: true, size: 17 }, { alignment: AlignmentType.CENTER }), { width: RISK_WIDTHS[0] }),
+        cell(para(title, { bold: true, size: 17 }), { width: RISK_WIDTHS[1] }),
+        cell(para(detail || title, { size: 17 }), { width: RISK_WIDTHS[2] })
+      ]
+    }))
+  })
+  return new Table({ columnWidths: RISK_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function comparisonTable(rowsIn, supplierName) {
+  const list = (rowsIn || []).filter(Boolean)
+  if (!list.length) return null
+  const rows = [headerRow(['Clause / Feature', 'NZ Industry Standard', `${supplierName} Position`, 'Assessment'], COMPARE_WIDTHS)]
+  list.forEach((r, i) => {
+    const tint = i % 2 ? ROW_TINT : undefined
+    const harsh = /aggressive/i.test(r.assessment || '')
+    rows.push(new TableRow({
+      children: [
+        cell(para(r.feature, { bold: true, size: 17 }), { fill: tint, width: COMPARE_WIDTHS[0] }),
+        cell(para(r.nzStandard, { size: 17 }), { fill: tint, width: COMPARE_WIDTHS[1] }),
+        cell(para(r.supplierPosition, { size: 17 }), { fill: tint, width: COMPARE_WIDTHS[2] }),
+        cell(para(r.assessment, { size: 17, bold: harsh, color: harsh ? RISK.high.text : BODY }), { fill: tint, width: COMPARE_WIDTHS[3] })
+      ]
+    }))
+  })
+  return new Table({ columnWidths: COMPARE_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function priorityBox(review) {
+  const list = (review.priorityAmendments?.length
+    ? review.priorityAmendments
+    : (review.directorExposure?.priorityAmendments || []).map((action, i) => ({ priority: i + 1, action }))
+  ).filter(Boolean)
+
+  const children = [para(recommendationLabel(review.overallRisk?.recommendation), { bold: true, size: 22, color: WHITE })]
+  if (!list.length) {
+    children.push(para('No priority amendments were identified.', { color: WHITE, size: 18 }, { spacing: { before: 120 } }))
+  }
+  list.forEach((p, i) => {
+    const action = typeof p === 'string' ? p : p.action
+    const ref = typeof p === 'string' ? null : p.clauseRef
+    children.push(new Paragraph({
+      spacing: { before: 140 },
+      children: [
+        run(`Priority ${typeof p === 'string' ? i + 1 : (p.priority || i + 1)} — `, { bold: true, color: WHITE, size: 18 }),
+        run(action, { color: WHITE, size: 18 }),
+        ...(ref ? [run(`  (${ref})`, { color: WHITE, size: 18, italics: true })] : [])
+      ]
+    }))
+  })
+
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: gridBorders(),
-    rows: [
-      new TableRow({ children: [cell(new Paragraph({ children: [runsText('RECOMMENDATION', { bold: true, color: WHITE, size: 20 })] }), BAND)] }),
-      new TableRow({ children: [cell([
-        new Paragraph({ spacing: { after: 80 }, children: [runsText(label, { bold: true, color: colour, size: 28 })] }),
-        ...paragraphs(overall?.recommendationReason)
-      ], LIGHT)] })
-    ]
+    columnWidths: [FULL_WIDTH],
+    width: { size: FULL_WIDTH, type: WidthType.DXA },
+    borders: gridBorders(DARKRED),
+    rows: [new TableRow({ children: [cell(children, { fill: DARKRED, width: FULL_WIDTH })] })]
   })
 }
 
-const DISCLAIMER = 'This review is internal advice prepared for Pipelines & Infrastructure (North) '
-  + 'Limited and is not a substitute for independent legal advice from a New Zealand solicitor. '
-  + 'Directors must obtain independent legal advice before executing any personal guarantee or '
-  + 'security document.'
+const DISCLAIMER = 'This review is provided as internal legal advice for Pipelines & Infrastructure (North) '
+  + 'Limited and is not a substitute for independent legal advice from a New Zealand solicitor, particularly '
+  + 'in relation to any Personal Guarantee and PPSA implications. Directors should obtain independent legal '
+  + 'advice before executing a personal guarantee.'
 
-// r = the review JSON from creditReviewPrompts.buildReview; returns a Buffer of the .docx
-async function buildCreditReviewDocx(r, { documents = [], reviewDate } = {}) {
+function documentsLine(review, documents) {
+  if (review.documentsSummary) return review.documentsSummary
+  // One entry per FILE, not per section read.
+  const seen = new Map()
+  for (const d of documents || []) {
+    if (!seen.has(d.filename)) {
+      seen.set(d.filename, `${d.filename}${d.read === false ? ` (NOT READ — ${d.reason})` : ''}`)
+    }
+  }
+  return [...seen.values()].join('  |  ')
+}
+
+async function buildCreditReviewDocx(review, { documents = [], reviewDate } = {}) {
+  const r = review || {}
+  const supplier = supplierShortName(r)
   const dateLabel = reviewDate || new Date().toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
-  const d = r.directorExposure || {}
   const overall = r.overallRisk || {}
+  const director = r.directorExposure || {}
+
+  const children = [
+    new Paragraph({ children: [run('Credit Application Legal Review', { bold: true, size: 32, color: NAVY })] }),
+    new Paragraph({
+      spacing: { before: 80 },
+      children: [run(`${supplier}${r.documentsSubtitle ? ` — ${r.documentsSubtitle}` : r.supplierTrade ? ` — ${r.supplierTrade}` : ''}`,
+        { bold: true, size: 22, color: BODY })]
+    }),
+    para('Prepared for: Pipelines & Infrastructure (North) Limited', { size: 18, color: GREY_TEXT }, { spacing: { before: 140 } }),
+    para(`Review date: ${dateLabel}`, { size: 18, color: GREY_TEXT }),
+    para(`Documents reviewed: ${documentsLine(r, documents)}`, { size: 18, color: GREY_TEXT }),
+    spacer(),
+    bannerBox(
+      `OVERALL RECOMMENDATION:  ${recommendationLabel(overall.recommendation)}`,
+      String(overall.recommendationReason || '').split(/\n\s*\n/).filter(Boolean).slice(0, 2)
+    ),
+
+    sectionHeading('1. Summary of Key Commercial & Legal Clauses'),
+    ...paragraphs(r.keyClausesSummary),
+
+    sectionHeading('2. Clause-by-Clause Analysis'),
+    clauseTable(r.clauseAnalysis),
+
+    sectionHeading('3. Overall Risk Summary'),
+    para('Top 3 commercial risks', { bold: true, size: 19, color: NAVY }, { spacing: { after: 100 } }),
+    topRisksTable(overall.topRisks),
+    spacer(),
+    para('Personal director exposure', { bold: true, size: 19, color: NAVY }, { spacing: { before: 200, after: 100 } }),
+    ...paragraphs(director.summary),
+    para(director.independentAdviceRecommended === false
+      ? 'Independent legal advice: not considered essential for this pack, though it remains the directors\' call.'
+      : 'Independent legal advice: required before any director signs a guarantee or security document.',
+      { bold: true, color: director.independentAdviceRecommended === false ? BODY : RISK.high.text, size: 18 }),
+    spacer(),
+    priorityBox(r),
+  ]
+
+  // Section 3's closing question, and the table that answers it with the market rather
+  // than with an opinion.
+  children.push(sectionHeading('Standard Supplier Positioning or Unusually Aggressive?'))
+  children.push(...paragraphs(r.positioningNarrative || overall.positioningReason))
+  if ((r.nonStandardPractice || []).length) {
+    children.push(spacer())
+    for (const item of r.nonStandardPractice) {
+      children.push(new Paragraph({ bullet: { level: 0 }, spacing: { after: 60 }, children: [run(item, { size: 18, color: BODY })] }))
+    }
+  }
+  const compare = comparisonTable(r.industryComparison, supplier)
+  if (compare) {
+    children.push(spacer())
+    children.push(compare)
+  }
+
+  children.push(spacer())
+  children.push(para(DISCLAIMER, { size: 16, color: GREY_TEXT, italics: true }))
 
   const doc = new Document({
-    styles: { default: { document: { run: { font: 'Calibri', size: 20 } } } },
+    styles: { default: { document: { run: { font: 'Arial', size: 18, color: BODY } } } },
     sections: [{
-      // A4 LANDSCAPE with 0.6" margins — the clause-by-clause table is five columns of
-      // prose (portrait squeezes "Why It Matters" to a column two words wide).
       properties: {
         page: {
-          size: { width: 16838, height: 11906, orientation: 'landscape' },
-          margin: { top: 864, bottom: 864, left: 864, right: 864 }
+          // Given portrait dimensions plus orientation, docx swaps them — which is what
+          // lands on the original's 15840 x 12240 landscape page. Passing the landscape
+          // figures directly gets them swapped back into portrait.
+          size: { width: 12240, height: 15840, orientation: 'landscape' },
+          margin: { top: 900, right: 1080, bottom: 900, left: 1080, header: 708, footer: 708 }
         }
+      },
+      headers: {
+        default: new Header({
+          children: [new Paragraph({
+            children: [run(
+              `PIPELINES & INFRASTRUCTURE LTD   |   CREDIT APPLICATION REVIEW   |   ${supplier.toUpperCase()}   |   CONFIDENTIAL & PRIVILEGED`,
+              { size: 14, color: GREY_LIGHT, bold: true })]
+          })]
+        })
       },
       footers: {
         default: new Footer({
           children: [new Paragraph({
             alignment: AlignmentType.CENTER,
-            children: [runsText('P&I (North) Ltd — internal legal review, not a substitute for independent legal advice', { color: GREY, size: 15 })]
+            children: [
+              run('Page ', { size: 14, color: GREY_LIGHT }),
+              new TextRun({ children: [PageNumber.CURRENT], font: 'Arial', size: 14, color: GREY_LIGHT }),
+              run(' of ', { size: 14, color: GREY_LIGHT }),
+              new TextRun({ children: [PageNumber.TOTAL_PAGES], font: 'Arial', size: 14, color: GREY_LIGHT })
+            ]
           })]
         })
       },
-      children: [
-        headerTable(r.supplierName, dateLabel),
-        spacer(),
-        detailsTable(r, documents, dateLabel),
-        heading('1. Key Clauses — Summary'),
-        ...paragraphs(r.keyClausesSummary),
-        heading('2. Clause-by-Clause Analysis'),
-        clauseTable(r.clauseAnalysis),
-        heading('3. Standing Risk Checklist'),
-        para('The six risks carried forward from P&I\'s completed credit application reviews, checked against this supplier.', { italics: true, color: GREY, size: 18 }),
-        spacer(),
-        checklistTable(r.standingRiskChecklist),
-        heading('4. Personal Director Exposure'),
-        ...paragraphs(d.summary),
-        spacer(),
-        para('Priority amendments before any director signs:', { bold: true }),
-        ...bulletList(d.priorityAmendments, 'No amendments identified as required before signing.'),
-        spacer(),
-        para(d.independentAdviceRecommended === false
-          ? 'Independent legal advice: not considered essential for this pack, though it remains the directors\' call.'
-          : 'Independent legal advice: recommended before any director signs a guarantee or security document.',
-          { bold: true, color: d.independentAdviceRecommended === false ? DARK : RED }),
-        heading('5. Inconsistent with Normal NZ Construction Practice'),
-        ...bulletList(r.nonStandardPractice, 'Nothing identified as inconsistent with normal NZ construction industry credit practice.'),
-        heading('6. Overall Risk Summary'),
-        para('Top commercial risks:', { bold: true }),
-        ...bulletList(overall.topRisks),
-        spacer(),
-        para(`Supplier positioning: ${overall.positioning || 'not assessed'}`, { bold: true }),
-        ...paragraphs(overall.positioningReason),
-        spacer(),
-        recommendationBox(overall),
-        spacer(),
-        para(DISCLAIMER, { italics: true, color: GREY, size: 17 })
-      ]
+      children
     }]
   })
 
   return Packer.toBuffer(doc)
 }
 
+// The model has been asked for the entity name alone, but it once returned the entity
+// plus a clause about which group companies are bound — which became the filename. Cut at
+// the first bracket or comma, so a stray sentence cannot end up in a filename or a header.
+function supplierShortName(r) {
+  const raw = String(r?.supplierName || 'Supplier')
+  const cut = raw.split(/\s*[(,—]|\s+\band\b,/)[0].trim()
+  return (cut || raw).replace(/\s+/g, ' ').slice(0, 70) || 'Supplier'
+}
+
 function creditReviewFilename(r) {
-  const name = String(r?.supplierName || 'Supplier').replace(/[^A-Za-z0-9 &()-]/g, '').trim() || 'Supplier'
+  const name = supplierShortName(r).replace(/[^A-Za-z0-9 &()-]/g, '').trim() || 'Supplier'
   return `${name} - Credit Application Review.docx`
 }
 
-module.exports = { buildCreditReviewDocx, creditReviewFilename }
+module.exports = { buildCreditReviewDocx, creditReviewFilename, supplierShortName }

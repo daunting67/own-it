@@ -522,31 +522,54 @@ const SUMMARY_SYSTEM = `${REVIEW_PREAMBLE}
 
 The clause-by-clause analysis and the standing risk checklist are already done and are given to
 you below. Your job is the parts that depend on seeing the whole picture: the plain-English
-summary a director reads first, their personal exposure, anything inconsistent with normal NZ
-construction practice, and the overall recommendation.
+summary a director reads first, their personal exposure, the priority amendments, how this
+supplier compares with normal NZ practice, and the overall recommendation.
 
-Work only from the analysis and notes given. Never introduce a clause or figure that is not in them.
+Work only from the analysis and notes given. Never introduce a clause or figure that is not in
+them. Write for a director, not a lawyer.
+
+Two sections deserve particular care because they are what P&I actually acts on:
+
+PRIORITY AMENDMENTS — an ordered list of what must change before anyone signs, most important
+first, each naming the clause it applies to. These are handed to the supplier as P&I's
+negotiating position, so each one must state the actual amendment, not the concern.
+
+INDUSTRY COMPARISON — a table setting this supplier's position against normal NZ construction
+trade credit practice, feature by feature (payment terms, default interest, personal guarantee,
+PPSA/security, defect notification window, set-off, price variation, liability, and anything else
+material in this pack). This is what turns "this clause is harsh" into "this clause is harsher
+than the market", and it is the evidence behind the positioning call. Give the industry norm as a
+figure or plain description where one exists (e.g. "10-15% p.a.", "20th of the following month",
+"20-30 working days"). Assessment must be one of: standard | reasonable | somewhat aggressive |
+aggressive | unusually aggressive.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "supplierName": "<the supplier as named in the pack>",
+  "supplierName": "<the supplier's LEGAL ENTITY NAME ONLY, e.g. 'Timberworld East Tamaki Ltd' — no description, no parenthetical about group companies, no trailing clause. Anything about related or group companies being bound belongs in keyClausesSummary, not here; this name is used as the document's title and filename>",
   "supplierTrade": "<what this supplier supplies, in a few words>",
-  "keyClausesSummary": "<2-4 paragraphs of plain-English narrative covering credit limit and payment terms, title and risk, security, guarantee, interest and recovery costs, disputes. Written for a director, not a lawyer.>",
+  "documentsSubtitle": "<the documents this review covers, as a subtitle, e.g. 'Credit Account Application & Terms of Trade'>",
+  "documentsSummary": "<the documents with their sizes, e.g. 'Credit Account Application (4pp)  |  Terms of Trade (24 clauses, 4pp)'>",
+  "keyClausesSummary": "<4-8 paragraphs of plain-English narrative: who the supplier is and what they supply to P&I; whether these are a known template (EC Credit Control) and what that means; the most significant provision and why; anything unusual not seen in the other reviews; the guarantee position; and anything genuinely favourable, said plainly>",
   "directorExposure": {
     "guaranteeRequired": true,
     "summary": "<what the directors are personally on the hook for if they sign as drafted>",
     "priorityAmendments": [ "<the specific amendment a director should require before signing>" ],
     "independentAdviceRecommended": true
   },
+  "priorityAmendments": [ { "priority": 1, "action": "<the actual amendment to demand, in the imperative>", "clauseRef": "<the clause it applies to>" } ],
   "nonStandardPractice": [ "<anything inconsistent with normal NZ construction industry credit practice, and why>" ],
+  "industryComparison": [ { "feature": "<e.g. Personal guarantee>", "nzStandard": "<the normal NZ position>", "supplierPosition": "<what this supplier requires>", "assessment": "<standard | reasonable | somewhat aggressive | aggressive | unusually aggressive>" } ],
+  "positioningNarrative": "<1-2 paragraphs answering: is this standard supplier positioning or unusually aggressive, judged against what a supplier of this kind normally asks for>",
   "overallRisk": {
-    "topRisks": [ "<top commercial risk 1>", "<2>", "<3>" ],
+    "topRisks": [ { "title": "<short name of the risk>", "detail": "<2-4 sentences: what it is and what it exposes P&I to, with the clause reference>" } ],
     "positioning": "<standard | firm but not unusual | unusually aggressive>",
     "positioningReason": "<one or two sentences supporting that assessment>",
     "recommendation": "<accept_as_is | accept_with_amendment | do_not_sign>",
-    "recommendationReason": "<one paragraph: what the directors should do and why>"
+    "recommendationReason": "<one short paragraph, written to sit at the TOP of the review as the first thing a director reads: the verdict and the two or three things that drive it>"
   }
-}`
+}
+topRisks must have exactly three entries. priorityAmendments should have as many as the pack
+genuinely needs, numbered from 1 in order of importance.`
 
 function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }) {
   const read = documents.filter(d => d.read)
@@ -734,7 +757,16 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
       maxTokens: 16000,
       effort: 'high'
     })
-    return Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
+    const rows = Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
+    // The analysis comes back as analysis only — it does not echo which document the
+    // clause came from, and the review groups the table by that (PART A: the application
+    // form and its guarantee, PART B: the terms of trade). One entry per clause in the
+    // order given, so the source is re-attached by position, and only when the counts
+    // agree — a mismatch means the order cannot be trusted and a wrong label is worse
+    // than none.
+    return rows.length === clauses.length
+      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null }))
+      : rows
   } catch (err) {
     if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
       const mid = Math.ceil(clauses.length / 2)
