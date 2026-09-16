@@ -175,7 +175,19 @@ async function callClaudeOnce({ system, content, maxTokens, effort }) {
     console.error('Claude API error, full body:', JSON.stringify(err), 'request-id:', requestId)
     const detail = err.error?.type ? ` (${err.error.type})` : ''
     const idSuffix = requestId ? ` [ref: ${requestId}]` : ''
-    const wrapped = new Error((err.error?.message || `Claude API error ${response.status}`) + detail + idSuffix)
+    const raw = err.error?.message || `Claude API error ${response.status}`
+    // Two failures here are account admin, not anything the user did with their documents,
+    // and the raw API wording sends a non-technical person hunting for a problem in their
+    // files. Say what it is and who fixes it. (Hit live on 16 Sep 2026 mid-review.)
+    const message = /credit balance is too low/i.test(raw)
+      ? 'The Anthropic account has run out of credit, so Claude stopped mid-run. Nothing is wrong with '
+        + 'your documents — top the account up at console.anthropic.com (Billing), then press Resume to '
+        + 'carry on from where it stopped; the work already done is saved.'
+      : /invalid x-api-key|authentication_error/i.test(raw)
+      ? 'The portal\'s Anthropic API key is not being accepted. This is a server setting, not your '
+        + 'documents — ANTHROPIC_API_KEY needs checking in the Vercel environment variables.'
+      : raw
+    const wrapped = new Error(message + (message === raw ? detail + idSuffix : ''))
     wrapped.retryable = RETRYABLE.has(response.status)
     wrapped.retryAfter = response.headers.get('retry-after')
     throw wrapped
