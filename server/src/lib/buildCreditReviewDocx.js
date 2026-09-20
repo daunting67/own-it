@@ -34,7 +34,7 @@ const RISK = {
   low: { fill: 'E2EFDA', text: '375623' }
 }
 
-const CLAUSE_WIDTHS = [2200, 1100, 3100, 3100, 3380, 800]
+const CLAUSE_WIDTHS = [2200, 1100, 3100, 3100, 3380, 400, 400]
 const RISK_WIDTHS = [600, 3000, 10080]
 const COMPARE_WIDTHS = [3200, 3500, 3800, 3180]
 const FULL_WIDTH = 13680
@@ -153,8 +153,12 @@ function clauseRow(c) {
       cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
       cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
       cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
-      // Left blank on purpose: the director ticks this column off by hand.
-      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] })
+      // Both left blank on purpose: the director ticks ONE of the two boxes by hand,
+      // rather than writing "Yes"/"No" into a single shared cell — a plain tick is
+      // unambiguous where a hand-written "Yes" over a crossed-out first answer was not
+      // (Progressive Maintenance Workshop review, 22 Jun 2026).
+      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] }),
+      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[6] })
     ]
   })
 }
@@ -171,26 +175,27 @@ function lowRiskSummaryRow(clauses) {
         `${clauses.length} standard clause${clauses.length === 1 ? '' : 's'}, consistent with normal NZ trade credit practice. Accepted as drafted — no amendment recommended.`,
         { italics: true, size: 17 }
       ), { fill: r.fill, width: CLAUSE_WIDTHS[2] + CLAUSE_WIDTHS[3] + CLAUSE_WIDTHS[4], span: 3 }),
-      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[5] })
+      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[5] }),
+      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[6] })
     ]
   })
 }
 
 function clauseTable(clauseAnalysis) {
   const rows = [headerRow(
-    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Yes /\nNo'],
+    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Yes', 'No'],
     CLAUSE_WIDTHS
   )]
 
   const parts = partsFromClauses(clauseAnalysis)
   if (!parts.length) {
-    rows.push(new TableRow({ children: [cell(para('No clauses of concern were identified.', { italics: true, color: GREY_LIGHT }), { fill: ROW_TINT, span: 6 })] }))
+    rows.push(new TableRow({ children: [cell(para('No clauses of concern were identified.', { italics: true, color: GREY_LIGHT }), { fill: ROW_TINT, span: 7 })] }))
   }
 
   for (const part of parts) {
     if (parts.length > 1 || part.title !== 'Clauses') {
       rows.push(new TableRow({
-        children: [cell(para(part.title, { bold: true, color: WHITE, size: 17 }), { fill: NAVY, span: 6 })]
+        children: [cell(para(part.title, { bold: true, color: WHITE, size: 17 }), { fill: NAVY, span: 7 })]
       }))
     }
     const low = part.clauses.filter(c => String(c.riskRating).toLowerCase() === 'low')

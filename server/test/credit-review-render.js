@@ -74,6 +74,13 @@ async function main() {
   const rows = await renderRows(baseReview)
   const joined = rows.join('\n')
 
+  // ---- Yes/No is two separate tick columns, not one shared cell (21 Sep 2026: a
+  // director's handwritten "Yes" over a crossed-out first answer in the old single
+  // column was not reliably readable back) ----
+  check('header has separate "Yes" and "No" columns, not one "Yes/No" column',
+    rows[0].includes('Yes') && rows[0].includes('No') && !rows[0].includes('Yes /'),
+    rows[0])
+
   // ---- HIGH and MEDIUM clauses each keep their own full row ----
   check('HIGH clause keeps its own row', rows.some(r => r.includes('cl 1 — Guarantee') && r.includes('HIGH')))
   check('MEDIUM clause keeps its own row', rows.some(r => r.includes('cl 9 — Default interest') && r.includes('MEDIUM')))
