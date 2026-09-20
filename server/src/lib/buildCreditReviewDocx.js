@@ -132,6 +132,50 @@ function partsFromClauses(clauseAnalysis) {
   }))
 }
 
+// Every clause is analysed (see creditReviewPrompts.js), but not every clause earns a full
+// row: a director reading this table is looking for what to act on, and a LOW-risk clause
+// — by definition standard NZ trade-credit boilerplate P&I would accept unchanged — read the
+// same as a HIGH one with five full-width cells each. Full rows are for HIGH and MEDIUM;
+// LOW clauses within a part collapse into one summary row so the table's length tracks the
+// number of things that actually need a decision, not the number of clauses the supplier's
+// drafter happened to use (73 full rows on one pack, 20 Sep 2026).
+function clauseRow(c) {
+  const r = riskOf(c.riskRating)
+  const position = [
+    c.recommendedPosition ? `${String(c.recommendedPosition).toUpperCase()}.` : null,
+    c.negotiationAngle
+  ].filter(Boolean).join(' ')
+  return new TableRow({
+    children: [
+      cell(para(c.clauseRef, { bold: true, size: 17 }), { width: CLAUSE_WIDTHS[0] }),
+      cell(para(String(c.riskRating || '').toUpperCase(), { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
+        { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
+      cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
+      cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
+      cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
+      // Left blank on purpose: the director ticks this column off by hand.
+      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] })
+    ]
+  })
+}
+
+function lowRiskSummaryRow(clauses) {
+  const r = riskOf('low')
+  const refs = clauses.map(c => c.clauseRef).filter(Boolean).join(', ')
+  return new TableRow({
+    children: [
+      cell(para(refs, { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[0] }),
+      cell(para('LOW', { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
+        { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
+      cell(para(
+        `${clauses.length} standard clause${clauses.length === 1 ? '' : 's'}, consistent with normal NZ trade credit practice. Accepted as drafted — no amendment recommended.`,
+        { italics: true, size: 17 }
+      ), { fill: r.fill, width: CLAUSE_WIDTHS[2] + CLAUSE_WIDTHS[3] + CLAUSE_WIDTHS[4], span: 3 }),
+      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[5] })
+    ]
+  })
+}
+
 function clauseTable(clauseAnalysis) {
   const rows = [headerRow(
     ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Yes /\nNo'],
@@ -149,25 +193,10 @@ function clauseTable(clauseAnalysis) {
         children: [cell(para(part.title, { bold: true, color: WHITE, size: 17 }), { fill: NAVY, span: 6 })]
       }))
     }
-    for (const c of part.clauses) {
-      const r = riskOf(c.riskRating)
-      const position = [
-        c.recommendedPosition ? `${String(c.recommendedPosition).toUpperCase()}.` : null,
-        c.negotiationAngle
-      ].filter(Boolean).join(' ')
-      rows.push(new TableRow({
-        children: [
-          cell(para(c.clauseRef, { bold: true, size: 17 }), { width: CLAUSE_WIDTHS[0] }),
-          cell(para(String(c.riskRating || '').toUpperCase(), { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
-            { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
-          cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
-          cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
-          cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
-          // Left blank on purpose: the director ticks this column off by hand.
-          cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] })
-        ]
-      }))
-    }
+    const low = part.clauses.filter(c => String(c.riskRating).toLowerCase() === 'low')
+    const notLow = part.clauses.filter(c => String(c.riskRating).toLowerCase() !== 'low')
+    for (const c of notLow) rows.push(clauseRow(c))
+    if (low.length) rows.push(lowRiskSummaryRow(low))
   }
   return new Table({ columnWidths: CLAUSE_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
 }

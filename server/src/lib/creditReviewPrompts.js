@@ -500,9 +500,30 @@ Analyse every clause you are given. Do not skip one because it looks routine: ro
 where risk hides in a credit application. If two clauses in the batch work together (a guarantee
 and the indemnity that backs it), say so in whyItMatters.
 
+RISK RATING RUBRIC — apply consistently, because the rating decides how the clause is presented to
+the directors, not just how it reads:
+- HIGH: uncapped or open-ended exposure for P&I or its directors personally — personal liability,
+  an unlimited indemnity, a general security interest over all present and after-acquired property,
+  a charge over real property, punitive default interest, or a one-sided termination/access right.
+  Anything a director should not sign without amendment.
+- MEDIUM: a real, negotiable commercial risk that is capped or already common in NZ trade credit —
+  a defect notification window that is a little short, an ordinary PMSI, a modest price-variation
+  clause. Worth raising with the supplier, not a reason to withhold signature.
+  Do not rate something MEDIUM merely because it is not perfectly balanced — every commercial
+  contract favours the drafting party somewhat. Rate it against what a director would actually
+  want changed before signing.
+- LOW: standard NZ trade-credit or Consumer Guarantees Act boilerplate that P&I would accept
+  unchanged in any comparable supplier agreement — governing law, notices, title retention pending
+  payment, ordinary privacy/credit-reporting consent. This is the majority rating on a well-drafted
+  pack, not the exception.
+
+Keep every field to its stated length regardless of riskRating — length signals nothing; the
+riskRating and negotiationAngle carry the signal. A HIGH-risk clause explained in two sentences is
+not under-analysed; a LOW-risk clause explained in five is over-written.
+
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "clauseAnalysis": [ { "clauseRef": "<clause number / title, as given>", "riskRating": "<high | medium | low>", "plainEnglish": "<one or two sentences: what it means>", "whyItMatters": "<the commercial or director impact on P&I specifically>", "recommendedPosition": "<accept | amend | reject>", "negotiationAngle": "<the actual amendment to ask for; null if accepting as is>" } ]
+  "clauseAnalysis": [ { "clauseRef": "<clause number / title, as given>", "riskRating": "<high | medium | low>", "plainEnglish": "<one or two sentences: what it means>", "whyItMatters": "<one or two sentences: the commercial or director impact on P&I specifically>", "recommendedPosition": "<accept | amend | reject>", "negotiationAngle": "<one sentence: the actual amendment to ask for; null if accepting as is>" } ]
 }
 One entry per clause given, in the order given.`
 
