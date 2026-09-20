@@ -784,13 +784,15 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
     })
     const rows = Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
     // The analysis comes back as analysis only — it does not echo which document the
-    // clause came from, and the review groups the table by that (PART A: the application
-    // form and its guarantee, PART B: the terms of trade). One entry per clause in the
-    // order given, so the source is re-attached by position, and only when the counts
-    // agree — a mismatch means the order cannot be trusted and a wrong label is worse
-    // than none.
+    // clause came from, or the verbatim wording it was given (that would just be the
+    // model re-typing it back, wasted output tokens for no gain). Both are re-attached
+    // by position afterwards, and only when the counts agree — a mismatch means the order
+    // cannot be trusted and a wrong label is worse than none. `document` drives the
+    // PART A / PART B grouping in the review; `wording` is what a phase-2 amendment
+    // document quotes and marks up — without it, a "Yes, pursue this" decision has
+    // nothing to show the supplier.
     return rows.length === clauses.length
-      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null }))
+      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null, wording: clauses[i].wording || null }))
       : rows
   } catch (err) {
     if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
@@ -810,7 +812,9 @@ async function analyseClauseBatch(context, clauses, depth = 0) {
         plainEnglish: 'This clause could not be analysed automatically.',
         whyItMatters: 'It is in the pack but is not covered by this review — read it yourself before signing.',
         recommendedPosition: 'amend',
-        negotiationAngle: null
+        negotiationAngle: null,
+        document: c.document || null,
+        wording: c.wording || null
       }))
     }
     throw err
@@ -950,8 +954,168 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], 
   }
 }
 
+// ---------------------------------------------------------------- phase 2: supplier amendment document
+//
+// The review above is P&I's internal record — a director's own risk assessment, written in
+// P&I's voice, for P&I's eyes. Phase 2 runs the other direction: once a director has gone
+// through the clause table and marked each clause Yes ("pursue this amendment") or No
+// ("accept as drafted"), phase 2 turns only the Yes clauses into something SENT TO THE
+// SUPPLIER — a covering summary of the requested changes in professional, non-adversarial
+// language, plus the actual clause wording marked up with exactly what to delete and what
+// to insert. Internal risk language ("directors are personally exposed") has no place in a
+// document the supplier reads, which is why this has its own system prompts rather than
+// reusing the review's.
+//
+// Two calls, not one, because they reason from different material: the summary works from
+// whyItMatters/negotiationAngle (already-written judgement); the redline works from the
+// verbatim wording (raw text it must reproduce exactly). A call doing both would be a worse
+// version of each.
+
+const PHASE2_PREAMBLE = `${COMPANY_CONTEXT}
+
+P&I's directors have reviewed a supplier's credit application and terms of trade, and have
+decided which clauses to ask the supplier to amend before signing. You are drafting
+correspondence FROM P&I TO THE SUPPLIER — not internal advice. Write in professional,
+factual, commercially normal language: state what P&I is asking for and why, without
+adversarial or alarmist phrasing ("exposes the directors to uncapped personal liability")
+that belongs in an internal legal review, not a letter to a trading partner. P&I wants to
+keep this account; the tone is a reasonable counterparty asking for reasonable terms, not a
+warning.`
+
+const SUPPLIER_SUMMARY_SYSTEM = `${PHASE2_PREAMBLE}
+
+You are given the clauses the directors marked "Yes" (pursue this amendment) — every other
+clause is being accepted as drafted and is none of the supplier's concern; do not mention
+them. Write the covering summary that introduces the requested amendments, before the
+marked-up clauses themselves.
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{
+  "introduction": "<1-2 paragraphs: professional opening. States that P&I has reviewed the credit application and terms of trade and is requesting the amendments below before executing, and that P&I values the relationship and wants to proceed on agreed terms>",
+  "items": [ { "clauseRef": "<as given>", "requestedChange": "<the specific amendment P&I is asking for, in the imperative, e.g. 'Cap the personal guarantee at the approved credit limit'>", "rationale": "<1-2 sentences: a factual, non-adversarial reason a reasonable supplier would accept — reference normal NZ trade credit practice where relevant, never P&I's internal risk exposure>" } ],
+  "closing": "<1 short paragraph: invites the supplier to confirm the amendments or discuss, states P&I's intention to proceed promptly once agreed>"
+}
+One entry in "items" per clause given, same order.`
+
+async function buildPhase2Summary({ supplierName, clauses }) {
+  const brief = [
+    `Supplier: ${supplierName}`,
+    '',
+    `Clauses to request amendment on (${clauses.length}):`,
+    JSON.stringify(clauses.map(c => ({
+      clauseRef: c.clauseRef, whyItMatters: c.whyItMatters, negotiationAngle: c.negotiationAngle, recommendedPosition: c.recommendedPosition
+    })), null, 2),
+    '',
+    'Produce the summary JSON as specified.'
+  ].join('\n')
+  return callClaude({ system: SUPPLIER_SUMMARY_SYSTEM, content: [{ type: 'text', text: brief }], maxTokens: 8000, effort: 'high' })
+}
+
+// ---- the redline: verbatim wording, marked up ----
+
+// Smaller than CLAUSES_PER_BATCH (5) — this call echoes most of its input back verbatim as
+// output (the unchanged wording), so the same clause count costs roughly double the output
+// tokens of the main analysis. Halving the batch keeps it inside one response for the same
+// reason batching the main analysis does (see CLAUSES_PER_BATCH above).
+const REDLINE_CLAUSES_PER_BATCH = 3
+
+const REDLINE_SYSTEM = `${PHASE2_PREAMBLE}
+
+You are marking up the VERBATIM wording of clauses P&I is asking the supplier to amend, so
+the supplier can see exactly what changes and what stays. This is not a rewrite: reproduce
+the given wording EXACTLY, character for character, splitting it into segments so that only
+the specific words being deleted or replaced are marked — everything else must be an
+unmodified copy of the input. Never paraphrase, summarise, or invent wording that is not
+either (a) copied verbatim from the clause given, or (b) the specific replacement text the
+negotiation angle calls for.
+
+Work clause by clause. For each clause: start from its wording, find the specific phrase(s)
+the negotiation angle requires changing, and split the wording into an ordered list of
+segments — "keep" for anything unchanged, "delete" for wording being removed (it must be an
+exact substring of the original), and "insert" for new replacement wording placed
+immediately after the text it replaces. A clause with no specific wording to point to (the
+change is structural, e.g. "delete this clause in full") is one "delete" segment covering
+the whole clause, or one "keep" segment plus an "insert" appended at the end — whichever the
+negotiation angle actually asks for.
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{
+  "redlines": [ { "clauseRef": "<as given>", "segments": [ { "text": "<exact text>", "type": "keep | delete | insert" } ] } ]
+}
+One entry per clause given, in the order given. Concatenating a clause's "keep" and
+"delete" segments (ignoring "insert") must reproduce its original wording exactly.`
+
+function batchRedlineClauses(clauses, size = REDLINE_CLAUSES_PER_BATCH) {
+  const batches = []
+  for (let i = 0; i < (clauses || []).length; i += size) batches.push(clauses.slice(i, i + size))
+  return batches
+}
+
+// A clause whose markup could not be generated, or that arrived with no preserved wording
+// (a run from before wording was carried through the clause analysis), still needs to
+// appear — flagged, with whatever text exists — rather than silently missing from a
+// document going to the supplier.
+function fallbackRedline(c) {
+  return {
+    clauseRef: c.clauseRef,
+    segments: c.wording
+      ? [
+          { text: c.wording, type: 'keep' },
+          { text: ' [COULD NOT BE MARKED UP AUTOMATICALLY — insert the agreed amendment manually before sending]', type: 'insert' }
+        ]
+      : [{ text: '[Original wording was not preserved for this clause — insert the amendment manually before sending]', type: 'insert' }]
+  }
+}
+
+async function redlineBatch(clauses, depth = 0) {
+  if (!clauses.length) return []
+  const brief = [
+    `Mark up these ${clauses.length} clause(s):`,
+    JSON.stringify(clauses.map(c => ({
+      clauseRef: c.clauseRef, wording: c.wording, negotiationAngle: c.negotiationAngle, recommendedPosition: c.recommendedPosition
+    })), null, 2),
+    '',
+    'Produce the redlines JSON as specified.'
+  ].join('\n')
+  try {
+    const out = await callClaude({ system: REDLINE_SYSTEM, content: [{ type: 'text', text: brief }], maxTokens: 16000, effort: 'high' })
+    const rows = Array.isArray(out?.redlines) ? out.redlines : []
+    return rows.length === clauses.length ? rows : clauses.map(fallbackRedline)
+  } catch (err) {
+    if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
+      const mid = Math.ceil(clauses.length / 2)
+      const [a, b] = await Promise.all([
+        redlineBatch(clauses.slice(0, mid), depth + 1),
+        redlineBatch(clauses.slice(mid), depth + 1)
+      ])
+      return [...a, ...b]
+    }
+    if (err.isMaxTokens || err.isBadJson) return clauses.map(fallbackRedline)
+    throw err
+  }
+}
+
+// Clauses without preserved wording never go to Claude — there's nothing verbatim to mark
+// up, and asking would only invite it to reconstruct wording it was never actually given.
+// They still come back in the RIGHT POSITION, as a flagged fallback, so the final document
+// reads in the same clause order the review itself used.
+async function buildPhase2Redlines(clauses) {
+  const results = new Array(clauses.length)
+  const toSend = []
+  clauses.forEach((c, i) => {
+    if (c.wording) toSend.push({ ...c, __i: i })
+    else results[i] = fallbackRedline(c)
+  })
+  for (const batch of batchRedlineClauses(toSend)) {
+    const rows = await redlineBatch(batch)
+    rows.forEach((row, j) => { results[batch[j].__i] = row })
+  }
+  return results
+}
+
 module.exports = {
   isReadable, unreadableReason, digestDocument, planDocument, digestPart, withUsage,
   analyseClauses, batchClauses, buildChecklist, buildReview,
+  buildPhase2Summary, buildPhase2Redlines,
   CLAUSES_PER_BATCH, RECURRING_RISKS
 }

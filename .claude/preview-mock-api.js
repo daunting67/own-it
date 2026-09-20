@@ -6,6 +6,7 @@ const http = require('http')
 const PROCESSES = require('../server/src/lib/processDefinitions')
 const { buildMeetingNotesDocx, meetingNotesFilename } = require('../server/src/lib/buildMeetingNotesDocx')
 const { buildCreditReviewDocx, creditReviewFilename } = require('../server/src/lib/buildCreditReviewDocx')
+const { buildCreditReviewPhase2Docx } = require('../server/src/lib/buildCreditReviewPhase2Docx')
 
 const PORT = 3002
 
@@ -132,16 +133,23 @@ async function runMeetingNotes(res) {
   send(res, 200, { id: 'mock-run-' + Date.now(), output, status: 'completed', document, filename })
 }
 
-let CREDIT_RUNS = []
+let CREDIT_RUNS = [
+  // Seeded so "Recent reviews" and the phase-2 panel are clickable immediately — this
+  // mock predates the job/step flow the real credit-review run uses, so there's no mock
+  // upload-and-run path to produce one interactively.
+  { id: 'mock-run-1', input: 'Timberworld (East Tamaki) · Timber, hardware, building supplies', output: 'Timberworld — Accept with amendment.', status: 'completed', runBy: 'tony@pipelines.nz', createdAt: new Date().toISOString() }
+]
+const PHASE2_DATA = {} // runId -> { supplierName, clauseAnalysis, generated }
+const PHASE2_JOBS = {} // jobId -> { id, runId, status, done, total }
 const MOCK_CREDIT_REVIEW = {
   supplierName: 'Timberworld (East Tamaki)',
   supplierTrade: 'Timber, hardware, building supplies',
   templateSource: 'EC Credit Control',
   keyClausesSummary: 'Timberworld trades on 20th-of-the-following-month terms with a $25,000 credit limit, secured by a general security interest under the PPSA and an unlimited personal guarantee from each director.\n\nTitle in goods does not pass until payment in full, and Timberworld may enter any site to retake goods. Default interest runs at 2.5% per month compounding (roughly 34.5% p.a.), plus all recovery costs on a solicitor-client basis.',
   clauseAnalysis: [
-    { clauseRef: 'cl 20 — Deed of Guarantee', riskRating: 'high', plainEnglish: 'Each director personally guarantees everything P&I ever owes Timberworld, without limit and without end.', whyItMatters: 'Directors are personally liable for the whole account, not just the $25,000 limit, and stay liable after leaving the company.', recommendedPosition: 'amend', negotiationAngle: 'Cap the guarantee at the approved credit limit, add release at nil balance, delete the principal-debtor wording.' },
-    { clauseRef: 'cl 12 — Security interest (PPSA)', riskRating: 'high', plainEnglish: 'Timberworld takes a security interest over all of P&I\u2019s present and after-acquired property.', whyItMatters: 'A general charge over plant and receivables cuts across P&I\u2019s bank security and may breach the facility terms.', recommendedPosition: 'amend', negotiationAngle: 'Reduce to a PMSI over unpaid supplied goods only.' },
-    { clauseRef: 'cl 9 — Default interest', riskRating: 'medium', plainEnglish: '2.5% per month compounding on overdue amounts.', whyItMatters: 'About 34.5% p.a. — well above anything P&I has accepted elsewhere.', recommendedPosition: 'amend', negotiationAngle: 'Bring to 12% p.a. simple, in line with the Colas position.' },
+    { clauseRef: 'cl 20 — Deed of Guarantee', riskRating: 'high', plainEnglish: 'Each director personally guarantees everything P&I ever owes Timberworld, without limit and without end.', whyItMatters: 'Directors are personally liable for the whole account, not just the $25,000 limit, and stay liable after leaving the company.', recommendedPosition: 'amend', negotiationAngle: 'Cap the guarantee at the approved credit limit, add release at nil balance, delete the principal-debtor wording.', wording: 'The Guarantor unconditionally and irrevocably guarantees, without limit, all amounts owing by the Customer to the Company at any time.' },
+    { clauseRef: 'cl 12 — Security interest (PPSA)', riskRating: 'high', plainEnglish: 'Timberworld takes a security interest over all of P&I\u2019s present and after-acquired property.', whyItMatters: 'A general charge over plant and receivables cuts across P&I\u2019s bank security and may breach the facility terms.', recommendedPosition: 'amend', negotiationAngle: 'Reduce to a PMSI over unpaid supplied goods only.', wording: 'The Customer grants the Company a security interest in all of the Customer\u2019s present and after-acquired property.' },
+    { clauseRef: 'cl 9 — Default interest', riskRating: 'medium', plainEnglish: '2.5% per month compounding on overdue amounts.', whyItMatters: 'About 34.5% p.a. — well above anything P&I has accepted elsewhere.', recommendedPosition: 'amend', negotiationAngle: 'Bring to 12% p.a. simple, in line with the Colas position.', wording: 'Overdue amounts accrue interest at 2.5% per month, compounding monthly, from the due date.' },
   ],
   standingRiskChecklist: [
     { risk: 'unlimited personal guarantee', present: true, detail: 'cl 20 — unlimited, continuing, joint and several, with principal debtor clause', riskRating: 'high' },
@@ -349,6 +357,80 @@ const server = http.createServer(async (req, res) => {
   if (creditDocMatch && req.method === 'GET') {
     const buf = await buildCreditReviewDocx(MOCK_CREDIT_REVIEW, { documents: [] })
     return send(res, 200, { filename: creditReviewFilename(MOCK_CREDIT_REVIEW), document: buf.toString('base64') })
+  }
+
+  // ---- Phase 2 (the supplier-facing amendment document) ----
+  const phase2Match = path.match(/^\/api\/credit-review\/runs\/([^/]+)\/phase2$/)
+  if (phase2Match && req.method === 'GET') {
+    const runId = phase2Match[1]
+    if (!PHASE2_DATA[runId]) {
+      PHASE2_DATA[runId] = {
+        supplierName: MOCK_CREDIT_REVIEW.supplierName,
+        clauseAnalysis: MOCK_CREDIT_REVIEW.clauseAnalysis.map(c => ({ ...c, decision: null })),
+        generated: null
+      }
+    }
+    return send(res, 200, PHASE2_DATA[runId])
+  }
+  const phase2DecisionMatch = path.match(/^\/api\/credit-review\/runs\/([^/]+)\/phase2\/decisions$/)
+  if (phase2DecisionMatch && req.method === 'PATCH') {
+    const runId = phase2DecisionMatch[1]
+    const body = await readJson(req)
+    const data = PHASE2_DATA[runId]
+    if (!data || !data.clauseAnalysis[body.index]) return send(res, 400, { error: 'No such clause' })
+    data.clauseAnalysis[body.index] = { ...data.clauseAnalysis[body.index], decision: body.decision }
+    return send(res, 200, data)
+  }
+  const phase2DocMatch = path.match(/^\/api\/credit-review\/runs\/([^/]+)\/phase2\/document$/)
+  if (phase2DocMatch && req.method === 'GET') {
+    const runId = phase2DocMatch[1]
+    const data = PHASE2_DATA[runId]
+    if (!data?.generated) return send(res, 404, { error: 'No supplier document generated yet' })
+    return send(res, 200, data.generated.doc)
+  }
+  const phase2StartMatch = path.match(/^\/api\/credit-review\/runs\/([^/]+)\/phase2\/jobs$/)
+  if (phase2StartMatch && req.method === 'POST') {
+    const runId = phase2StartMatch[1]
+    const data = PHASE2_DATA[runId]
+    const yesClauses = (data?.clauseAnalysis || []).filter(c => c.decision === 'yes')
+    if (!yesClauses.length) return send(res, 400, { error: 'Mark at least one clause "Yes" before generating the supplier document' })
+    const id = 'mock-phase2-job-' + Date.now()
+    PHASE2_JOBS[id] = { id, runId, yesClauses, status: 'running', done: 0, total: 2 }
+    return send(res, 200, { id, runId, status: 'running', done: 0, total: 2, current: { label: 'Starting…' } })
+  }
+  const phase2JobMatch = path.match(/^\/api\/credit-review\/phase2\/jobs\/([^/]+)$/)
+  if (phase2JobMatch && req.method === 'GET') {
+    const job = PHASE2_JOBS[phase2JobMatch[1]]
+    if (!job) return send(res, 404, { error: 'Generation job not found' })
+    return send(res, 200, { id: job.id, runId: job.runId, status: job.status, done: job.done, total: job.total,
+      current: job.status === 'running' ? { label: job.done === 0 ? 'Writing the covering summary' : 'Marking up clause wording' } : null,
+      filename: job.filename || null })
+  }
+  const phase2StepMatch = path.match(/^\/api\/credit-review\/phase2\/jobs\/([^/]+)\/step$/)
+  if (phase2StepMatch && req.method === 'POST') {
+    const job = PHASE2_JOBS[phase2StepMatch[1]]
+    if (!job) return send(res, 404, { error: 'Generation job not found' })
+    await new Promise(r => setTimeout(r, 1500))
+    job.done += 1
+    if (job.done >= job.total) {
+      const summary = {
+        introduction: `Pipelines & Infrastructure (North) Limited has reviewed the credit application and terms of trade for ${job.yesClauses.length ? PHASE2_DATA[job.runId].supplierName : 'the supplier'}. We are requesting the amendments below before executing the agreement.`,
+        items: job.yesClauses.map(c => ({ clauseRef: c.clauseRef, requestedChange: c.negotiationAngle || c.recommendedPosition, rationale: c.whyItMatters })),
+        closing: 'We would welcome the opportunity to discuss these points and look forward to opening the account promptly once agreed.'
+      }
+      const redlines = job.yesClauses.map(c => ({
+        clauseRef: c.clauseRef,
+        segments: c.wording
+          ? [{ text: c.wording, type: 'keep' }, { text: ' [mock markup — see negotiationAngle: ' + c.negotiationAngle + ']', type: 'insert' }]
+          : [{ text: '[Original wording was not preserved for this clause]', type: 'insert' }]
+      }))
+      const filename = `${PHASE2_DATA[job.runId].supplierName} - Requested Amendments.docx`
+      const buf = await buildCreditReviewPhase2Docx({ supplierName: PHASE2_DATA[job.runId].supplierName, summary, redlines })
+      job.status = 'complete'
+      job.filename = filename
+      PHASE2_DATA[job.runId].generated = { filename, generatedAt: new Date().toISOString(), doc: { filename, document: buf.toString('base64') } }
+    }
+    return send(res, 200, { id: job.id, runId: job.runId, status: job.status, done: job.done, total: job.total, filename: job.filename || null })
   }
 
   send(res, 404, { error: `No mock for ${req.method} ${path}` })

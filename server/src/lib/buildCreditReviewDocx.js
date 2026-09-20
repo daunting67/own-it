@@ -419,4 +419,11 @@ function creditReviewFilename(r) {
   return `${name} - Credit Application Review.docx`
 }
 
-module.exports = { buildCreditReviewDocx, creditReviewFilename, supplierShortName }
+module.exports = {
+  buildCreditReviewDocx, creditReviewFilename, supplierShortName,
+  // Low-level building blocks, shared with buildCreditReviewPhase2Docx.js so the
+  // supplier-facing amendment document is typographically the same family as the review
+  // it comes from (same font, palette, margins) without copy-pasting the constants.
+  run, para, paragraphs, gridBorders, noBorders, cell, headerRow, spacer, sectionHeading,
+  NAVY, DARKRED, WHITE, GREY_TEXT, GREY_LIGHT, BODY, FULL_WIDTH
+}

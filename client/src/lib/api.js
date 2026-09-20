@@ -135,6 +135,20 @@ export const api = {
   kickCreditReviewStep: (id) => request(`/api/credit-review/jobs/${id}/step`, { method: 'POST', body: '{}' }),
   resumeCreditReviewJob: (id) => request(`/api/credit-review/jobs/${id}/resume`, { method: 'POST', body: '{}' }),
 
+  // Phase 2 — the supplier-facing amendment document, built from the Yes/No a director
+  // records against THIS review's own clause table (Yes = pursue the amendment). Addressed
+  // by the review's own runId throughout, same tab as the review it comes from.
+  getCreditReviewPhase2: (runId) => request(`/api/credit-review/runs/${runId}/phase2`),
+  saveCreditReviewPhase2Decision: (runId, index, decision) =>
+    request(`/api/credit-review/runs/${runId}/phase2/decisions`, { method: 'PATCH', body: JSON.stringify({ index, decision }) }),
+  getCreditReviewPhase2Document: (runId) => request(`/api/credit-review/runs/${runId}/phase2/document`),
+  // Same job/step/poll shape as the review itself, and for the same reason — marking up a
+  // long Yes list is several Claude calls, minutes long, too slow for one browser request.
+  startCreditReviewPhase2Job: (runId) => request(`/api/credit-review/runs/${runId}/phase2/jobs`, { method: 'POST', body: '{}' }),
+  getCreditReviewPhase2Job: (id) => request(`/api/credit-review/phase2/jobs/${id}`),
+  kickCreditReviewPhase2Step: (id) => request(`/api/credit-review/phase2/jobs/${id}/step`, { method: 'POST', body: '{}' }),
+  resumeCreditReviewPhase2Job: (id) => request(`/api/credit-review/phase2/jobs/${id}/resume`, { method: 'POST', body: '{}' }),
+
   // Tenders
   getTenders: () => request('/api/tenders'),
   getTender: (id) => request(`/api/tenders/${id}`),

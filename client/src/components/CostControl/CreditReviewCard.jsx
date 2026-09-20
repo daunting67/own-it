@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { api, uploadToSignedUrl } from '../../lib/api'
 import FileDropZone from './FileDropZone'
 import WorkingIndicator from './WorkingIndicator'
+import CreditReviewPhase2Panel from './CreditReviewPhase2Panel'
 
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
@@ -50,6 +51,9 @@ export default function CreditReviewCard() {
   const [historyError, setHistoryError] = useState(null)
   const [resetKey, setResetKey] = useState(0)
   const [jobId, setJobId] = useState(null)
+  // The runId whose phase-2 panel (supplier amendment document) is currently open, or
+  // null. At most one open at a time — same tab, one review's decisions in view.
+  const [phase2For, setPhase2For] = useState(null)
 
   useEffect(() => {
     api.getCreditReviewRuns().then(setHistory).catch(() => {})
@@ -263,9 +267,20 @@ export default function CreditReviewCard() {
             </div>
           )}
 
-          <button className="btn btn-primary" onClick={() => saveDocFile(result)}>
-            📄 Download Review (.docx)
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={() => saveDocFile(result)}>
+              📄 Download Review (.docx)
+            </button>
+            <button className="btn btn-secondary" onClick={() => setPhase2For(p => (p === result.id ? null : result.id))}>
+              {phase2For === result.id ? "Hide GM's markup" : "Process GM's markup →"}
+            </button>
+          </div>
+
+          {phase2For === result.id && (
+            <div style={{ marginTop: 14 }}>
+              <CreditReviewPhase2Panel runId={result.id} />
+            </div>
+          )}
         </div>
       )}
 
@@ -274,29 +289,44 @@ export default function CreditReviewCard() {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Recent reviews</div>
           <div style={{ display: 'grid', gap: 8 }}>
             {history.map(run => (
-              <div key={run.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '8px 12px', background: 'var(--pi-neutral-tint)', borderRadius: 6, fontSize: 13 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  {/* Same clamp as the reconciliation history: a run that fails before the
-                      label is shortened still carries the full raw upload list. */}
-                  <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
-                    {run.input || 'Credit application review'}
+              <div key={run.id} style={{ padding: '8px 12px', background: 'var(--pi-neutral-tint)', borderRadius: 6, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    {/* Same clamp as the reconciliation history: a run that fails before the
+                        label is shortened still carries the full raw upload list. */}
+                    <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                      {run.input || 'Credit application review'}
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                      {new Date(run.createdAt).toLocaleString('en-NZ')} · {run.runBy} · {run.status}
+                    </div>
+                    {historyError?.runId === run.id && (
+                      <div style={{ color: '#a33', fontSize: 11 }}>{historyError.message}</div>
+                    )}
                   </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                    {new Date(run.createdAt).toLocaleString('en-NZ')} · {run.runBy} · {run.status}
-                  </div>
-                  {historyError?.runId === run.id && (
-                    <div style={{ color: '#a33', fontSize: 11 }}>{historyError.message}</div>
+                  {run.status === 'completed' && (
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => downloadRun(run.id)}
+                        disabled={historyDocFetching === run.id}
+                      >
+                        {historyDocFetching === run.id ? 'Loading…' : 'Download'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => setPhase2For(p => (p === run.id ? null : run.id))}
+                      >
+                        {phase2For === run.id ? "Hide markup" : "GM's markup →"}
+                      </button>
+                    </div>
                   )}
                 </div>
-                {run.status === 'completed' && (
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => downloadRun(run.id)}
-                    disabled={historyDocFetching === run.id}
-                    style={{ flexShrink: 0 }}
-                  >
-                    {historyDocFetching === run.id ? 'Loading…' : 'Download'}
-                  </button>
+
+                {phase2For === run.id && (
+                  <div style={{ marginTop: 12 }}>
+                    <CreditReviewPhase2Panel runId={run.id} />
+                  </div>
                 )}
               </div>
             ))}
