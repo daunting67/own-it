@@ -392,10 +392,10 @@ const server = http.createServer(async (req, res) => {
   if (phase2StartMatch && req.method === 'POST') {
     const runId = phase2StartMatch[1]
     const data = PHASE2_DATA[runId]
-    const yesClauses = (data?.clauseAnalysis || []).filter(c => c.decision === 'yes')
-    if (!yesClauses.length) return send(res, 400, { error: 'Mark at least one clause "Yes" before generating the supplier document' })
+    const actionClauses = (data?.clauseAnalysis || []).filter(c => c.decision === 'action')
+    if (!actionClauses.length) return send(res, 400, { error: 'Mark at least one clause "Action" before generating the supplier document' })
     const id = 'mock-phase2-job-' + Date.now()
-    PHASE2_JOBS[id] = { id, runId, yesClauses, status: 'running', done: 0, total: 2 }
+    PHASE2_JOBS[id] = { id, runId, actionClauses, status: 'running', done: 0, total: 2 }
     return send(res, 200, { id, runId, status: 'running', done: 0, total: 2, current: { label: 'Starting…' } })
   }
   const phase2JobMatch = path.match(/^\/api\/credit-review\/phase2\/jobs\/([^/]+)$/)
@@ -414,11 +414,11 @@ const server = http.createServer(async (req, res) => {
     job.done += 1
     if (job.done >= job.total) {
       const summary = {
-        introduction: `Pipelines & Infrastructure (North) Limited has reviewed the credit application and terms of trade for ${job.yesClauses.length ? PHASE2_DATA[job.runId].supplierName : 'the supplier'}. We are requesting the amendments below before executing the agreement.`,
-        items: job.yesClauses.map(c => ({ clauseRef: c.clauseRef, requestedChange: c.negotiationAngle || c.recommendedPosition, rationale: c.whyItMatters })),
+        introduction: `Pipelines & Infrastructure (North) Limited has reviewed the credit application and terms of trade for ${job.actionClauses.length ? PHASE2_DATA[job.runId].supplierName : 'the supplier'}. We are requesting the amendments below before executing the agreement.`,
+        items: job.actionClauses.map(c => ({ clauseRef: c.clauseRef, requestedChange: c.negotiationAngle || c.recommendedPosition, rationale: c.whyItMatters })),
         closing: 'We would welcome the opportunity to discuss these points and look forward to opening the account promptly once agreed.'
       }
-      const redlines = job.yesClauses.map(c => ({
+      const redlines = job.actionClauses.map(c => ({
         clauseRef: c.clauseRef,
         segments: c.wording
           ? [{ text: c.wording, type: 'keep' }, { text: ' [mock markup — see negotiationAngle: ' + c.negotiationAngle + ']', type: 'insert' }]

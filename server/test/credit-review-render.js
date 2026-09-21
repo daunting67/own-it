@@ -23,6 +23,11 @@ function check(name, cond, detail) {
   else { fail++; console.log(`  FAIL  ${name}${detail ? '\n          ' + detail : ''}`) }
 }
 
+function xmlUnescape(s) {
+  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+}
+
 // Extract each table row's plain text from the rendered document.xml, the same way a
 // human reading the .docx would encounter it — not by inspecting the docx.js objects,
 // which would only prove the builder called itself correctly.
@@ -37,7 +42,7 @@ async function renderRows(review) {
   const rows = clauseTableXml.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []
   return rows.map(r => {
     const texts = r.match(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g) || []
-    return texts.map(t => t.replace(/<[^>]+>/g, '')).join(' | ')
+    return xmlUnescape(texts.map(t => t.replace(/<[^>]+>/g, '')).join(' | '))
   })
 }
 
@@ -74,11 +79,13 @@ async function main() {
   const rows = await renderRows(baseReview)
   const joined = rows.join('\n')
 
-  // ---- Yes/No is two separate tick columns, not one shared cell (21 Sep 2026: a
-  // director's handwritten "Yes" over a crossed-out first answer in the old single
-  // column was not reliably readable back) ----
-  check('header has separate "Yes" and "No" columns, not one "Yes/No" column',
-    rows[0].includes('Yes') && rows[0].includes('No') && !rows[0].includes('Yes /'),
+  // ---- Action / Don't Action are two separate tick columns, not one shared cell
+  // (21 Sep 2026: a director's handwritten "Yes" over a crossed-out first answer in the
+  // old single column was not reliably readable back — later renamed Yes/No -> Keep/Remove
+  // -> Action/Don't Action, the wording the GM already uses marking up a printed review by
+  // hand) ----
+  check('header has a standalone "Action" column distinct from "Don\'t Action"',
+    / \| Action \| /.test(rows[0]) && / \| Don't Action$/.test(rows[0]),
     rows[0])
 
   // ---- HIGH and MEDIUM clauses each keep their own full row ----

@@ -16,8 +16,8 @@ const {
 //
 // Three things in that format are easy to miss and matter most:
 //   - the RECOMMENDATION is stated at the top, before any analysis, not buried at the end;
-//   - the clause table carries an empty "Yes / No" column, because a director signs the
-//     decision off clause by clause on paper;
+//   - the clause table carries empty "Action / Don't Action" columns, because a director
+//     signs the decision off clause by clause on paper;
 //   - the review closes by comparing the supplier against NZ industry norms, which is what
 //     turns "this clause is harsh" into "this clause is harsher than the market".
 
@@ -69,11 +69,14 @@ function cell(children, { fill, width, span } = {}) {
     margins: { top: 80, bottom: 80, left: 110, right: 110 }
   })
 }
-function headerRow(labels, widths) {
+// sizes is optional, per-column, falling back to the standard 17 (8.5pt) — used to shrink
+// a header label that would otherwise force a narrow column wider (the clause table's
+// "Action" / "Don't Action" tick columns, at 400 twips each, are barely a third of an inch).
+function headerRow(labels, widths, sizes) {
   return new TableRow({
     tableHeader: true,
     children: labels.map((label, i) => cell(
-      para(label, { bold: true, color: WHITE, size: 17 }),
+      para(label, { bold: true, color: WHITE, size: (sizes && sizes[i]) || 17 }),
       { fill: NAVY, width: widths[i] }
     ))
   })
@@ -153,10 +156,11 @@ function clauseRow(c) {
       cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
       cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
       cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
-      // Both left blank on purpose: the director ticks ONE of the two boxes by hand,
-      // rather than writing "Yes"/"No" into a single shared cell — a plain tick is
-      // unambiguous where a hand-written "Yes" over a crossed-out first answer was not
-      // (Progressive Maintenance Workshop review, 22 Jun 2026).
+      // Both left blank on purpose: the director ticks ONE of the two boxes (Action or
+      // Don't Action) by hand, rather than writing a word into a single shared cell — a
+      // plain tick is unambiguous where a hand-written answer over a crossed-out first one
+      // was not (Progressive Maintenance Workshop review, 22 Jun 2026 — same wording the
+      // GM already used there).
       cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] }),
       cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[6] })
     ]
@@ -183,8 +187,9 @@ function lowRiskSummaryRow(clauses) {
 
 function clauseTable(clauseAnalysis) {
   const rows = [headerRow(
-    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Yes', 'No'],
-    CLAUSE_WIDTHS
+    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Action', "Don't Action"],
+    CLAUSE_WIDTHS,
+    [17, 17, 17, 17, 17, 13, 13]
   )]
 
   const parts = partsFromClauses(clauseAnalysis)

@@ -320,7 +320,7 @@ async function finishJob(job) {
   await removeUploads(job.steps.filter(s => s.kind === 'read').map(s => s.path)).catch(() => {})
 
   // Seed phase 2 (the supplier-facing amendment document) with this review's own clause
-  // table, unmarked — a director records Yes/No against these later, from the same tab.
+  // table, unmarked — a director records Action/Don't Action against these later, from the same tab.
   // Not fatal if it fails: the review itself is already filed and downloadable either way.
   await savePhase2Data(runId, {
     supplierName: review.supplierName,
@@ -334,8 +334,8 @@ async function finishJob(job) {
 // ---------------------------------------------------------------------------
 // Phase 2: the supplier-facing amendment document.
 //
-// Built only from the clauses a director marks "Yes" on THIS review's clause table
-// (Yes = pursue this amendment; No = accept as drafted — see the Progressive Maintenance
+// Built only from the clauses a director marks "Action" on THIS review's clause table
+// (Action = pursue this amendment; Don't Action = accept as drafted — see the Progressive Maintenance
 // Workshop review, 22 Jun 2026, for where that convention comes from). Lives in the same
 // tab as the review it comes from, addressed by the review's own runId — never a second,
 // disconnected picker for "which review is this about".
@@ -353,7 +353,7 @@ router.get('/runs/:id/phase2', async (req, res) => {
 router.patch('/runs/:id/phase2/decisions', async (req, res) => {
   const { index, decision } = req.body || {}
   if (!Number.isInteger(index)) return res.status(400).json({ error: 'index is required' })
-  if (!['yes', 'no', null].includes(decision)) return res.status(400).json({ error: 'decision must be "yes", "no", or null' })
+  if (!['action', 'no_action', null].includes(decision)) return res.status(400).json({ error: 'decision must be "action", "no_action", or null' })
 
   const data = await getPhase2Data(req.params.id)
   if (!data) return res.status(404).json({ error: 'No phase 2 data for this review' })
@@ -390,36 +390,36 @@ function publicPhase2Job(job) {
   }
 }
 
-// Start generating: read this review's Yes-marked clauses and plan the steps. One call
-// for the covering summary, one call per REDLINE_CLAUSES_PER_BATCH Yes clauses for the
+// Start generating: read this review's Action-marked clauses and plan the steps. One call
+// for the covering summary, one call per REDLINE_CLAUSES_PER_BATCH Action clauses for the
 // markup — mirrors the main review's job/step split, and for the same reason: marking up
-// a long Yes list is exactly the kind of multi-minute, multi-call work a single
+// a long Action list is exactly the kind of multi-minute, multi-call work a single
 // serverless request cannot hold open.
 router.post('/runs/:id/phase2/jobs', async (req, res) => {
   const runId = req.params.id
   const data = await getPhase2Data(runId)
   if (!data) return res.status(404).json({ error: 'No phase 2 data for this review' })
 
-  const yesClauses = data.clauseAnalysis.filter(c => c.decision === 'yes')
-  if (!yesClauses.length) return res.status(400).json({ error: 'Mark at least one clause "Yes" before generating the supplier document' })
+  const actionClauses = data.clauseAnalysis.filter(c => c.decision === 'action')
+  if (!actionClauses.length) return res.status(400).json({ error: 'Mark at least one clause "Action" before generating the supplier document' })
 
   const REDLINE_BATCH = 3 // kept in step with REDLINE_CLAUSES_PER_BATCH in creditReviewPrompts.js
   const redlineBatches = []
-  for (let i = 0; i < yesClauses.length; i += REDLINE_BATCH) redlineBatches.push(yesClauses.slice(i, i + REDLINE_BATCH))
+  for (let i = 0; i < actionClauses.length; i += REDLINE_BATCH) redlineBatches.push(actionClauses.slice(i, i + REDLINE_BATCH))
 
   const job = {
     id: randomUUID(),
     kind: 'phase2',
     runId,
     supplierName: data.supplierName,
-    yesClauses,
+    actionClauses,
     summary: null,
     redlines: [],
     steps: [
       { kind: 'summary' },
       ...redlineBatches.map((batch, i) => ({
         kind: 'redline', clauses: batch,
-        from: i * REDLINE_BATCH + 1, to: i * REDLINE_BATCH + batch.length, totalClauses: yesClauses.length
+        from: i * REDLINE_BATCH + 1, to: i * REDLINE_BATCH + batch.length, totalClauses: actionClauses.length
       })),
       { kind: 'finish' }
     ],
@@ -466,7 +466,7 @@ router.post('/phase2/jobs/:id/step', async (req, res) => {
 
 async function runPhase2Step(job, step) {
   if (step.kind === 'summary') {
-    const summary = await buildPhase2Summary({ supplierName: job.supplierName, clauses: job.yesClauses })
+    const summary = await buildPhase2Summary({ supplierName: job.supplierName, clauses: job.actionClauses })
     return { summary }
   }
   if (step.kind === 'redline') {

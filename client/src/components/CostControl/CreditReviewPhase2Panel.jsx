@@ -26,11 +26,12 @@ function saveDocFile(doc) {
 }
 
 // Phase 2: what actually goes to the supplier. Built from the clauses a director marks
-// "Yes" here (pursue this amendment) against THIS review's own clause table — "No" means
-// accept as drafted, and never appears in the generated document. That convention comes
-// from how P&I already annotates a printed review by hand (Progressive Maintenance
-// Workshop review, 22 Jun 2026) — this just makes the same decision recordable digitally
-// instead of by pen, so it can drive a document rather than sit on paper in a drawer.
+// "Action" here (pursue this amendment) against THIS review's own clause table — "Don't
+// Action" means accept as drafted, and never appears in the generated document. That's the
+// same wording the GM already used marking up a printed review by hand (Progressive
+// Maintenance Workshop review, 22 Jun 2026) — this just makes the same decision recordable
+// digitally instead of by pen, so it can drive a document rather than sit on paper in a
+// drawer.
 //
 // Self-contained: owns its own fetch, its own decision-saving, its own generation job and
 // polling, so CreditReviewCard only has to render this when a director asks to see it —
@@ -130,13 +131,13 @@ export default function CreditReviewPhase2Panel({ runId }) {
   if (!data) return null
 
   const clauses = data.clauseAnalysis || []
-  const yesCount = clauses.filter(c => c.decision === 'yes').length
+  const actionCount = clauses.filter(c => c.decision === 'action').length
 
   return (
     <div style={{ padding: 16, background: 'var(--pi-neutral-tint)', borderRadius: 6 }}>
       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
         Mark each clause the director wants to pursue with {data.supplierName || 'the supplier'} before
-        signing. <strong>Yes</strong> = ask the supplier to amend it. <strong>No</strong> = accept as
+        signing. <strong>Action</strong> = ask the supplier to amend it. <strong>Don't Action</strong> = accept as
         drafted — it will not appear in the document sent to the supplier.
       </div>
 
@@ -157,20 +158,20 @@ export default function CreditReviewPhase2Panel({ runId }) {
             </div>
             <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
               <button
-                className={c.decision === 'yes' ? 'btn btn-primary' : 'btn btn-secondary'}
+                className={c.decision === 'action' ? 'btn btn-primary' : 'btn btn-secondary'}
                 disabled={savingIndex === i}
-                onClick={() => setDecision(i, c.decision === 'yes' ? null : 'yes')}
+                onClick={() => setDecision(i, c.decision === 'action' ? null : 'action')}
                 style={{ padding: '4px 12px', fontSize: 12 }}
               >
-                Yes
+                Action
               </button>
               <button
-                className={c.decision === 'no' ? 'btn btn-primary' : 'btn btn-secondary'}
+                className={c.decision === 'no_action' ? 'btn btn-primary' : 'btn btn-secondary'}
                 disabled={savingIndex === i}
-                onClick={() => setDecision(i, c.decision === 'no' ? null : 'no')}
+                onClick={() => setDecision(i, c.decision === 'no_action' ? null : 'no_action')}
                 style={{ padding: '4px 12px', fontSize: 12 }}
               >
-                No
+                Don't Action
               </button>
             </div>
           </div>
@@ -187,10 +188,10 @@ export default function CreditReviewPhase2Panel({ runId }) {
         <button
           className="btn btn-primary"
           onClick={generate}
-          disabled={generating || yesCount === 0}
-          style={{ opacity: generating || yesCount === 0 ? 0.6 : 1, cursor: generating || yesCount === 0 ? 'not-allowed' : 'pointer' }}
+          disabled={generating || actionCount === 0}
+          style={{ opacity: generating || actionCount === 0 ? 0.6 : 1, cursor: generating || actionCount === 0 ? 'not-allowed' : 'pointer' }}
         >
-          {generating ? 'Working…' : `Generate Supplier Document (${yesCount} clause${yesCount === 1 ? '' : 's'}) →`}
+          {generating ? 'Working…' : `Generate Supplier Document (${actionCount} clause${actionCount === 1 ? '' : 's'}) →`}
         </button>
 
         {data.generated && !generating && (
