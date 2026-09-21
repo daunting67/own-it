@@ -90,7 +90,32 @@ async function getPhase2Doc(runId) {
   return { filename: file.name, document: buf.toString('base64') }
 }
 
+// A run's auto-fetched FastField receipt PDFs, copied here from the temporary
+// fuel-receipt-inbox bucket once matched, so the workbook's hyperlink points at something
+// permanent under OUR OWN storage rather than expiring the moment fuel-receipt-inbox's own
+// (short-lived) copy is ever cleaned up. Deliberately `{runId}-receipts/...`, a SIBLING of
+// `{runId}/...` (same pattern as `{runId}-phase2/...` above) rather than a subfolder inside
+// it — getCostDoc's `list(runId, {limit:1})` takes whatever sorts first, and this codebase's
+// own comment on getPhase2Doc already warns Storage's listing order isn't guaranteed
+// alphabetical; a `receipts` entry living INSIDE that same prefix could occasionally win that
+// race and break every download of the actual output workbook.
+async function saveCostReceipt(runId, filename, buffer) {
+  await saveCostDoc(`${runId}-receipts`, filename, buffer, 'application/pdf')
+}
+
+// Multi-year: an Excel hyperlink is baked into the workbook once and may be clicked long
+// after the run — this app has no cookie session (bearer-JWT only, see fuelReceiptSubmissions
+// project notes), so a plain GET from a clicked link can never carry auth. A long-lived signed
+// URL is the only way the file opens directly for someone who still has the old workbook.
+const TEN_YEARS_SECONDS = 10 * 365 * 24 * 3600
+async function getCostReceiptSignedUrl(runId, filename, expiresInSeconds = TEN_YEARS_SECONDS) {
+  const { data, error } = await db.storage.from(BUCKET).createSignedUrl(`${runId}-receipts/${filename}`, expiresInSeconds)
+  if (error) throw new Error(error.message)
+  return data.signedUrl
+}
+
 module.exports = {
   saveCostDoc, getCostDoc, XLSX_TYPE,
-  savePhase2Data, getPhase2Data, savePhase2Doc, getPhase2Doc
+  savePhase2Data, getPhase2Data, savePhase2Doc, getPhase2Doc,
+  saveCostReceipt, getCostReceiptSignedUrl,
 }

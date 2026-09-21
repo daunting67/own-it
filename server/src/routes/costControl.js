@@ -5,8 +5,9 @@ const db = require('../lib/supabase')
 const { requireAuth, requireDept } = require('../middleware/auth')
 const { reconcile } = require('../lib/fuelEngine')
 const { buildFuelReconXlsx } = require('../lib/buildFuelReconXlsx')
-const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
+const { saveCostDoc, getCostDoc, saveCostReceipt, getCostReceiptSignedUrl } = require('../lib/costDocs')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/costUploads')
+const { getReceiptsForPeriod, downloadPdf } = require('../lib/fuelReceiptSubmissions')
 
 const PROCESS_ID = 'cost-control-fuel-recon'
 const PROCESS_NAME = 'Fuel Receipt Reconciliation'
@@ -114,6 +115,16 @@ function stripFences(text) {
 }
 function safePathPart(name) {
   return (name || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
+}
+// FastField's own displayReferenceValue ("10/09/2026 Angelliz Ebarle7080591007108174") is
+// already rendered exactly as the manually-downloaded files are named, once slashes (illegal
+// in a filename) become underscores — see fuelReceiptSubmissions.js's field-name notes. Falls
+// back to the submission id when a receipt somehow has no display value, so two receipts can
+// never collide onto the same source_file.
+function fastfieldFilename(receipt, index) {
+  const display = receipt.fields?.displayReferenceValue
+  const base = display ? display.replace(/\//g, '_') : `fastfield-${receipt.submissionId || index}`
+  return safePathPart(`${base}.pdf`)
 }
 function mediaTypeFor(filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase()
@@ -591,8 +602,12 @@ router.post('/upload-url', async (req, res) => {
 router.post('/run', async (req, res) => {
   const invoicePaths = Array.isArray(req.body?.invoicePaths) ? req.body.invoicePaths.filter(Boolean) : []
   const receiptPaths = Array.isArray(req.body?.receiptPaths) ? req.body.receiptPaths.filter(Boolean) : []
+  // Gated behind an explicit flag (not yet exposed in the UI — backend wiring is being
+  // verified against real production data first): when off, behaviour is byte-for-byte
+  // unchanged from before FastField auto-fetch existed.
+  const useFastField = !!req.body?.useFastField
   if (!invoicePaths.length) return res.status(400).json({ error: 'Upload the supplier invoice PDF' })
-  if (!receiptPaths.length) return res.status(400).json({ error: 'Upload at least one receipt or bowser photo' })
+  if (!receiptPaths.length && !useFastField) return res.status(400).json({ error: 'Upload at least one receipt or bowser photo' })
 
   const allPaths = [...invoicePaths, ...receiptPaths]
   const filenames = allPaths.map(p => p.split('/').pop())
@@ -630,14 +645,55 @@ router.post('/run', async (req, res) => {
     const receiptFiles = (await Promise.all(rawReceiptFiles.map(splitPdfIfNeeded))).flat()
     const receiptBatches = batchByPageCount(receiptFiles)
 
-    const [invoiceParts, ...batchResults] = await Promise.all([
+    const [invoiceParts, ...manualBatchResults] = await Promise.all([
       Promise.all(invoiceBatches.map(files => extractInvoiceBatch(anthropicKey, files))),
       ...receiptBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
     ])
     const invoiceData = invoiceParts.reduce(mergeInvoiceParts)
 
     if (!invoiceData?.lines?.length) throw new Error('Could not read any invoice lines — check the invoice PDF')
-    const receipts = batchResults.flat()
+    // Tagged so fuelEngine's dedup can prefer a manually-uploaded copy on a true tie, and so
+    // the workbook can tell which rows to hyperlink to our own stored FastField PDF.
+    const manualReceipts = manualBatchResults.flat().map(r => ({ ...r, source: 'manual' }))
+
+    // FastField auto-fetch: pulls whatever the "Fuel Receipts" webhook has already stored for
+    // this invoice's own period, the same way fuelEngine derives its period internally — see
+    // getReceiptsForPeriod's own comment for why the window looks back 45 days rather than
+    // trusting receivedAt. This can only run AFTER the invoice is read, unlike manual receipts
+    // above, which is why it isn't in the same Promise.all.
+    let fastfieldReceipts = [], fastfieldMeta = null
+    // filename -> PDF bytes for every fetched FastField receipt, kept so a MATCHED row can
+    // later be copied into this run's own permanent storage for the workbook hyperlink —
+    // see the persistence step below, after reconcile() has decided what actually matched.
+    const fastfieldPdfByFilename = new Map()
+    if (useFastField) {
+      const periodEnd = invoiceData.period_end || invoiceData.invoice_date
+      if (periodEnd) {
+        const startDay = new Date(Date.parse(`${periodEnd}T00:00:00Z`) - 45 * 86400000).toISOString().slice(0, 10)
+        const { receipts: periodReceipts, outside, undated, incomplete } = await getReceiptsForPeriod(startDay, periodEnd)
+        const withPdf = periodReceipts.filter(r => r.pdfPath)
+        const pdfBuffers = await Promise.all(withPdf.map(r => downloadPdf(r.pdfPath)))
+        const rawFastfieldFiles = withPdf.map((r, i) => ({
+          filename: fastfieldFilename(r, i),
+          buffer: pdfBuffers[i],
+          label: 'RECEIPT / PHOTO (auto-fetched from FastField)',
+        }))
+        for (const f of rawFastfieldFiles) fastfieldPdfByFilename.set(f.filename, f.buffer)
+        const fastfieldFiles = (await Promise.all(rawFastfieldFiles.map(splitPdfIfNeeded))).flat()
+        const fastfieldBatches = batchByPageCount(fastfieldFiles)
+        const fastfieldBatchResults = await Promise.all(fastfieldBatches.map(files => extractReceiptsBatch(anthropicKey, files)))
+        fastfieldReceipts = fastfieldBatchResults.flat().map(r => ({ ...r, source: 'fastfield' }))
+        fastfieldMeta = {
+          fetched: withPdf.length,
+          noPdf: periodReceipts.length - withPdf.length,
+          undated: undated.length,
+          outside: outside.length,
+          incomplete: incomplete.length,
+        }
+      }
+    }
+
+    const receipts = [...manualReceipts, ...fastfieldReceipts]
 
     // Coverage check: which uploaded receipt files never produced a single extracted
     // receipt? A split PDF's chunks all keep the ORIGINAL filename (see splitPdfIfNeeded),
@@ -650,8 +706,35 @@ router.post('/run', async (req, res) => {
     const receiptFilesMissing = receiptFilenames.filter(f => !receiptFilesSeen.has(f))
 
     const R = reconcile(invoiceData, receipts)
+
+    // Copy every MATCHED FastField receipt's PDF into this run's own permanent storage, and
+    // build the {source_file -> signed URL} map buildFuelReconXlsx needs for the hyperlink
+    // column. Only matched rows, not every fetched receipt — an unmatched or "not on invoice"
+    // FastField receipt has nowhere in the workbook to link from. A copy failure must not fail
+    // the whole reconciliation (same never-throw philosophy as every other side-channel in
+    // this route) — the row just prints without a working link, exactly like a manual-upload
+    // match today.
+    const receiptLinks = {}
+    if (fastfieldPdfByFilename.size) {
+      const matchedFastfieldFiles = new Set(
+        R.results
+          .filter((res) => res.status === 'Matched' && res.receipt?.source === 'fastfield' && res.receipt.source_file)
+          .map((res) => res.receipt.source_file)
+      )
+      await Promise.all([...matchedFastfieldFiles].map(async (filename) => {
+        const buffer = fastfieldPdfByFilename.get(filename)
+        if (!buffer) return
+        try {
+          await saveCostReceipt(runId, filename, buffer)
+          receiptLinks[filename] = await getCostReceiptSignedUrl(runId, filename)
+        } catch (err) {
+          console.error(`Could not store FastField receipt "${filename}" for run ${runId}:`, err.message)
+        }
+      }))
+    }
+
     const periodEndLabel = fmtDate(invoiceData.period_end)
-    const { workbook, stats } = buildFuelReconXlsx(R, { periodEndLabel })
+    const { workbook, stats } = buildFuelReconXlsx(R, { periodEndLabel, receiptLinks })
     const buf = await workbook.xlsx.writeBuffer()
 
     // invoice_number comes straight from the model's reading of the invoice header — an
@@ -674,6 +757,9 @@ router.post('/run', async (req, res) => {
       receiptFilesMissing.length
         ? `⚠️ ${receiptFilesMissing.length} uploaded file(s) produced NO receipt data — check these were readable and re-upload if needed: ${receiptFilesMissing.join(', ')}.`
         : null,
+      fastfieldMeta ? `FastField: ${fastfieldMeta.fetched} receipt(s) auto-fetched for this period.` : null,
+      fastfieldMeta?.noPdf ? `⚠️ ${fastfieldMeta.noPdf} FastField submission(s) have no photo yet (delivery incomplete) — not included.` : null,
+      fastfieldMeta?.undated ? `⚠️ ${fastfieldMeta.undated} FastField submission(s) had no readable fill date — not included, check manually.` : null,
       'Download the .xlsx below — Missing Receipts is the chase-up worklist, Exceptions needs a decision.',
     ].filter(Boolean).join('\n')
 
@@ -706,4 +792,5 @@ module.exports.__test = {
   splitPdfIfNeeded, batchByPageCount, extractInvoiceBatch, extractReceiptsBatch,
   extractCacheKey,
   mergeInvoiceParts, INVOICE_MODEL, RECEIPT_MODEL, MAX_PAGES_PER_BATCH,
+  fastfieldFilename,
 }

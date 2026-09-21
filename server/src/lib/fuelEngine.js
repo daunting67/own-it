@@ -318,9 +318,13 @@ function reconcile(invoice, receipts, opts = {}) {
     }
     for (const c of clusters) {
       if (c.length < 2) continue;
-      // keep the best: till_slip over pump_display, high over low confidence
+      // keep the best: till_slip over pump_display, high over low confidence, and — only when
+      // everything else ties — a manually-uploaded copy over a FastField-fetched one (a human
+      // chose to upload it, which is itself a weak signal; source is otherwise irrelevant to
+      // which copy reads better).
       const rank = (it) => (it.receipt.photo_type === 'till_slip' ? 2 : it.receipt.photo_type === 'pump_display' ? 1 : 0)
-        + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0);
+        + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0)
+        + (it.receipt.source === 'manual' ? 0.1 : 0);
       c.sort((a, b) => rank(b) - rank(a));
       for (let i = 1; i < c.length; i++) {
         c[i].duplicate = true; c[i].used = true; duplicateCount++;
@@ -373,7 +377,8 @@ function reconcile(invoice, receipts, opts = {}) {
       else if (ties(b) && !ties(a)) { keep = b; drop = a; }
       else {
         const rank = (it) => (it.receipt.photo_type === 'till_slip' ? 2 : it.receipt.photo_type === 'pump_display' ? 1 : 0)
-          + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0) + (it.rate != null ? 0.25 : 0);
+          + (it.receipt.ocr_confidence === 'high' ? 0.5 : 0) + (it.rate != null ? 0.25 : 0)
+          + (it.receipt.source === 'manual' ? 0.1 : 0);
         [keep, drop] = rank(a) >= rank(b) ? [a, b] : [b, a];
         keep._unresolvedSecondOpinion = drop.litres;                    // neither verifies — say so
       }

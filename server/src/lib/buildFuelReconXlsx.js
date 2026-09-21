@@ -196,7 +196,7 @@ function buildFuelReconXlsx(R, meta = {}) {
   })
   reserveLogoRows(rec)
   placeLogo(rec, logoId, 50)
-  titleBand(rec, 13, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
+  titleBand(rec, 14, `Fuel Reconciliation — Z Energy Invoice ${inv.number}`,
     `Period ending ${meta.periodEndLabel || inv.periodEnd}  ·  Account ${inv.account}  ·  Total invoice ${invoiceTotalLabel} (incl GST)`)
 
   const recHeaderRow = TITLE_ROW + 3  // title + subtitle + 1 blank spacer row (matches the original layout)
@@ -204,23 +204,30 @@ function buildFuelReconXlsx(R, meta = {}) {
   // request — the underlying figures still live in fuelEngine.js's output and surface via
   // Notes/Comments prose and the Summary tab; they're just not their own raw columns here.
   const recHeaders = ['Date', 'Driver', 'Card (invoice)', 'Product', 'Txn', 'Inv. litres',
-    'Pump rate', 'Your rate', 'Invoice $ (incl GST)', 'Receipt', 'Status', 'Notes', 'Comments']
-  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 14, L: 46, M: 40 }
+    'Pump rate', 'Your rate', 'Invoice $ (incl GST)', 'Receipt', 'Status', 'Notes', 'Comments', 'Receipt file']
+  const recWidths = { A: 10, B: 16, C: 18, D: 12, E: 9, F: 10, G: 9, H: 9, I: 12, J: 8, K: 14, L: 46, M: 40, N: 14 }
   headerRow(rec, recHeaderRow, recHeaders, recWidths)
   rec.pageSetup.printTitlesRow = `${recHeaderRow}:${recHeaderRow}`
-  rec.autoFilter = { from: { row: recHeaderRow, column: 1 }, to: { row: recHeaderRow, column: 13 } }
+  rec.autoFilter = { from: { row: recHeaderRow, column: 1 }, to: { row: recHeaderRow, column: 14 } }
   rec.views = [{ showGridLines: false, state: 'frozen', xSplit: 2, ySplit: recHeaderRow }]
+  // Populated only for a row matched to a FastField-auto-fetched receipt — manual-upload
+  // matches and missing/lost rows stay blank, not broken, since they have no stored copy of
+  // their own to link to. Keyed by the receipt's source_file (unique per fetched PDF).
+  const receiptLinks = meta.receiptLinks || {}
   let rr = recHeaderRow + 1
   const firstDataRow = rr
   const LITRES_COLS = new Set([6])   // Inv. litres
   const MONEY_COLS = new Set([9])    // Invoice $
   for (const res of R.results) {
     const l = res.line
+    const receiptUrl = res.receipt && res.receipt.source === 'fastfield'
+      ? receiptLinks[res.receipt.source_file] : null
     const cells = [
       l.date, l.driver, l.card, res.product, l.txn_number, l.litres,
       l.pump_rate, l.your_rate, l.amount_incl,
       res.status === 'Matched' ? 'Yes' : res.status === 'Lost receipt' ? 'Lost' : 'No',
       res.status, res.notes.join(' · '), res.comments,
+      receiptUrl ? { text: 'Open', hyperlink: receiptUrl } : null,
     ]
     cells.forEach((v, i) => {
       const col = i + 1
@@ -229,9 +236,10 @@ function buildFuelReconXlsx(R, meta = {}) {
       // left GENUINELY empty: an empty string still counts as a neighbouring value and stops
       // Excel spilling the text beside it, which clipped Notes to the column width.
       const isText = col === 12 || col === 13
-      c.value = isText ? (v || null) : safeNum(v ?? null)
-      c.font = font(9)
+      c.value = col === 14 ? v : isText ? (v || null) : safeNum(v ?? null)
+      c.font = col === 14 && v ? font(9, false, '0563C1') : font(9)
       if ([5, 6, 7, 8, 9, 10].includes(col)) c.alignment = { horizontal: 'right' }
+      if (col === 14) c.alignment = { horizontal: 'center' }
       if (isText) c.alignment = { vertical: 'top', wrapText: true }
       if (LITRES_COLS.has(col)) c.numFmt = LITRES_FMT
       if (MONEY_COLS.has(col)) c.numFmt = MONEY
@@ -251,7 +259,7 @@ function buildFuelReconXlsx(R, meta = {}) {
   rec.getCell(rr, 9).value = sumOrZero('I', firstDataRow, recLast)
   for (const col of [6]) { const c = rec.getCell(rr, col); c.numFmt = LITRES_FMT; c.font = font(10, true, NAVY) }
   for (const col of [9]) { const c = rec.getCell(rr, col); c.numFmt = MONEY; c.font = font(10, true, NAVY) }
-  for (let col = 1; col <= 13; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
+  for (let col = 1; col <= 14; col++) rec.getCell(rr, col).fill = fill(LT), rec.getCell(rr, col).border = medTopBottomBorder
 
   // ================= Missing Receipts =================
   const missing = wb.addWorksheet('Missing Receipts', { views: [{ showGridLines: false }] })

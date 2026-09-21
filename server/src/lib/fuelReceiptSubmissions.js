@@ -146,6 +146,14 @@ async function storeSubmission(body) {
   return rawOnly
 }
 
+// The actual bytes, for feeding a fetched receipt into the same extraction pipeline manual
+// uploads already go through — reconciliation needs the PDF itself, not a link to it.
+async function downloadPdf(path) {
+  const { data, error } = await db.storage.from(PDF_BUCKET).download(path)
+  if (error) throw new Error(error.message)
+  return Buffer.from(await data.arrayBuffer())
+}
+
 // Short-lived read link for a stored PDF part — for diagnostics/manual inspection only;
 // the eventual hyperlink-in-the-workbook feature will need its own long-lived version of this.
 async function getPdfSignedUrl(path, expiresInSeconds = 3600) {
@@ -383,7 +391,7 @@ async function getTodaysSubmissions() {
 
 module.exports = {
   storeSubmission, storeMultipartSubmission, getSubmissionsInRange, getTodaysSubmissions,
-  getPdfSignedUrl, FUEL_RECEIPTS_FORM_ID,
+  getPdfSignedUrl, downloadPdf, FUEL_RECEIPTS_FORM_ID,
   // Rows -> receipts. Use these, not the raw row queries, anywhere a receipt is meant.
   pairSubmissions, filterByFillDate, getReceiptsForPeriod,
   fillDateOf, submissionKeyOf, cardFromPdfName, PAIR_WINDOW_MS,
