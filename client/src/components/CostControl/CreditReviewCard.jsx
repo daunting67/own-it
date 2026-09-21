@@ -268,13 +268,21 @@ export default function CreditReviewCard() {
           )}
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={() => saveDocFile(result)}>
-              📄 Download Review (.docx)
+            {/* result never carries the document bytes (setResult only stores id/output/
+                filename/review — see finishJob's return in creditReview.js) — the docx
+                itself only ever exists in Storage. Fetch it the same way the history
+                rows already do, rather than trying to decode a field that was never set. */}
+            <button className="btn btn-primary" onClick={() => downloadRun(result.id)} disabled={historyDocFetching === result.id}>
+              {historyDocFetching === result.id ? 'Loading…' : '📄 Download Review (.docx)'}
             </button>
             <button className="btn btn-secondary" onClick={() => setPhase2For(p => (p === result.id ? null : result.id))}>
               {phase2For === result.id ? "Hide GM's markup" : "Process GM's markup →"}
             </button>
           </div>
+
+          {historyError?.runId === result.id && (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#a33' }}>{historyError.message}</div>
+          )}
 
           {phase2For === result.id && (
             <div style={{ marginTop: 14 }}>
