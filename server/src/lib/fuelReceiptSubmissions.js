@@ -49,7 +49,27 @@ async function uploadPdfPart(buffer, contentType) {
 // The submission id FastField appends to the delivered filename, after the display-mask part
 // (e.g. "10_09_2026 Angelliz Ebarle7080591007108174_26d9172e-....pdf"). Recovering it is what
 // lets the PDF request be joined to the JSON request for the same submission.
+//
+// PROVEN WRONG AGAINST REAL TRAFFIC (22 Sep 2026, first live audit of the production table):
+// this pattern has NEVER once matched. Every real `_pdfOriginalName` recorded since go-live is
+// bare `displayReferenceValue` with `/`->`_` and nothing appended — e.g.
+// "10_09_2026 Jose Traje7080591006533125.pdf", no UUID anywhere. So pairSubmissions()'s
+// "pass 1" below has been dead code since launch; every real pairing has gone through the
+// time-proximity fallback (pass 2) instead. Kept, in case a future FastField config change
+// ever does append one, but do not rely on it — see cardFromPdfName() for what actually works.
 const SUBMISSION_ID_IN_NAME = /_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=\.[A-Za-z0-9]+$)/i
+
+// The fuel card number is always the last 16 digits before ".pdf" in a real delivered filename
+// (displayReferenceValue = "$date$ $fuel$$card$", and $card$ is a fixed-width 16-digit number —
+// see the header comment). Unlike the submission id above, THIS is present on every real PDF
+// filename observed, and it is exactly the field the JSON twin also carries verbatim
+// (`rawPayload.card`) — so it is a correlation key that needs no timing assumption at all.
+const CARD_IN_PDF_NAME = /(\d{16})\.pdf$/i
+
+function cardFromPdfName(name) {
+  const m = name && name.match(CARD_IN_PDF_NAME)
+  return m ? m[1] : null
+}
 
 // A multipart request is HALF a submission — the rendered PDF. Its JSON twin arrives as a
 // SEPARATE request seconds earlier (see storeMultipartSubmission). `fields` is whatever multer
@@ -172,8 +192,12 @@ function fillDateOf(receiptOrRow) {
   return Number.isNaN(t) ? null : new Date(t)
 }
 
-// How long after its JSON twin a PDF may arrive and still be considered the same submission.
-// Observed gap on the first real submission: 9 seconds.
+// How far apart the two halves of one submission may arrive and still be considered a pair,
+// used only as the LAST-RESORT fallback (see pairSubmissions) and as the tie-break when more
+// than one same-card candidate is available. Observed gap on the first real submission: 9
+// seconds; the widest gap in a full audit of the first 12 days of live traffic (22 Sep 2026,
+// 61 rows) was well under a minute. 10 minutes leaves headroom without risking a cross-match
+// between two genuinely different people's near-simultaneous submissions.
 const PAIR_WINDOW_MS = 10 * 60 * 1000
 
 /*
@@ -219,7 +243,8 @@ function pairSubmissions(rows) {
     else if (hasPdf(row)) pdfRows.push(row)
   }
 
-  // Pass 1 — join on the submission id, the only reliable key.
+  // Pass 1 — join on the submission id. PROVEN DEAD against real traffic (see
+  // SUBMISSION_ID_IN_NAME's comment) but harmless to keep in case that ever changes.
   const usedPdf = new Set()
   const unmatchedData = []
   for (const d of dataRows) {
@@ -229,16 +254,54 @@ function pairSubmissions(rows) {
     else unmatchedData.push(d)
   }
 
-  // Pass 2 — legacy PDF rows carry no id at all, so fall back to "arrived just after its twin".
-  // Nearest in time wins, and only forwards: FastField sends the JSON first.
-  const stillUnmatched = []
+  // Pass 2 — join on the fuel card number embedded in the PDF's own filename against the
+  // JSON twin's `card` field. THIS IS THE PAIRING THAT ACTUALLY WORKS: a live audit of the
+  // first 12 days of real traffic (22 Sep 2026, 30 submissions) found this resolves 29/30
+  // correctly, against only 15/30 for time-proximity alone — because FastField does NOT
+  // reliably send the JSON before the PDF (proven: several real pairs arrive PDF-first, by
+  // 1-3 seconds), which silently broke the old forward-only time window for roughly half of
+  // real submissions.
+  //
+  // A proper (smallest-gap-first) assignment across ALL same-card candidates at once —
+  // not a first-seen-first-served greedy pass. That distinction is real, not theoretical: the
+  // same card is routinely reused days apart (a driver's normal fill pattern), so processing
+  // rows in arrival order let an EARLIER row wrongly claim the only same-card PDF seen so far,
+  // even when a LATER row it hadn't reached yet was the true match seconds away. Proven on
+  // real data: the very first-ever test submission (9 Sep) has a card that recurs on 17 Sep;
+  // resolving it before reaching the 17 Sep row claimed that day's real PDF from 8 days away.
+  // Smallest-gap-first fixes this because a true pair (seconds apart) always sorts before a
+  // same-card-different-day false one (hours/days apart) — proven true across every real gap
+  // observed so far, several orders of magnitude apart.
+  const cardPairs = []
   for (const d of unmatchedData) {
+    const card = d.rawPayload && d.rawPayload.card
+    if (!card) continue
+    const dt = Date.parse(d.receivedAt || 0) || 0
+    for (const p of pdfRows) {
+      if (cardFromPdfName(p.rawPayload && p.rawPayload._pdfOriginalName) !== card) continue
+      cardPairs.push({ d, p, gap: Math.abs((Date.parse(p.receivedAt || 0) || 0) - dt) })
+    }
+  }
+  cardPairs.sort((a, b) => a.gap - b.gap)
+  const usedData = new Set()
+  for (const { d, p } of cardPairs) {
+    if (usedData.has(d) || usedPdf.has(p)) continue
+    usedData.add(d); usedPdf.add(p)
+    receipts.push(build(d, p, 'card'))
+  }
+  const stillUnmatchedAfterCard = unmatchedData.filter((d) => !usedData.has(d))
+
+  // Pass 3 — last resort for rows with no parseable card (e.g. the very first test submission,
+  // predating the filename-preserving fix, whose PDF part carries no name at all). Nearest in
+  // time wins, in EITHER direction — pass 2's finding applies here too.
+  const stillUnmatched = []
+  for (const d of stillUnmatchedAfterCard) {
     const dt = Date.parse(d.receivedAt || 0) || 0
     let best = null, bestGap = Infinity
     for (const p of pdfRows) {
       if (usedPdf.has(p) || submissionKeyOf(p)) continue
-      const gap = (Date.parse(p.receivedAt || 0) || 0) - dt
-      if (gap >= 0 && gap <= PAIR_WINDOW_MS && gap < bestGap) { best = p; bestGap = gap }
+      const gap = Math.abs((Date.parse(p.receivedAt || 0) || 0) - dt)
+      if (gap <= PAIR_WINDOW_MS && gap < bestGap) { best = p; bestGap = gap }
     }
     if (best) { usedPdf.add(best); receipts.push(build(d, best, 'time-proximity')) }
     else stillUnmatched.push(d)
@@ -323,5 +386,5 @@ module.exports = {
   getPdfSignedUrl, FUEL_RECEIPTS_FORM_ID,
   // Rows -> receipts. Use these, not the raw row queries, anywhere a receipt is meant.
   pairSubmissions, filterByFillDate, getReceiptsForPeriod,
-  fillDateOf, submissionKeyOf, PAIR_WINDOW_MS,
+  fillDateOf, submissionKeyOf, cardFromPdfName, PAIR_WINDOW_MS,
 }

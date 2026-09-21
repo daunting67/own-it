@@ -3,18 +3,25 @@
  * FUEL RECEIPT SUBMISSIONS — pairing and fill-date selection
  * ==========================================================
  *
- * Two defects found on 10 Sep 2026 while re-checking a recommendation, both proven against the
- * first real submission before being fixed here:
+ * Three defects, each proven against real submissions before being fixed here:
  *
- *   1. getSubmissionsInRange() selects on receivedAt — WHEN THE WEBHOOK GOT IT — not on the date
- *      the driver filled up. An invoice period is a range of FILL dates, and a fill on the last
- *      day of the month is routinely submitted the next day. Selecting on receivedAt drops
- *      exactly those receipts, which then get reported to Chloe as "no receipt supplied".
- *   2. One receipt is stored as TWO rows (JSON half + PDF half). Anything treating a row as a
- *      receipt double-counts every single one — verified live: 2 rows came back for 1 receipt.
+ *   1. (10 Sep 2026) getSubmissionsInRange() selects on receivedAt — WHEN THE WEBHOOK GOT IT —
+ *      not on the date the driver filled up. An invoice period is a range of FILL dates, and a
+ *      fill on the last day of the month is routinely submitted the next day. Selecting on
+ *      receivedAt drops exactly those receipts, which then get reported as "no receipt supplied".
+ *   2. (10 Sep 2026) One receipt is stored as TWO rows (JSON half + PDF half). Anything treating
+ *      a row as a receipt double-counts every single one — verified live: 2 rows came back for
+ *      1 receipt.
+ *   3. (22 Sep 2026) The submission-id-in-filename join has never once fired against real
+ *      traffic, and FastField does not reliably send the JSON before the PDF — so the old
+ *      forward-only time-proximity fallback correctly paired only 15 of the first 30 real
+ *      submissions. Fixed by correlating on the fuel card number instead (present on both
+ *      halves), assigned smallest-gap-first across all same-card candidates at once — a naive
+ *      row-by-row pass reintroduces a subtler version of the same bug when one card recurs
+ *      days apart, which is the normal case for a driver's regular refills.
  *
- * Fixtures are shaped from the real 10 Sep submission (Angelliz Ebarle, card 7080591007108174,
- * JSON at 22:10:23Z and its PDF at 22:10:32Z — a 9 second gap) but inlined, so these run with no
+ * Fixtures are shaped from real submissions (Angelliz Ebarle, card 7080591007108174, JSON at
+ * 22:10:23Z and its PDF at 22:10:32Z — a 9 second gap) but inlined, so these run with no
  * network, no API key and no database.
  *
  *   node test/fuel-receipt-pairing.js
@@ -27,7 +34,7 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-not-a-real-key'
 
 const {
-  pairSubmissions, filterByFillDate, fillDateOf, submissionKeyOf,
+  pairSubmissions, filterByFillDate, fillDateOf, submissionKeyOf, cardFromPdfName,
 } = require('../src/lib/fuelReceiptSubmissions')
 
 let pass = 0, fail = 0
@@ -46,7 +53,7 @@ const jsonRow = (o = {}) => ({
   contentType: 'application/json',
   pdfPath: null,
   rawPayload: {
-    card: '7080591007108174',
+    card: o.card || '7080591007108174',
     date: o.date || '2026-09-10T10:09:00.000+12:00',
     fuel: [o.name || 'Angelliz Ebarle'],
     rego: 'Own vehicle',
@@ -127,6 +134,51 @@ const pdfRow = (o = {}) => ({
   check('near-simultaneous submissions pair by id, not by time',
     receipts.length === 2 && a.pdfPath === 'a.pdf' && b.pdfPath === 'b.pdf',
     `A->${a && a.pdfPath} B->${b && b.pdfPath}`)
+}
+
+// ---- DEFECT 3 (found 22 Sep 2026, live audit of the first 12 days of real traffic): the
+// submission id is never actually in the PDF filename (SUBMISSION_ID_IN_NAME has never once
+// matched a real delivery), and FastField does NOT reliably send the JSON before the PDF — so
+// the old forward-only time-proximity fallback correctly paired only 15 of 30 real submissions.
+// Card-number correlation (cardFromPdfName) fixed 29 of those 30. ----
+check('cardFromPdfName reads the trailing 16-digit card number',
+  cardFromPdfName('10_09_2026 Jose Traje7080591006533125.pdf') === '7080591006533125')
+check('cardFromPdfName handles a name with punctuation before the card',
+  cardFromPdfName('12_09_2026 Rory Pole - AP7080591007722370.pdf') === '7080591007722370')
+check('cardFromPdfName returns null when there is nothing to read', cardFromPdfName(null) === null)
+
+{
+  // Real, observed shape: the PDF arrives BEFORE its JSON twin, by 2 seconds. The old fallback
+  // only ever looked forward from the JSON row, so this pair was invisible to it.
+  const { receipts, incomplete } = pairSubmissions([
+    pdfRow({ id: 1, receivedAt: '2026-09-10T03:27:40.615Z', pdfPath: 'jose.pdf', originalName: '10_09_2026 Jose Traje7080591006533125.pdf' }),
+    jsonRow({ id: 2, receivedAt: '2026-09-10T03:27:42.742Z', name: 'Jose Traje', card: '7080591006533125', submissionId: null }),
+  ])
+  check('a PDF arriving BEFORE its JSON twin still pairs, via the card number',
+    receipts.length === 1 && receipts[0].pdfPath === 'jose.pdf' && receipts[0].pairedBy === 'card' && incomplete.length === 0,
+    JSON.stringify({ receipts, incomplete }))
+}
+
+{
+  // The exact bug found live: the SAME card recurs 8 days apart (a driver's normal refill
+  // pattern). Resolving rows in arrival order let the EARLIER row (9 Sep) claim the ONLY
+  // same-card PDF it had seen so far, even though that PDF's true partner (17 Sep, 2 seconds
+  // away) hadn't been reached yet — silently misattributing one driver's fill to another
+  // day and leaving the real 17 Sep pair broken. Smallest-gap-first, decided across every
+  // same-card candidate at once rather than row-by-row, is what fixes it.
+  const card = '7080591007108174'
+  const early = jsonRow({ id: 1, submissionId: 'aaaa0000-0000-4000-8000-000000000001', receivedAt: '2026-09-09T22:10:23.225Z' })
+  const laterJson = jsonRow({ id: 2, submissionId: 'bbbb0000-0000-4000-8000-000000000002', receivedAt: '2026-09-17T20:23:59.767Z' })
+  const laterPdf = pdfRow({ id: 3, receivedAt: '2026-09-17T20:23:57.472Z', pdfPath: 'true-match.pdf', originalName: `17_09_2026 Angelliz Ebarle${card}.pdf` })
+  const { receipts, incomplete } = pairSubmissions([early, laterJson, laterPdf])
+  const earlyReceipt = receipts.find(r => r.submissionId === 'aaaa0000-0000-4000-8000-000000000001')
+  const laterReceipt = receipts.find(r => r.submissionId === 'bbbb0000-0000-4000-8000-000000000002')
+  check('a same-card PDF 8 days away does not steal an earlier, unrelated submission',
+    laterReceipt && laterReceipt.pdfPath === 'true-match.pdf' && earlyReceipt && earlyReceipt.pdfPath === null,
+    JSON.stringify({ earlyReceipt, laterReceipt, incomplete }))
+  check('  ...row order does not change which pair wins',
+    JSON.stringify(pairSubmissions([early, laterJson, laterPdf]).receipts) ===
+    JSON.stringify(pairSubmissions([laterPdf, early, laterJson]).receipts))
 }
 
 // ---- determinism ----
