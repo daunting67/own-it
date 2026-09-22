@@ -388,46 +388,11 @@ async function extract(anthropicKey, system, files, model = INVOICE_MODEL) {
  * Every cache operation FAILS OPEN: any storage error falls through to a normal extraction, so
  * the cache can never be the reason a reconciliation fails.
  */
-const EXTRACT_CACHE_BUCKET = 'extract-cache'
-const cacheEnabled = () => (process.env.COST_EXTRACT_CACHE || '').toLowerCase() !== 'off'
-
-// Hash exactly what goes to the model: the prompt, the model, and every file's bytes in order.
-// Order is included deliberately — the same pages in a different batch are a different request
-// and can legitimately read differently.
-function extractCacheKey(system, model, files) {
-  const h = createHash('sha256')
-  h.update(model).update('\u0000').update(system)
-  for (const f of files) {
-    h.update('\u0000').update(f.filename || '')
-    h.update('#').update(String(f.pageOffset ?? '')).update('+').update(String(f.pages ?? ''))
-    // sourceHash = the ORIGINAL upload's bytes (see splitPdfIfNeeded). Falling back to the
-    // buffer is correct for anything that never went through the splitter.
-    h.update(':').update(f.sourceHash || createHash('sha256').update(f.buffer).digest('hex'))
-  }
-  return h.digest('hex')
-}
-
-async function cacheGet(key) {
-  if (!cacheEnabled()) return null
-  try {
-    const { data, error } = await db.storage.from(EXTRACT_CACHE_BUCKET).download(`${key}.json`)
-    if (error || !data) return null
-    return JSON.parse(Buffer.from(await data.arrayBuffer()).toString('utf8'))
-  } catch { return null }
-}
-
-async function cachePut(key, value) {
-  if (!cacheEnabled()) return
-  try {
-    const body = Buffer.from(JSON.stringify(value), 'utf8')
-    const opts = { contentType: 'application/json', upsert: true }
-    let { error } = await db.storage.from(EXTRACT_CACHE_BUCKET).upload(`${key}.json`, body, opts)
-    if (error && /bucket not found/i.test(error.message)) {
-      await db.storage.createBucket(EXTRACT_CACHE_BUCKET, { public: false }).catch(() => {})
-      await db.storage.from(EXTRACT_CACHE_BUCKET).upload(`${key}.json`, body, opts)
-    }
-  } catch { /* fail open — a cache miss next time is the only cost */ }
-}
+// Lives in lib/extractCache.js — shared with Debit Card Receipt Reconciliation (ported there
+// 22 Sep 2026 after this exact same run-to-run wobble was measured on real debit receipts too),
+// one bucket for every Cost Control process since the key already hashes in the prompt text and
+// model name.
+const { extractCacheKey, cacheGet, cachePut } = require('../lib/extractCache')
 
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
   const key = extractCacheKey(RECEIPT_PROMPT, RECEIPT_MODEL, files)
