@@ -229,12 +229,30 @@ function reconcile(statement, receipts, opts = {}) {
     // large type and it's the number the cardholder themselves checks at the counter.
     r._itemsTieOut = (r._printedTotal != null && itemsSum != null)
       ? Math.abs(itemsSum - r._printedTotal) <= 0.02 : null;
-    for (const it of r.items) {
+    if (r.items && r.items.length) {
+      for (const it of r.items) {
+        items.push({
+          _iid: 'I' + (++iid),
+          receipt: r,
+          description: it.description || null,
+          amount: toNumber(it.amount),
+          used: false,
+          duplicate: false,
+        });
+      }
+    } else if (r._printedTotal != null) {
+      // A till slip that only ever prints ONE figure (no itemised breakdown at all — a simple
+      // purchase, or the model genuinely couldn't read a line-item split) produced ZERO items
+      // here before this fix, which made the receipt's own total invisible to matching no
+      // matter how clearly it was read. PROVEN live: a $6.90 Sonny Bakery slip with total 6.90
+      // and items:[] never matched its statement line, even though nothing about the amount was
+      // in question. A receipt with no items is still ONE purchase — treat it as a single item
+      // worth its own printed total, the same way a genuinely single-item slip already behaves.
       items.push({
         _iid: 'I' + (++iid),
         receipt: r,
-        description: it.description || null,
-        amount: toNumber(it.amount),
+        description: null,
+        amount: r._printedTotal,
         used: false,
         duplicate: false,
       });

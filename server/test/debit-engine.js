@@ -144,5 +144,32 @@ for (const pt of ['lost_receipt', 'lost_receipt_note', 'Lost Receipt', 'handwrit
   check('an unsupported purchase still reports Missing receipt', statusOf(R, 1) === 'Missing receipt', `got ${statusOf(R, 1)}`)
 }
 
+// 9) A receipt with NO itemised breakdown at all (items: []) — a simple till slip that only
+// ever prints one figure, no line-by-line split — must still match on its own printed total.
+// PROVEN LIVE, 22 Sep 2026: a real $6.90 Sonny Bakery slip read total:6.90, items:[] (the model
+// correctly reported nothing was itemised) and never matched its statement line, because the
+// engine only ever turned r.items into matchable items — a receipt with zero items produced
+// zero matchable items, so its own total was invisible no matter how clearly it was read.
+{
+  const R = reconcile(
+    STATEMENT([{ date: '27/07/26', cardholder: 'CARD 6079', card: '6079', merchant: 'SONNY BAKERY', amount: 6.90 }]),
+    [RECEIPT({ date: '26/07/26', name: 'Victor Garcia Pais', card: '6079', merchant: 'Sonny Bakery Pakuranga',
+      total: 6.90, items: [] })]
+  )
+  check('a receipt with no itemised breakdown still matches on its printed total',
+    statusOf(R, 1) === 'Matched', `got ${statusOf(R, 1)}`)
+}
+
+// 10) The mirror case: items:[] AND total: null (nothing readable at all) must still report
+// Missing, not crash and not fabricate a match out of nothing.
+{
+  const R = reconcile(
+    STATEMENT([{ date: '27/07/26', cardholder: 'CARD 6079', card: '6079', merchant: 'SONNY BAKERY', amount: 6.90 }]),
+    [RECEIPT({ date: '26/07/26', name: 'Victor Garcia Pais', card: '6079', total: null, items: [] })]
+  )
+  check('items:[] with no total at all still reports Missing, not a crash',
+    statusOf(R, 1) === 'Missing receipt', `got ${statusOf(R, 1)}`)
+}
+
 console.log(`\n=== ${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed ===\n`)
 process.exit(fail === 0 ? 0 : 1)

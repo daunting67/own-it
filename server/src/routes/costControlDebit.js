@@ -1,5 +1,5 @@
 const { Router } = require('express')
-const { randomUUID } = require('crypto')
+const { randomUUID, createHash } = require('crypto')
 const { PDFDocument } = require('pdf-lib')
 const db = require('../lib/supabase')
 const { requireAuth, requireDept } = require('../middleware/auth')
@@ -7,6 +7,8 @@ const { reconcile } = require('../lib/debitCardEngine')
 const { buildDebitCardReconXlsx } = require('../lib/buildDebitCardReconXlsx')
 const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/costUploads')
+const { findAttachmentUrl, extractDebitReceiptFile } = require('../lib/debitReceiptAttachments')
+const { extractCacheKey, cacheGet, cachePut } = require('../lib/extractCache')
 
 const PROCESS_ID = 'cost-control-debit-recon'
 const PROCESS_NAME = 'Debit Card Receipt Reconciliation'
@@ -30,6 +32,16 @@ ONLY extract lines that are an actual purchase transaction with a real dollar am
 or reference-number lines that carry no amount, section/page headers, or any other non-transaction
 formatting row — these are not purchases and must be left out of "lines" entirely, not included with a
 null or zero amount.
+
+A purchase always takes money OUT of the account. Many statements print this as two separate
+columns, "Withdrawals" and "Deposits" (or "Debit"/"Credit") — a figure in the Withdrawals/Debit
+column is a candidate purchase; a figure in the Deposits/Credit column is money coming IN
+(a bank transfer, a refund, a reimbursement) and is NEVER a purchase, no matter how large or how
+purchase-like its description reads (e.g. a reference number, "transfer", or someone's initials).
+Extracting a deposit as if it needed a receipt sends the cost-control team chasing a driver for a
+receipt that can never exist, because nothing was bought. If a statement's layout doesn't visually
+separate the two, use the running balance to tell them apart: a real purchase DECREASES the balance
+from the line before it; a deposit increases it.
 
 You may be given the WHOLE statement, or just an EXCERPT of a few pages (a long statement is split
 into page-range excerpts so no single response gets too large). Always list every genuine transaction
@@ -144,21 +156,27 @@ const MAX_PAGES_PER_BATCH = 8
 const SPLIT_CHUNK_SIZE = 6
 
 async function splitPdfIfNeeded(f) {
-  if (!f.filename.toLowerCase().endsWith('.pdf')) return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }]
+  // Stamp the ORIGINAL bytes' hash before anything is re-serialised, and carry it on every
+  // chunk — see costControl.js's identical comment for the measured reason: pdf-lib does not
+  // round-trip deterministically, so hashing a re-split chunk's own bytes mints a new
+  // extraction-cache key on every run and the cache never hits. A chunk is fully identified by
+  // (original file, page range), not by its own re-serialised bytes.
+  const src = { ...f, sourceHash: createHash('sha256').update(f.buffer).digest('hex') }
+  if (!src.filename.toLowerCase().endsWith('.pdf')) return [{ ...src, pageOffset: 0, pages: 1, isSplitPart: false }]
   let doc
   try {
-    doc = await PDFDocument.load(f.buffer, { ignoreEncryption: true })
+    doc = await PDFDocument.load(src.buffer, { ignoreEncryption: true })
   } catch {
-    return [{ ...f, pageOffset: 0, pages: 1, isSplitPart: false }]
+    return [{ ...src, pageOffset: 0, pages: 1, isSplitPart: false }]
   }
   const total = doc.getPageCount()
-  if (total <= 1) return [{ ...f, pageOffset: 0, pages: total, isSplitPart: false }]
+  if (total <= 1) return [{ ...src, pageOffset: 0, pages: total, isSplitPart: false }]
 
   const chunks = []
   for (let start = 0; start < total; start += SPLIT_CHUNK_SIZE) {
     const end = Math.min(start + SPLIT_CHUNK_SIZE, total)
     const buf = await extractPageRange(doc, start, end)
-    chunks.push({ ...f, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
+    chunks.push({ ...src, buffer: buf, pageOffset: start, pages: end - start, isSplitPart: true })
   }
   return chunks
 }
@@ -283,7 +301,15 @@ async function extract(anthropicKey, system, files, model = STATEMENT_MODEL) {
   return parsed
 }
 
+// Cached on the same terms as fuel's receipts (see lib/extractCache.js) — MEASURED 22 Sep 2026,
+// two live runs over the same real 54-receipt set: a perfectly legible $6.90 till slip read
+// correctly in one run and came back as "no cover sheet, total unreadable" in the other, with
+// three OTHER receipts wobbling the same way on a third run. Nothing about the photos changed
+// between runs — the same fix fuel needed on 10 Sep applies here for the same reason.
 async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
+  const key = extractCacheKey(RECEIPT_PROMPT, RECEIPT_MODEL, files)
+  const cached = await cacheGet(key)
+  if (Array.isArray(cached)) return cached
   try {
     const parsed = await extract(anthropicKey, RECEIPT_PROMPT, files, RECEIPT_MODEL)
     if (!Array.isArray(parsed?.receipts)) {
@@ -294,6 +320,9 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
         + `not the expected {"receipts":[...]}. Nothing was silently dropped — re-run, or remove the `
         + `problem file and re-run without it.`)
     }
+    // Only a productive read is cached — caching an empty result would freeze a silent
+    // failure in place for good.
+    if (parsed.receipts.length) await cachePut(key, parsed.receipts)
     return parsed.receipts
   } catch (err) {
     if (err.isMaxTokens && files.length > 1 && depth < 8) {
@@ -302,7 +331,13 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
         extractReceiptsBatch(anthropicKey, files.slice(0, mid), depth + 1),
         extractReceiptsBatch(anthropicKey, files.slice(mid), depth + 1),
       ])
-      return [...a, ...b]
+      // Cache the COMBINED result under this batch's own key too — otherwise the bisect path
+      // never writes the top-level entry, and every future run re-attempts the whole batch,
+      // overflows again and re-splits from scratch (see extractCache.js's header for why this
+      // matters: a re-run should be instant, not a fresh roll of the dice at full price).
+      const combined = [...a, ...b]
+      if (combined.length) await cachePut(key, combined)
+      return combined
     }
     if (err.isMaxTokens && files.length === 1 && files[0].pages > 1 && depth < 8) {
       const halves = await resplitFileInHalf(files[0])
@@ -311,7 +346,9 @@ async function extractReceiptsBatch(anthropicKey, files, depth = 0) {
           extractReceiptsBatch(anthropicKey, [halves[0]], depth + 1),
           extractReceiptsBatch(anthropicKey, [halves[1]], depth + 1),
         ])
-        return [...a, ...b]
+        const combined = [...a, ...b]
+        if (combined.length) await cachePut(key, combined)
+        return combined
       }
     }
     if (err.isMaxTokens) {
@@ -333,8 +370,13 @@ function mergeStatementParts(a, b) {
 }
 
 async function extractStatementBatch(anthropicKey, files, depth = 0) {
+  const key = extractCacheKey(STATEMENT_PROMPT, STATEMENT_MODEL, files)
+  const cached = await cacheGet(key)
+  if (cached && typeof cached === 'object') return cached
   try {
-    return await extract(anthropicKey, STATEMENT_PROMPT, files)
+    const parsed = await extract(anthropicKey, STATEMENT_PROMPT, files)
+    if (parsed && Array.isArray(parsed.lines) && parsed.lines.length) await cachePut(key, parsed)
+    return parsed
   } catch (err) {
     if (err.isMaxTokens && files.length > 1 && depth < 8) {
       const mid = Math.ceil(files.length / 2)
@@ -435,12 +477,26 @@ router.post('/run', async (req, res) => {
     const statementBatches = batchByPageCount(statementFiles)
 
     const rawReceiptFiles = receiptPaths.map(p => ({ ...byPath.get(p), label: 'RECEIPT' }))
-    const receiptFiles = (await Promise.all(rawReceiptFiles.map(splitPdfIfNeeded))).flat()
+
+    // FastField's "Debit Card Receipts" form has a separate "Upload PDF" field alongside the
+    // usual photo — proven on a real 327-receipt export (22 Sep 2026): 12% of receipts, and 100%
+    // of some cardholders', use it. For those the rendered report page carries no receipt
+    // content at all, just a "Click to Download" link — mixed arbitrarily into a normal batch
+    // with unrelated files, extraction can't reliably tell which page belongs with which link.
+    // Pulled out and handled individually via extractDebitReceiptFile (which makes its own two
+    // known-role calls and merges them) BEFORE splitting/batching; every other file's page-split
+    // + batch-by-page-count pipeline is completely unaffected.
+    const attachmentFlags = await Promise.all(rawReceiptFiles.map(f => findAttachmentUrl(f.buffer)))
+    const attachmentReceiptFiles = rawReceiptFiles.filter((_, i) => attachmentFlags[i])
+    const normalReceiptFiles = rawReceiptFiles.filter((_, i) => !attachmentFlags[i])
+
+    const receiptFiles = (await Promise.all(normalReceiptFiles.map(splitPdfIfNeeded))).flat()
     const receiptBatches = batchByPageCount(receiptFiles)
 
     const [statementParts, ...batchResults] = await Promise.all([
       Promise.all(statementBatches.map(files => extractStatementBatch(anthropicKey, files))),
       ...receiptBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
+      ...attachmentReceiptFiles.map(f => extractDebitReceiptFile(extractReceiptsBatch, anthropicKey, f)),
     ])
     const statementData = statementParts.reduce(mergeStatementParts)
 

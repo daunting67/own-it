@@ -48,6 +48,7 @@ const {
   splitPdfIfNeeded, batchByPageCount, extractStatementBatch, extractReceiptsBatch,
   mergeStatementParts, STATEMENT_MODEL, RECEIPT_MODEL,
 } = require('../src/routes/costControlDebit').__test
+const { findAttachmentUrl, extractDebitReceiptFile } = require('../src/lib/debitReceiptAttachments')
 
 const args = process.argv.slice(2)
 const argOf = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : null }
@@ -67,16 +68,26 @@ function readFile(dir, name, label) {
 async function runPipeline(files, key) {
   const stmtFiles = (await Promise.all(files.statement.map(splitPdfIfNeeded))).flat()
   const stmtBatches = batchByPageCount(stmtFiles)
-  const rcptFiles = (await Promise.all(files.receipts.map(splitPdfIfNeeded))).flat()
+
+  // Same split as the real /run route: a file with a separate "Upload PDF" attachment link
+  // needs its own two known-role extraction calls, not to be mixed arbitrarily into a batch
+  // with unrelated files.
+  const attachmentFlags = await Promise.all(files.receipts.map((f) => findAttachmentUrl(f.buffer)))
+  const attachmentFiles = files.receipts.filter((_, i) => attachmentFlags[i])
+  const normalFiles = files.receipts.filter((_, i) => !attachmentFlags[i])
+
+  const rcptFiles = (await Promise.all(normalFiles.map(splitPdfIfNeeded))).flat()
   const rcptBatches = batchByPageCount(rcptFiles)
 
   console.log(`  ${files.receipts.length} receipt file(s) -> ${rcptFiles.length} chunk(s), `
-    + `${rcptBatches.length} batch(es) on ${RECEIPT_MODEL}`)
+    + `${rcptBatches.length} batch(es) on ${RECEIPT_MODEL}`
+    + (attachmentFiles.length ? `, ${attachmentFiles.length} with a separate Upload-PDF attachment` : ''))
   console.log(`  statement on ${STATEMENT_MODEL}\n`)
 
   const started = Date.now()
   const [stmtParts, ...batchResults] = await Promise.all([
     Promise.all(stmtBatches.map((f) => extractStatementBatch(key, f))),
+    ...attachmentFiles.map((f) => extractDebitReceiptFile(extractReceiptsBatch, key, f)),
     ...rcptBatches.map((f) => extractReceiptsBatch(key, f)),
   ])
   const elapsed = ((Date.now() - started) / 1000).toFixed(1)
