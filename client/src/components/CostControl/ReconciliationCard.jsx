@@ -26,10 +26,12 @@ export default function ReconciliationCard({
   icon, title, description,
   sourceLabel, sourceHint,
   receiptsLabel, receiptsHint,
+  fastfieldOption,
   api,
 }) {
   const [sourceFile, setSourceFile] = useState(null)
   const [receiptFiles, setReceiptFiles] = useState([])
+  const [useFastField, setUseFastField] = useState(false)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState('')
   const [progressNote, setProgressNote] = useState('')
@@ -57,7 +59,7 @@ export default function ReconciliationCard({
   }
 
   async function runReconciliation() {
-    if (!sourceFile || !receiptFiles.length) return
+    if (!sourceFile || (!receiptFiles.length && !useFastField)) return
     setRunning(true)
     setResult(null)
     setError(null)
@@ -80,8 +82,8 @@ export default function ReconciliationCard({
       }
 
       setProgress('Reading documents and matching transactions')
-      setProgressNote('this is the long step — usually around a minute')
-      const res = await api.run(sourcePaths, receiptPaths)
+      setProgressNote(useFastField ? 'this is the long step — usually around a minute, plus a bit longer while FastField receipts are fetched' : 'this is the long step — usually around a minute')
+      const res = await api.run(sourcePaths, receiptPaths, useFastField)
       setResult(res)
       setSourceFile(null)
       setReceiptFiles([])
@@ -110,7 +112,7 @@ export default function ReconciliationCard({
     }
   }
 
-  const canRun = sourceFile && receiptFiles.length > 0 && !running
+  const canRun = sourceFile && (receiptFiles.length > 0 || useFastField) && !running
 
   return (
     <div className="card" style={{ padding: 28 }}>
@@ -145,6 +147,24 @@ export default function ReconciliationCard({
           onFiles={f => setReceiptFiles(prev => [...prev, ...f])}
           onRemove={removeReceipt}
         />
+
+        {fastfieldOption && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: running ? 'default' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={useFastField}
+              onChange={e => setUseFastField(e.target.checked)}
+              disabled={running}
+              style={{ marginTop: 3 }}
+            />
+            <span style={{ fontSize: 13 }}>
+              <strong>{fastfieldOption.label}</strong>
+              {fastfieldOption.hint && (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{fastfieldOption.hint}</div>
+              )}
+            </span>
+          </label>
+        )}
       </div>
 
       <button

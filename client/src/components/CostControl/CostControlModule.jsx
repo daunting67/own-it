@@ -14,6 +14,10 @@ const TABS = [
         + 'get a branded reconciliation workbook showing what\'s matched, missing, or needs a decision',
       sourceLabel: 'Supplier invoice (PDF) — one file, e.g. the Z Energy tax invoice',
       receiptsLabel: 'Receipts & bowser photos — driver "Fuel Card Receipts" PDFs, batch scans, or photos of the pump display',
+      fastfieldOption: {
+        label: 'Also pull receipts drivers submitted through FastField',
+        hint: 'Auto-fetches whatever the "Fuel Receipts" FastField form has for this invoice\'s period — on top of anything uploaded above. Can be used on its own with no files uploaded here at all.',
+      },
       api: {
         getRuns: api.getCostControlRuns,
         getRunDocument: api.getCostControlRunDocument,
