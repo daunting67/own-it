@@ -48,32 +48,57 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
 period_end = the statement's own date. Use null (not 0 or "") for anything genuinely unreadable.`
 
 const RECEIPT_PROMPT = `You are extracting data from driver debit-card receipts for P&I (North) Ltd's
-cost-control team. Each file is a "DEBIT CARD RECEIPTS" cover sheet (with DATE/NAME/CARD/COMMENTS
-fields) wrapping a photo of a till slip or similar proof of purchase — OR it may be a MULTI-PAGE BATCH
-SCAN containing many distinct slips (extract every distinct receipt you find, one JSON object per
-receipt, with its page number).
+cost-control team. Each file is one of TWO real formats, and you must tell them apart:
+
+FORMAT A — a "DEBIT CARD RECEIPTS" cover sheet (with DATE/NAME/CARD/COMMENTS fields, handwritten)
+wrapping a photo of a till slip — OR a MULTI-PAGE BATCH SCAN containing many distinct slips like this
+(extract every distinct receipt you find, one JSON object per receipt, with its page number).
+
+FORMAT B — a FastField "Debit Card Receipts" form report, digitally typed and laid out as a labelled
+table, NOT handwritten. Its fields map onto the same schema as Format A's cover sheet:
+  "Invoice/receipt date"                           -> cover_date
+  "Cardholder Name"                                -> cover_name
+  "Card Name in Bank" (e.g. "P&I(North)-Charl-Cheque(Debit)") -> cover_card
+  "Purchased from"                                 -> merchant (unless the photo shows a different,
+                                                       more specific merchant name — prefer the photo)
+  "Describe who and what these items are purchased for" -> comments
+Below these fields sits the actual photographed receipt/till slip — that photo, not the table above
+it, is where txn_date, total and any itemised amounts come from. See the CRITICAL warning below:
+this is the single most common way this format gets misread.
 
 Each file is preceded by a text block "FILE: <filename>" — use that exact filename as source_file. For a
 multi-page batch scan, set page to the 1-indexed page the receipt appears on; otherwise page is null.
 
-For each receipt: read the cover-sheet DATE/NAME/CARD/COMMENTS; whether the photo is a clear till slip
-or a handwritten "LOST RECEIPT" note; the merchant name; the printed transaction date/time; the total
-amount (the single most important field, read carefully); card last-4 if visible; and a short
-description per line item (a receipt can show multiple items — list each as a separate item with its
-own amount). Mark ocr_confidence "low" for blurry/glare-affected photos, "high" for clear till slips.
+For each receipt: read DATE/NAME/CARD/COMMENTS (from the cover sheet or the form table, whichever
+format this file is); whether the photo is a clear till slip or a handwritten "LOST RECEIPT" note; the
+merchant name; the printed transaction date/time; the total amount (the single most important field,
+read carefully); card last-4 if visible; and a short description per line item (a receipt can show
+multiple items — list each as a separate item with its own amount). Mark ocr_confidence "low" for
+blurry/glare-affected photos, "high" for clear till slips.
 
-The COMMENTS box matters and is easy to overlook: transcribe it VERBATIM into "comments". It is
-handwritten and is the cardholder's own explanation of the spend (e.g. "site tools", "PPE for new
-starter", "customer meeting"). Keep the driver's own wording — do not summarise, tidy or interpret it —
-and use null ONLY when the box is genuinely empty. If the handwriting is partly illegible, transcribe
-what you can read and append " [illegible]".
+⚠️ CRITICAL, Format B only: "Describe who and what these items are purchased for" is a PURPOSE
+NARRATIVE the cardholder typed, not a priced itemisation — it routinely lists item names in a way
+that LOOKS like a shopping list (e.g. "1x brake caliper, 1x rotors and a set of brake pads") but
+carries NO dollar amounts at all, because that is not what the field is for. NEVER build "items" or
+"total" from this text, and never leave "total" null just because this text existed and looked
+item-like. "items" and "total" ALWAYS come from actually reading the photographed till slip/receipt
+image on the page — if that image is genuinely unreadable, total is null (see the "total" rule below),
+not inferred or left null out of confusion with the purpose text above it.
 
-"total" is the slip's own printed TOTAL for the whole purchase — the large figure at the bottom,
-the one the cardholder checks at the counter. It is the single most important field on the receipt,
-because the bank statement shows the whole purchase as ONE amount while the slip itemises it: a
-five-item shop of $65.20 has no individual item equal to $65.20, so without the total there is
-nothing for that statement line to be matched against. Read it even when you have also itemised
-the goods, and use null only if it genuinely is not legible. Do not compute it — read it.
+The COMMENTS field matters and is easy to overlook: transcribe it VERBATIM into "comments" (Format
+A: handwritten in the COMMENTS box; Format B: the "Describe who and what..." text). It is the
+cardholder's own explanation of the spend (e.g. "site tools", "PPE for new starter", "1x brake
+caliper, 1x rotors and a set of brake pads"). Keep their own wording — do not summarise, tidy or
+interpret it — and use null ONLY when it is genuinely empty. If handwriting is partly illegible,
+transcribe what you can read and append " [illegible]".
+
+"total" is the slip's own printed TOTAL for the whole purchase — the large figure at the bottom of
+the PHOTOGRAPHED RECEIPT, the one the cardholder checks at the counter. It is the single most
+important field on the receipt, because the bank statement shows the whole purchase as ONE amount
+while the slip itemises it: a five-item shop of $65.20 has no individual item equal to $65.20, so
+without the total there is nothing for that statement line to be matched against. Read it even when
+you have also itemised the goods, and use null only if the photographed receipt's own total is
+genuinely not legible. Do not compute it, and do not derive it from anything other than the photo.
 
 photo_type MUST be exactly one of these two strings, not a variation and not a new value of your
 own: "till_slip", "lost_receipt". Use "lost_receipt" for a handwritten note saying the receipt was
