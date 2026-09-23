@@ -74,7 +74,11 @@ async function withUsage(fn) {
 // from here, not just that one: a review is a DEPARTURE REGISTER — the same practical
 // commercial risk filter P&I already applies to major construction contracts — not an
 // exhaustive legal commentary on every clause a supplier's drafter happened to write.
-const REVIEW_PHILOSOPHY = `THE FILTER: this is a practical commercial risk review, not an exhaustive
+const REVIEW_PHILOSOPHY = `THE OBJECTIVE, in Dan's own words — hold this question in mind for every
+clause: "What are the clauses that could genuinely hurt P&I, its directors, or materially change
+our commercial exposure — and which ones are actually worth negotiating before we sign?"
+
+THE FILTER: this is a practical commercial risk review, not an exhaustive
 legal commentary. Do not turn every supplier-friendly clause into a legal issue. A clause being
 one-sided does NOT by itself make it a departure — weigh the practical likelihood and consequence
 for P&I. The finished register should generally hold only the important issues: preferably 5-10,
@@ -119,8 +123,10 @@ its own). Dan's own worked example keeps them as four separate, trackable items 
 combined exposure in the reasoning for each — that is the pattern to follow, not one item covering
 several clause references.
 
-LIVE WITH BY DEFAULT — do not raise these unless something materially unusual appears in THIS pack
-(an unusual rate, mechanism or scope, not just the clause's mere presence):
+LIVE WITH BY DEFAULT — a standing default across every review, not just this one. Do not re-add
+these items unless something materially unusual appears in this particular document (an unusual
+rate, mechanism or scope, not just the clause's mere presence) — the next supplier's pack
+containing one of these is not, by itself, a reason to raise it either:
 - Ordinary site access / repossession rights. P&I works on third-party sites, so this is never
   ideal, but it is a known, low-practical-risk item — not worth negotiating capital on.
 - The supplier determining ownership of disputed goods.
@@ -135,7 +141,13 @@ THE THREE-TIER CALL — this is the decision, not riskRating alone:
 - NEGOTIATE / CLARIFY: not ideal, commercially manageable; raise it if worthwhile, don't hold up
   the account over it.
 - LIVE WITH: normal supplier protection or low practical risk; do not spend negotiating capital on
-  it, and do not print it in the register at all.`
+  it, and do not print it in the register at all.
+
+WHAT DAN NEEDS TO BE ABLE TO DO WITH THIS, AT A GLANCE — the standard the whole register is judged
+against: he wants to look at it and immediately understand "What can actually hurt us? What should
+we push back on? What can we live with? What wording do we send them?" Avoid turning ordinary
+supplier Terms of Trade into the equivalent of negotiating a major construction subcontract. The
+objective is focused commercial risk management, not legal perfection.`
 
 const COMPANY_CONTEXT = `Pipelines & Infrastructure (North) Limited ("P&I") is a New Zealand civil
 construction company specialising in the excavation and installation of large-diameter stormwater,
