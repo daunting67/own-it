@@ -550,31 +550,32 @@ const TRIAGE_SYSTEM = `${REVIEW_PREAMBLE}
 
 You are triaging ONE BATCH of clauses from the pack against P&I's standing filter below —
 deciding which tier each belongs in. You are NOT drafting the register yet: a later step takes
-every clause any batch rates MUST_CHANGE or NEGOTIATE, looks at them TOGETHER — including how
-they interact with each other, not just within this batch — and drafts the final register from
-that.
+every clause any batch rates MUST CHANGE or NEGOTIATE / CLARIFY, looks at them TOGETHER —
+including how they interact with each other, not just within this batch — and drafts the final
+register from that.
 
 Triage every clause you are given. Do not skip one because it looks routine: you cannot rate
-something LIVE_WITH without having actually read it, and routine wording is where risk hides.
+something LIVE WITH without having actually read it, and routine wording is where risk hides.
 
 ${REVIEW_PHILOSOPHY}
 
-For a LIVE_WITH clause, keep "note" to one short phrase — most clauses land here, and
+For a LIVE WITH clause, keep "note" to one short phrase — most clauses land here, and
 elaborating on routine wording is exactly what this triage step exists to avoid. For a
-MUST_CHANGE or NEGOTIATE candidate, give enough for the drafting step to work from without going
-back to the source: what the clause actually does, and why it matters to P&I specifically.
+MUST CHANGE or NEGOTIATE / CLARIFY candidate, give enough for the drafting step to work from
+without going back to the source: what the clause actually does, and why it matters to P&I
+specifically.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "triage": [ { "clauseRef": "<clause number / title, as given>", "tier": "<must_change | negotiate | live_with>", "riskRating": "<high | medium | low>", "note": "<LIVE_WITH: one short phrase why it's fine. MUST_CHANGE/NEGOTIATE: 1-2 sentences on what it does and why it matters to P&I>" } ]
+  "triage": [ { "clauseRef": "<clause number / title, as given>", "tier": "<must_change | negotiate | live_with — the three tiers are MUST CHANGE, NEGOTIATE / CLARIFY, and LIVE WITH>", "riskRating": "<high | medium | low>", "note": "<LIVE WITH: one short phrase why it's fine. MUST CHANGE / NEGOTIATE / CLARIFY: 1-2 sentences on what it does and why it matters to P&I>" } ]
 }
 One entry per clause given, in the order given.`
 
 const REGISTER_SYSTEM = `${REVIEW_PREAMBLE}
 
-Every clause in the pack has already been triaged. You are given every clause triaged MUST_CHANGE
-or NEGOTIATE, from the WHOLE pack, together — not batched by document or clause number. That is
-deliberate: P&I's clearest example of why is its own ETL / Modern Transport Group review —
+Every clause in the pack has already been triaged. You are given every clause triaged MUST CHANGE
+or NEGOTIATE / CLARIFY, from the WHOLE pack, together — not batched by document or clause number.
+That is deliberate: P&I's clearest example of why is its own ETL / Modern Transport Group review —
 group-wide credit, a director personal undertaking, an ALLPAAP security interest and security for
 future debts are each individually a known issue, but taken TOGETHER they are a materially larger
 exposure than any one of them alone. You can only see that by holding the whole candidate set in
@@ -908,7 +909,7 @@ function reviewContext({ supplierName, notes, digests }) {
 async function buildRegister(candidates) {
   if (!candidates.length) return []
   const brief = [
-    `Candidates triaged MUST_CHANGE or NEGOTIATE, across the whole pack (${candidates.length}):`,
+    `Candidates triaged MUST CHANGE or NEGOTIATE / CLARIFY, across the whole pack (${candidates.length}):`,
     JSON.stringify(candidates.map(c => ({
       clauseRef: c.clauseRef, document: c.document, tier: c.tier, riskRating: c.riskRating,
       note: c.note, wording: c.wording
