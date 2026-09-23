@@ -112,7 +112,12 @@ personal undertaking, on its own, is a known issue to negotiate. An ALLPAAP secu
 its own, is a known issue to negotiate. Security extending to future debts, on its own, is ordinary.
 But group-wide credit + a director personal undertaking + ALLPAAP + future debts, taken TOGETHER, is
 a materially larger and more concerning exposure than any one of those provisions considered alone —
-flag the COMBINATION as its own issue, not several separate, smaller-looking ones.
+say so explicitly. This means EXPLAINING the combination, not MERGING the items: each of those four
+is still its own negotiating ask (ETL may agree to drop the ALLPAAP and refuse to restrict the
+account to one entity, or vice versa — a director needs to be able to track and decide each one on
+its own). Dan's own worked example keeps them as four separate, trackable items and states the
+combined exposure in the reasoning for each — that is the pattern to follow, not one item covering
+several clause references.
 
 LIVE WITH BY DEFAULT — do not raise these unless something materially unusual appears in THIS pack
 (an unusual rate, mechanism or scope, not just the clause's mere presence):
@@ -580,14 +585,27 @@ ${REVIEW_PHILOSOPHY}
 YOUR JOB, IN ORDER:
 1. Look across every candidate for clauses that work together — a guarantee and the indemnity
    that backs it, a security grant and a cross-company clause that broadens what it secures, a
-   termination right and the charge that survives it. Where several candidates form one real
-   commercial issue, draft ONE register item covering the combination (name every clause
-   reference involved) rather than several overlapping items.
+   termination right and the charge that survives it. EXPLAIN the combination in each item's
+   concernReason (cross-reference the item numbers or clause refs it compounds with) — do NOT
+   merge them into one row. Each is still its own negotiating ask: the supplier may agree to one
+   and not another, and a director needs to track and decide each on its own. One candidate is one
+   register item, always — Dan's own worked example on this exact pack (the ETL / Modern Transport
+   Group review) keeps the guarantee, the ALLPAAP and the group-company scope as three separate,
+   trackable items even though the reasoning for each explains how they compound. That is the
+   pattern to follow.
 2. Draft the full departure-register entry for each surviving issue — see schema below.
 3. Order the finished register by IMPORTANCE TO P&I, most material first. Never by clause number.
 4. Trim to what is genuinely material. Treat 5-10 as a real target, not a suggestion to ignore —
-   a candidate that turns out minor once weighed against the rest of the register can be dropped,
-   or folded into a more significant item, rather than printed on its own.
+   a candidate that turns out minor once weighed against the rest of the register can be dropped
+   entirely, but never folded into a different item just to hit the target.
+
+LENGTH — Dan's own worked example is the calibration, not a stylistic preference: existingPosition,
+concernReason and proposedPosition each run ONE SHORT SENTENCE (Dan's average: 17-25 words).
+proposedAmendment is the one field allowed a second sentence where the actual wording needs it
+(Dan's average: 35 words — still one or two sentences, not a paragraph). A director reading this
+register needs to see what's wrong and what to do about it at a glance, the same way Dan's own
+register reads — not a legal memo. If you find yourself writing three sentences for
+existingPosition, you are writing the clause-by-clause commentary this redesign replaced.
 
 DRAFTING PROPOSED AMENDMENTS — keep them commercial and realistic. P&I's objective is to open the
 account while removing disproportionate exposures, not to rewrite the supplier's entire contract:
@@ -602,18 +620,22 @@ Return ONLY valid JSON (no markdown fences, no explanation):
 {
   "register": [
     {
-      "documentPage": "<which document(s)/clause(s) this is in, e.g. 'Credit Application, cl 3.4' — name every document involved if this item combines several>",
-      "clauseRef": "<the clause reference(s), e.g. 'Cl. 3.4' or 'Cll. 1.2-1.3 & Limited Company Declaration'>",
+      "documentPage": "<which document(s) this ONE issue is in, e.g. 'Credit Application, cl 3.4'>",
+      "clauseRef": "<the clause reference(s) for THIS ONE issue, e.g. 'Cl. 3.4', or 'Cll. 1.2-1.3 + Declaration' where several sub-clauses are all part of the SAME issue — but never joining together clause refs for DIFFERENT issues that merely interact, e.g. the guarantee clause and the ALLPAAP clause stay two items even though they compound>",
       "clauseIssue": "<short name of the issue, e.g. 'ALLPAAP security over all P&I assets'>",
       "riskRating": "<high | medium | low>",
-      "existingPosition": "<what the clause currently says/does, plainly>",
-      "concernReason": "<why this matters to P&I specifically — the practical consequence, not abstract legal risk>",
-      "proposedPosition": "<what P&I's position should be>",
-      "proposedAmendment": "<the actual wording/instruction to put to the supplier>",
+      "existingPosition": "<what the clause currently says/does — ONE short sentence, ~20 words>",
+      "concernReason": "<why this matters to P&I specifically — ONE short sentence, ~20 words; if this compounds with another item, say so here in a few words, e.g. 'Combined with item 3's group-company scope, this reaches well beyond the ETL account P&I intended.'>",
+      "proposedPosition": "<what P&I's position should be — ONE short sentence, ~15-20 words>",
+      "proposedAmendment": "<the actual wording/instruction to put to the supplier — one or two sentences, ~30-40 words>",
       "priority": "<must_change | negotiate | acceptable_if_required>"
     }
   ]
-}`
+}
+One DISTINCT NEGOTIATING ASK is one item — combining a clause's own sub-references (cl 1.2-1.3, or
+a clause plus the declaration that goes with it) into one item is fine when they are genuinely the
+same issue. Combining DIFFERENT issues into one item because they interact is not — that
+compounding belongs in each item's concernReason as a cross-reference, never as a merged row.`
 
 const OVERALL_SYSTEM = `${REVIEW_PREAMBLE}
 
