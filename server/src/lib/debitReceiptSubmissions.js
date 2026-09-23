@@ -1,6 +1,7 @@
 const db = require('./supabase')
 const { randomUUID } = require('crypto')
 const { pairSubmissions: pairFastfieldSubmissions } = require('./fastfieldPairing')
+const { nzMidnightUtc, nzDateOf } = require('./nzDay')
 
 // FastField's "Debit Card Receipts" form (id 1029371), confirmed 22 Sep 2026 via
 // findPlantForms('debit'). Its displayReferenceMask is
@@ -116,13 +117,26 @@ async function getPdfSignedUrl(path, expiresInSeconds = 3600) {
   return data.signedUrl
 }
 
-// NO keyFromJson/keyFromPdfName YET — deliberately. Fuel's equivalent (the card number) only
-// got built after seeing a real submission prove what's actually in the payload and filename;
-// guessing here would repeat the exact mistake this integration is trying not to repeat. Until
-// then this falls through fastfieldPairing's submission-id pass and time-proximity fallback
-// only, which is enough to prove the webhook itself is receiving and storing correctly.
+// KEY NOW KNOWN — confirmed 24 Sep 2026 against a real live submission (Charl Heyneke, id 69,
+// misrouted into FuelReceiptSubmission by a wrong delivery-action URL — see that investigation
+// for how this payload was actually seen). This form's mask is "DCR $lookuplistpicker_1$
+// $datepicker_1$" (cardholder + date, NO per-submission unique value), rendered into
+// `displayReferenceValue` ("DCR Charl Heyneke 23/09/2026") and, on the PDF side, into
+// `_pdfOriginalName` ("DCR Charl Heyneke 23_09_2026.pdf") with "/" -> "_" — same convention
+// fuel's fastfieldFilename relies on. This CAN collide (same cardholder submitting twice in
+// one day), which is exactly the case fastfieldPairing's smallest-gap-first-across-ALL-
+// candidates design (see its header) was built to still resolve correctly.
+function keyFromJson(row) {
+  const p = row && row.rawPayload
+  const v = p && p.displayReferenceValue
+  return v ? v.replace(/\//g, '_') : null
+}
+function keyFromPdfName(name) {
+  return name ? name.replace(/\.pdf$/i, '') : null
+}
+
 function pairSubmissions(rows) {
-  return pairFastfieldSubmissions(rows, {})
+  return pairFastfieldSubmissions(rows, { keyFromJson, keyFromPdfName, keyLabel: 'displayReferenceValue' })
 }
 
 async function getRecentSubmissions(hours = 48) {
@@ -136,7 +150,58 @@ async function getRecentSubmissions(hours = 48) {
   return data || []
 }
 
+// The date the CARDHOLDER filled the form in — NOT receivedAt. Checks the imported
+// bulk-export convention (`date`, set by scripts/importDebitBulkExport.js) and the real live
+// webhook field confirmed above (`datepicker_1`) — a submission stored via either path reads
+// correctly either way.
+function fillDateOf(receiptOrRow) {
+  const p = (receiptOrRow && (receiptOrRow.fields || receiptOrRow.rawPayload)) || {}
+  const raw = p.date || p.datepicker_1
+  if (!raw) return null
+  const t = Date.parse(raw)
+  return Number.isNaN(t) ? null : new Date(t)
+}
+
+// Same logic as fuelReceiptSubmissions.js's filterByFillDate — see that file for the exact
+// half-open NZ-day-range reasoning.
+function filterByFillDate(receipts, startDay, endDay) {
+  const from = nzMidnightUtc(startDay).getTime()
+  const toDay = new Date(nzMidnightUtc(endDay).getTime() + 36 * 3600000)
+  const to = nzMidnightUtc(nzDateOf(toDay)).getTime()
+  const inPeriod = [], outside = [], undated = []
+  for (const r of receipts) {
+    if (!r.fillDate) { undated.push(r); continue }
+    const t = r.fillDate.getTime()
+    if (t >= from && t < to) inPeriod.push(r)
+    else outside.push(r)
+  }
+  return { inPeriod, outside, undated }
+}
+
+/*
+ * The one to call from a reconciliation: every RECEIPT (not row) whose FILL DATE falls in an
+ * NZ-local day range, halves already joined. Mirrors fuelReceiptSubmissions.js's
+ * getReceiptsForPeriod exactly — see that file for why the DB query has no upper bound (a
+ * fill on the last day of a period is routinely submitted days later) while the precise
+ * selection happens on fill date afterwards, not on receivedAt.
+ */
+async function getReceiptsForPeriod(startDay, endDay, { lookbackDays = 45 } = {}) {
+  const from = new Date(nzMidnightUtc(startDay).getTime() - lookbackDays * 86400000).toISOString()
+  const { data, error } = await db
+    .from('DebitReceiptSubmission')
+    .select('*')
+    .gte('receivedAt', from)
+    .order('receivedAt', { ascending: true })
+  if (error) throw new Error(error.message)
+
+  const { receipts, incomplete } = pairSubmissions(data || [])
+  for (const r of receipts) r.fillDate = fillDateOf(r)
+  const { inPeriod, outside, undated } = filterByFillDate(receipts, startDay, endDay)
+  return { receipts: inPeriod, outside, undated, incomplete }
+}
+
 module.exports = {
   storeSubmission, storeMultipartSubmission, downloadPdf, getPdfSignedUrl,
   getRecentSubmissions, pairSubmissions, DEBIT_RECEIPTS_FORM_ID,
+  fillDateOf, filterByFillDate, getReceiptsForPeriod, keyFromJson, keyFromPdfName,
 }

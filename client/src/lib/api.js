@@ -120,8 +120,8 @@ export const api = {
   getDebitCardRuns: () => request('/api/cost-control-debit/runs'),
   getDebitCardRunDocument: (id) => request(`/api/cost-control-debit/runs/${id}/document`),
   getDebitCardUploadUrl: (filename) => request('/api/cost-control-debit/upload-url', { method: 'POST', body: JSON.stringify({ filename }) }),
-  runDebitCardRecon: (statementPaths, receiptPaths) =>
-    request('/api/cost-control-debit/run', { method: 'POST', body: JSON.stringify({ invoicePaths: statementPaths, receiptPaths }) }),
+  runDebitCardRecon: (statementPaths, receiptPaths, useFastField) =>
+    request('/api/cost-control-debit/run', { method: 'POST', body: JSON.stringify({ invoicePaths: statementPaths, receiptPaths, useFastField }) }),
 
   // Cost Control — supplier credit application review (documents are read one request at
   // a time, then the review is built from the digests — see routes/creditReview.js)

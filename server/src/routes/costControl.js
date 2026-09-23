@@ -248,11 +248,23 @@ async function fetchAnthropic(anthropicKey, body) {
   const MAX_ATTEMPTS = 4
   let response
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify(body)
-    })
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    } catch (err) {
+      // A CONNECTION-LEVEL failure (ETIMEDOUT etc, thrown by fetch() itself before any
+      // response) used to propagate straight out and kill the whole run, never reaching the
+      // 429/529 retry below. MEASURED 24 Sep 2026 on the debit side (same fetchAnthropic
+      // shape): pulling every cardholder's receipts via FastField auto-fetch in one run fires
+      // far more concurrent batches than a manual upload ever did, and one dropped connection
+      // among 20+ failed an otherwise-healthy run. Ported the fix here too, same reasoning.
+      if (attempt === MAX_ATTEMPTS) throw err
+      await sleep(1000 * (2 ** (attempt - 1)))
+      continue
+    }
     if (response.status !== 429 && response.status !== 529) return response
     if (attempt === MAX_ATTEMPTS) return response
     const retryAfter = Number(response.headers.get('retry-after'))

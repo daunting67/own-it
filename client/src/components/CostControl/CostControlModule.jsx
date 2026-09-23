@@ -36,6 +36,10 @@ const TABS = [
         + 'showing what\'s matched, missing, or needs a decision',
       sourceLabel: 'Debit card statement (PDF) — one file, from the bank or card provider',
       receiptsLabel: 'Receipts — driver "Debit Card Receipts" PDFs or batch scans',
+      fastfieldOption: {
+        label: 'Also pull receipts submitted through FastField',
+        hint: 'Auto-fetches whatever the "Debit Card Receipts" FastField form has for this statement\'s period — on top of anything uploaded above. Can be used on its own with no files uploaded here at all.',
+      },
       api: {
         getRuns: api.getDebitCardRuns,
         getRunDocument: api.getDebitCardRunDocument,

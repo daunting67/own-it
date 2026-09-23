@@ -9,6 +9,7 @@ const { saveCostDoc, getCostDoc } = require('../lib/costDocs')
 const { createUploadUrl, downloadUpload, removeUploads } = require('../lib/costUploads')
 const { findAttachmentUrl, extractDebitReceiptFile } = require('../lib/debitReceiptAttachments')
 const { extractCacheKey, cacheGet, cachePut } = require('../lib/extractCache')
+const { getReceiptsForPeriod, downloadPdf } = require('../lib/debitReceiptSubmissions')
 
 const PROCESS_ID = 'cost-control-debit-recon'
 const PROCESS_NAME = 'Debit Card Receipt Reconciliation'
@@ -138,6 +139,16 @@ function stripFences(text) {
 function safePathPart(name) {
   return (name || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120)
 }
+// Same convention as costControl.js's fastfieldFilename — FastField's own displayReferenceValue
+// (or, for an imported bulk-export row, the cardholderName+date we stored in rawPayload.date)
+// rendered with "/" -> "_", falling back to the submissionId so two receipts can never collide
+// onto the same source_file.
+function debitFastfieldFilename(receipt, index) {
+  const display = receipt.fields?.displayReferenceValue
+    || (receipt.fields?.cardholderName && receipt.fields?.date && `DCR ${receipt.fields.cardholderName} ${receipt.fields.date.slice(0, 10)}`)
+  const base = display ? display.replace(/\//g, '_') : `fastfield-${receipt.submissionId || index}`
+  return safePathPart(`${base}.pdf`)
+}
 function mediaTypeFor(filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase()
   if (ext === 'pdf') return { kind: 'document', media_type: 'application/pdf' }
@@ -227,11 +238,23 @@ async function fetchAnthropic(anthropicKey, body) {
   const MAX_ATTEMPTS = 4
   let response
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify(body)
-    })
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+    } catch (err) {
+      // A CONNECTION-LEVEL failure (ETIMEDOUT etc, thrown by fetch() itself before any
+      // response) used to propagate straight out and kill the whole run — never caught by the
+      // 429/529 retry below, which only looks at response.status. MEASURED live 24 Sep 2026:
+      // FastField auto-fetch pulling every cardholder's receipts in one run fires far more
+      // concurrent batches (20+) than a single person's manual upload ever did, and one
+      // dropped connection among them failed a run that otherwise had nothing wrong with it.
+      if (attempt === MAX_ATTEMPTS) throw err
+      await sleep(1000 * (2 ** (attempt - 1)))
+      continue
+    }
     if (response.status !== 429 && response.status !== 529) return response
     if (attempt === MAX_ATTEMPTS) return response
     const retryAfter = Number(response.headers.get('retry-after'))
@@ -444,8 +467,10 @@ router.post('/upload-url', async (req, res) => {
 router.post('/run', async (req, res) => {
   const statementPaths = Array.isArray(req.body?.invoicePaths) ? req.body.invoicePaths.filter(Boolean) : []
   const receiptPaths = Array.isArray(req.body?.receiptPaths) ? req.body.receiptPaths.filter(Boolean) : []
+  // Mirrors costControl.js's useFastField flag exactly — see that file's comment.
+  const useFastField = !!req.body?.useFastField
   if (!statementPaths.length) return res.status(400).json({ error: 'Upload the debit card statement PDF' })
-  if (!receiptPaths.length) return res.status(400).json({ error: 'Upload at least one receipt' })
+  if (!receiptPaths.length && !useFastField) return res.status(400).json({ error: 'Upload at least one receipt' })
 
   const allPaths = [...statementPaths, ...receiptPaths]
   const filenames = allPaths.map(p => p.split('/').pop())
@@ -493,7 +518,7 @@ router.post('/run', async (req, res) => {
     const receiptFiles = (await Promise.all(normalReceiptFiles.map(splitPdfIfNeeded))).flat()
     const receiptBatches = batchByPageCount(receiptFiles)
 
-    const [statementParts, ...batchResults] = await Promise.all([
+    const [statementParts, ...manualBatchResults] = await Promise.all([
       Promise.all(statementBatches.map(files => extractStatementBatch(anthropicKey, files))),
       ...receiptBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
       ...attachmentReceiptFiles.map(f => extractDebitReceiptFile(extractReceiptsBatch, anthropicKey, f)),
@@ -501,7 +526,57 @@ router.post('/run', async (req, res) => {
     const statementData = statementParts.reduce(mergeStatementParts)
 
     if (!statementData?.lines?.length) throw new Error('Could not read any statement lines — check the statement PDF')
-    const receipts = batchResults.flat()
+    const manualReceipts = manualBatchResults.flat().map(r => ({ ...r, source: 'manual' }))
+
+    // FastField auto-fetch — mirrors costControl.js's fuel auto-fetch exactly (see that file's
+    // comment for the full reasoning): pulls whatever the "Debit Card Receipts" webhook (plus
+    // the one-off 22 Sep 2026 bulk-export backfill — see scripts/importDebitBulkExport.js) has
+    // stored for this statement's own period. Runs AFTER the statement is read, since it needs
+    // period_end/statement_date.
+    let fastfieldReceipts = [], fastfieldMeta = null
+    if (useFastField) {
+      const periodEnd = statementData.period_end || statementData.statement_date
+      if (periodEnd) {
+        const startDay = new Date(Date.parse(`${periodEnd}T00:00:00Z`) - 45 * 86400000).toISOString().slice(0, 10)
+        const { receipts: periodReceipts, outside, undated, incomplete } = await getReceiptsForPeriod(startDay, periodEnd)
+        const withPdf = periodReceipts.filter(r => r.pdfPath)
+        const pdfBuffers = await Promise.all(withPdf.map(r => downloadPdf(r.pdfPath)))
+        const rawFastfieldFiles = withPdf.map((r, i) => ({
+          filename: debitFastfieldFilename(r, i),
+          buffer: pdfBuffers[i],
+          label: 'RECEIPT (auto-fetched from FastField)',
+        }))
+        // Same "Upload PDF" attachment check as manual uploads above — a fetched report can
+        // equally be the attachment-only kind.
+        const fetchedAttachmentFlags = await Promise.all(rawFastfieldFiles.map(f => findAttachmentUrl(f.buffer)))
+        const fetchedAttachmentFiles = rawFastfieldFiles.filter((_, i) => fetchedAttachmentFlags[i])
+        const fetchedNormalFiles = rawFastfieldFiles.filter((_, i) => !fetchedAttachmentFlags[i])
+        const fetchedSplitFiles = (await Promise.all(fetchedNormalFiles.map(splitPdfIfNeeded))).flat()
+        const fetchedBatches = batchByPageCount(fetchedSplitFiles)
+        // allSettled, not all: these are AUTO-fetched extras across every cardholder in the
+        // period, not files the user is actively waiting on one at a time — one bad egg (a
+        // stale/expired "Upload PDF" attachment link, an unreadable scan) must not sink the
+        // whole run and cost every other cardholder their reconciliation. Failures are named
+        // in the output instead of silently vanishing.
+        const fetchedSettled = await Promise.allSettled([
+          ...fetchedBatches.map(files => extractReceiptsBatch(anthropicKey, files)),
+          ...fetchedAttachmentFiles.map(f => extractDebitReceiptFile(extractReceiptsBatch, anthropicKey, f)),
+        ])
+        const fetchedFailures = fetchedSettled.filter(r => r.status === 'rejected')
+        fastfieldReceipts = fetchedSettled.filter(r => r.status === 'fulfilled').flatMap(r => r.value).map(r => ({ ...r, source: 'fastfield' }))
+        if (fetchedFailures.length) console.error('FastField auto-fetch: some batches failed:', fetchedFailures.map(f => f.reason?.message))
+        fastfieldMeta = {
+          fetched: withPdf.length,
+          failedBatches: fetchedFailures.length,
+          noPdf: periodReceipts.length - withPdf.length,
+          undated: undated.length,
+          outside: outside.length,
+          incomplete: incomplete.length,
+        }
+      }
+    }
+
+    const receipts = [...manualReceipts, ...fastfieldReceipts]
 
     const receiptFilenames = receiptPaths.map(p => p.split('/').pop())
     const receiptFilesSeen = new Set(receipts.map(r => r.source_file).filter(Boolean))
@@ -532,6 +607,10 @@ router.post('/run', async (req, res) => {
       receiptFilesMissing.length
         ? `⚠️ ${receiptFilesMissing.length} uploaded file(s) produced NO receipt data — check these were readable and re-upload if needed: ${receiptFilesMissing.join(', ')}.`
         : null,
+      fastfieldMeta ? `FastField: ${fastfieldMeta.fetched} receipt(s) auto-fetched for this period.` : null,
+      fastfieldMeta?.failedBatches ? `⚠️ ${fastfieldMeta.failedBatches} auto-fetched batch(es) could not be read (stale attachment link or unreadable file) — check the server log and re-run if a driver's receipt seems to be missing.` : null,
+      fastfieldMeta?.noPdf ? `⚠️ ${fastfieldMeta.noPdf} FastField submission(s) have no photo yet (delivery incomplete) — not included.` : null,
+      fastfieldMeta?.undated ? `⚠️ ${fastfieldMeta.undated} FastField submission(s) had no readable fill date — not included, check manually.` : null,
       'Download the .xlsx below — Missing Receipts is the chase-up worklist, Exceptions needs a decision.',
     ].filter(Boolean).join('\n')
 
