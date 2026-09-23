@@ -78,10 +78,10 @@ const REVIEW_PHILOSOPHY = `THE OBJECTIVE, in Dan's own words — hold this quest
 clause: "What are the clauses that could genuinely hurt P&I, its directors, or materially change
 our commercial exposure — and which ones are actually worth negotiating before we sign?"
 
-THE FILTER: this is a practical commercial risk review, not an exhaustive
-legal commentary. Do not turn every supplier-friendly clause into a legal issue. A clause being
-one-sided does NOT by itself make it a departure — weigh the practical likelihood and consequence
-for P&I. The finished register should generally hold only the important issues: preferably 5-10,
+THE FILTER: this is a practical commercial risk review, similar to the departure-register process
+P&I uses for major construction contracts — not a long clause-by-clause legal commentary. Do not
+turn every supplier-friendly clause into a legal issue. A clause being one-sided does NOT
+automatically make it a departure — consider the practical likelihood and consequence for P&I. The finished register should generally hold only the important issues: preferably 5-10,
 not 15-20 minor observations. Order it by IMPORTANCE TO P&I, never by clause number.
 
 ALWAYS HUNT FOR (the recurring pattern P&I has been burned by, or nearly was):
@@ -96,19 +96,27 @@ ALWAYS HUNT FOR (the recurring pattern P&I has been burned by, or nearly was):
   comfortable with an ordinary PMSI and NOT comfortable with an ALLPAAP. Treating the two as
   equivalent, or rating them the same, is a mistake.
 - Cross-company / group-company liability (one credit application or guarantee covering several
-  related legal entities) and cross-default provisions.
+  related legal entities) and cross-default provisions. A group arrangement by itself is not
+  necessarily unacceptable and can be administratively convenient — the concern is what it
+  combines with (see CLAUSE INTERACTIONS below). If the personal guarantee and ALLPAAP are
+  removed, a group-wide arrangement becomes considerably less concerning.
 - Security for future debts, not just the current transaction.
 - Broad PPSA contracting-out (waiving Part 9 debtor protections).
 - Broad or unlimited indemnities running one way, especially where the supplier's own liability is
   simultaneously excluded or capped low.
-- Open-ended loss-of-hire / loss-of-revenue claims with no defined cap or period.
+- Open-ended loss-of-hire / loss-of-revenue claims with no defined cap or period. Responsibility for
+  damage to hired plant while in P&I's custody is reasonable — the concern is the additional,
+  potentially open-ended loss-of-revenue exposure on top of it. Worth negotiating, but not in the
+  same category as personal guarantees or ALLPAAP.
 - Termination charges — particularly termination for convenience (no default by P&I) that still
   leaves P&I paying for the remainder of a fixed term.
 - Unreasonable default interest or recovery costs.
-- Insurance or damage-waiver exclusions that interact badly with P&I's ACTUAL work — large-diameter
-  stormwater, wastewater, watermains, deep drainage, excavation, dewatering and work around water.
-  A generic "water damage" exclusion is a live issue for P&I in a way it would not be for most
-  contractors — don't wave it through as boilerplate without checking.
+- Insurance or damage-waiver exclusions relevant to P&I's ACTUAL work — stormwater, wastewater,
+  watermains, deep drainage, excavations, dewatering and working around water. Do not
+  automatically reject damage-waiver exclusions; an exclusion like "loss or damage involving
+  water" needs the supplier to explain exactly how it operates when its plant is used for P&I's
+  normal work. That makes it a CLARIFY / NEGOTIATE item by default, not a must-change — depending
+  on the supplier's answer it could become a higher-risk issue.
 
 MOST IMPORTANTLY — CLAUSE INTERACTIONS, NOT JUST CLAUSES IN ISOLATION: look at how clauses work
 together. Five related companies, on their own, might be administratively convenient. A director
@@ -119,9 +127,9 @@ a materially larger and more concerning exposure than any one of those provision
 say so explicitly. This means EXPLAINING the combination, not MERGING the items: each of those four
 is still its own negotiating ask (ETL may agree to drop the ALLPAAP and refuse to restrict the
 account to one entity, or vice versa — a director needs to be able to track and decide each one on
-its own). Dan's own worked example keeps them as four separate, trackable items and states the
-combined exposure in the reasoning for each — that is the pattern to follow, not one item covering
-several clause references.
+its own). Dan's handover lists the director liability, the ALLPAAP and the five-company scope as
+three separate items and explains the combined exposure in the reasoning — that is the pattern to
+follow, not one item covering several different issues.
 
 LIVE WITH BY DEFAULT — a standing default across every review, not just this one. Do not re-add
 these items unless something materially unusual appears in this particular document (an unusual
@@ -137,11 +145,11 @@ containing one of these is not, by itself, a reason to raise it either:
   warranties.
 
 THE THREE-TIER CALL — this is the decision, not riskRating alone:
-- MUST CHANGE: material exposure P&I should actively push back on before signing.
-- NEGOTIATE / CLARIFY: not ideal, commercially manageable; raise it if worthwhile, don't hold up
-  the account over it.
-- LIVE WITH: normal supplier protection or low practical risk; do not spend negotiating capital on
-  it, and do not print it in the register at all.
+- MUST CHANGE: material exposure that P&I should actively push back on.
+- NEGOTIATE / CLARIFY: not ideal, but commercially manageable. Raise it if worthwhile, but don't
+  necessarily hold up the account.
+- LIVE WITH: normal supplier protection or low practical risk. Do not waste negotiating capital
+  on it — and do not print it in the register at all.
 
 WHAT DAN NEEDS TO BE ABLE TO DO WITH THIS, AT A GLANCE — the standard the whole register is judged
 against: he wants to look at it and immediately understand "What can actually hurt us? What should
@@ -149,9 +157,69 @@ we push back on? What can we live with? What wording do we send them?" Avoid tur
 supplier Terms of Trade into the equivalent of negotiating a major construction subcontract. The
 objective is focused commercial risk management, not legal perfection.`
 
+// The "ETL / Modern Transport Group — current position" section of Dan's handover: his own
+// eight issues on that pack, each with the risk, priority and position he chose. Given to
+// the stage-2 calls (triage, register, overall) as calibration — how Dan actually rates and
+// positions things — because without it the register rated his two MEDIUM items (loss of
+// hire, the water exclusion) HIGH / Must Change and offered a capped-guarantee fallback he
+// never offered (23 Sep 2026). Not given to the reading stage, which only preserves wording.
+const HANDOVER_WORKED_EXAMPLE = `DAN'S WORKED EXAMPLE — ETL / Modern Transport Group (Credit Application + ETL Hire & Sales
+Terms). Dan reviewed this pack himself and reduced it to 8 material issues, in this priority order.
+Use it to calibrate how he rates risk, sets priority and states P&I's position. It is NOT a
+description of the pack in front of you (unless that pack is ETL's) — never import an issue from
+it that is not actually in the documents you are reviewing.
+
+1. Director personal liability — Credit Application, Limited Companies declaration. Risk HIGH,
+   Priority MUST CHANGE. The directors jointly accept liability for credit extended and undertake to
+   pay if P&I fails to meet its obligations. Position: directors sign solely on behalf of P&I — no
+   personal guarantee or personal liability. One of the biggest issues.
+2. Personal liability of the person signing an ETL hire contract — ETL 7.3. Risk HIGH, Priority
+   MUST CHANGE. The person signing for a corporate hirer "will, in any event, be personally liable".
+   Even with the guarantee removed from the credit application, this recreates personal liability
+   whenever a P&I director or employee signs an individual hire contract. Position: delete the
+   personal liability; the signatory may warrant authority to bind P&I, liability stays with P&I.
+3. ALLPAAP security — Credit Application 3.4. Risk HIGH, Priority MUST CHANGE. Security over all of
+   P&I's present and after-acquired personal property for money owing now and in the future.
+   Position: delete the ALLPAAP; restrict security to unpaid goods supplied by the relevant
+   supplier and identifiable proceeds (P&I is comfortable with a normal PMSI / retention of title).
+4. Credit application covers five Modern Group companies — Credit Application 1.2-1.3 + Limited
+   Companies declaration. Risk HIGH in combination with the other provisions, Priority MUST CHANGE /
+   CLARIFY. The group arrangement by itself is not necessarily unacceptable and could be
+   administratively convenient; the concern is five companies + director undertaking + ALLPAAP +
+   future debts together. Position: the credit application applies to Equipment and Transport
+   Leasing Ltd only unless P&I separately agrees in writing to extend it. If the guarantee and
+   ALLPAAP are removed, the group-wide arrangement becomes considerably less concerning.
+5. Termination without cause + future rentals — ETL 5.2 / 5.4.2. Risk HIGH, Priority MUST CHANGE.
+   ETL can terminate hire without reason on 48 hours' notice, and P&I may then have to pay the
+   remaining rentals to the end of the hire term. Position: if ETL terminates without P&I default,
+   P&I pays accrued hire to return/removal plus reasonable removal costs — no future rentals.
+6. One-sided liability / third-party indemnity — ETL 10.1-10.3, as ONE item. Risk HIGH, Priority
+   MUST CHANGE. ETL broadly excludes its own liability, including negligence, with a low cap, while
+   P&I gives ETL a broad third-party indemnity. Position: P&I's indemnity applies only to the
+   extent loss is caused by P&I's negligence, breach or misuse; ETL stays responsible for loss it
+   causes or contributes to. (One item because it is one ask: each party carries its own fault.)
+7. Equipment damage + open-ended loss of hire — ETL 7.1.9-7.1.10. Risk MEDIUM, Priority NEGOTIATE.
+   Responsibility for damage to hired plant in P&I's custody is reasonable; the concern is loss of
+   revenue running until the plant is hireable again or a total loss settles to ETL's satisfaction.
+   Position: loss of hire reasonable, evidenced, subject to mitigation, not duplicating insurance /
+   damage-waiver recovery, and ideally capped to a defined period, e.g. 30 days. Worth negotiating,
+   but not in the same category as personal guarantees or ALLPAAP.
+8. Damage waiver — water exclusion — ETL 9, particularly 9.4.6. Risk MEDIUM, Priority CLARIFY /
+   NEGOTIATE. The waiver excludes loss or damage involving water, which is particularly relevant to
+   P&I's stormwater, wastewater, watermain, deep drainage, excavation and dewatering work. Dan does
+   not automatically reject damage-waiver exclusions, but P&I needs ETL to explain exactly how the
+   water exclusion operates when its plant is used for P&I's normal work. Depending on ETL's
+   response, it could become a higher-risk issue.
+
+Considered but deliberately NOT raised on this pack: site access / repossession rights; the
+supplier determining ownership of disputed goods; ordinary PPSA enforcement mechanics; reasonable
+default interest and collection costs; broad but relatively standard credit-check / privacy
+wording; other normal supplier boilerplate.`
+
 const COMPANY_CONTEXT = `Pipelines & Infrastructure (North) Limited ("P&I") is a New Zealand civil
-construction company specialising in the excavation and installation of large-diameter stormwater,
-wastewater and watermains for local authorities and subdivision projects. To open a trade account
+construction contractor undertaking civil infrastructure work including large-diameter stormwater,
+wastewater, watermains, deep drainage and associated infrastructure works, for local authorities and
+subdivision projects. To open a trade account
 with a supplier, P&I must complete that supplier's credit application form and agree to its attached
 terms and conditions. The directors sign personally where a guarantee is required, so director-level
 exposure matters as much as company-level exposure.`
@@ -179,7 +247,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
   "templateSource": "<the terms template publisher if identifiable from the document's own markings or drafting, e.g. 'EC Credit Control', or null>",
   "summary": "<2-4 sentences: what this document covers and why it matters to the review>",
   "keyFacts": [ { "label": "<e.g. Credit limit sought, Payment terms, Trading name, Guarantors required, Governing law>", "value": "<the fact as stated>" } ],
-  "clauses": [ { "clauseRef": "<clause number/title>", "topic": "<one of: personal guarantee, indemnity, PPSA / security interest, charge over land or real property, default interest, credit limit and payment terms, title and risk, defect or dispute notification, price variation, termination or suspension of supply, limitation of liability, privacy and credit reporting, costs of recovery, unilateral variation of terms, other>", "wording": "<the clause wording, quoted>" } ],
+  "clauses": [ { "clauseRef": "<clause number/title>", "topic": "<one of: personal guarantee, indemnity, PPSA / security interest, charge over land or real property, default interest, credit limit and payment terms, title and risk, defect or dispute notification, price variation, termination or suspension of supply, limitation of liability, privacy and credit reporting, costs of recovery, unilateral variation of terms, other>", "wording": "<the clause wording, quoted>", "page": <the page number this clause starts on within the whole document — if you are told you are reading 'pages N-M' of a file, the first page you see is page N — or null if unknown> } ],
   "signatureRequirements": [ "<who is required to sign what, e.g. 'Directors to sign the Deed of Guarantee at clause 20 personally, witnessed'>" ],
   "incorporatedReferences": [ "<a document, website or term set incorporated by reference that is NOT part of the uploaded pack>" ],
   "risks": [ "<a specific risk to P&I or its directors evident in this document>" ],
@@ -528,7 +596,9 @@ clause a negotiation angle P&I can actually put to the supplier. Where the notes
 something needed for a full assessment, say so rather than guessing. Never invent a clause, figure
 or wording the notes do not support.
 
-${REVIEW_PHILOSOPHY}`
+${REVIEW_PHILOSOPHY}
+
+${HANDOVER_WORKED_EXAMPLE}`
 
 // Stage 2 is built in PIECES, not in one answer, for the same reason it always was: a
 // hard ceiling on how many clauses a pack could contain is a real failure, not a
@@ -569,8 +639,6 @@ register from that.
 Triage every clause you are given. Do not skip one because it looks routine: you cannot rate
 something LIVE WITH without having actually read it, and routine wording is where risk hides.
 
-${REVIEW_PHILOSOPHY}
-
 For a LIVE WITH clause, keep "note" to one short phrase — most clauses land here, and
 elaborating on routine wording is exactly what this triage step exists to avoid. For a
 MUST CHANGE or NEGOTIATE / CLARIFY candidate, give enough for the drafting step to work from
@@ -593,47 +661,54 @@ future debts are each individually a known issue, but taken TOGETHER they are a 
 exposure than any one of them alone. You can only see that by holding the whole candidate set in
 view at once, which is exactly what this step is for.
 
-${REVIEW_PHILOSOPHY}
-
 YOUR JOB, IN ORDER:
 1. Look across every candidate for clauses that work together — a guarantee and the indemnity
    that backs it, a security grant and a cross-company clause that broadens what it secures, a
    termination right and the charge that survives it. EXPLAIN the combination in each item's
    concernReason (cross-reference the item numbers or clause refs it compounds with) — do NOT
    merge them into one row. Each is still its own negotiating ask: the supplier may agree to one
-   and not another, and a director needs to track and decide each on its own. One candidate is one
-   register item, always — Dan's own worked example on this exact pack (the ETL / Modern Transport
-   Group review) keeps the guarantee, the ALLPAAP and the group-company scope as three separate,
-   trackable items even though the reasoning for each explains how they compound. That is the
-   pattern to follow.
+   and not another, and a director needs to track and decide each on its own. Dan's worked example
+   above keeps the director liability, the ALLPAAP and the five-company scope as three separate
+   items even though the reasoning explains how they compound. The test for whether clauses belong
+   in ONE item is whether they are one ask — his item 6 puts ETL 10.1-10.3 (ETL's liability
+   exclusion and P&I's third-party indemnity) in a single item because the ask is single: each
+   party carries its own fault.
 2. Draft the full departure-register entry for each surviving issue — see schema below.
 3. Order the finished register by IMPORTANCE TO P&I, most material first. Never by clause number.
 4. Trim to what is genuinely material. Treat 5-10 as a real target, not a suggestion to ignore —
    a candidate that turns out minor once weighed against the rest of the register can be dropped
    entirely, but never folded into a different item just to hit the target.
 
-LENGTH — Dan's own worked example is the calibration, not a stylistic preference: existingPosition,
-concernReason and proposedPosition each run ONE SHORT SENTENCE (Dan's average: 17-25 words).
-proposedAmendment is the one field allowed a second sentence where the actual wording needs it
-(Dan's average: 35 words — still one or two sentences, not a paragraph). A director reading this
-register needs to see what's wrong and what to do about it at a glance, the same way Dan's own
-register reads — not a legal memo. If you find yourself writing three sentences for
-existingPosition, you are writing the clause-by-clause commentary this redesign replaced.
+LENGTH — Dan's handover asks for commentary that is concise and practical, so a director can see
+what can hurt P&I and what to do about it at a glance: existingPosition, concernReason and
+proposedPosition each run ONE SHORT SENTENCE. proposedAmendment is the one field allowed a second
+sentence where the actual wording needs it — still one or two sentences, not a paragraph. If you
+find yourself writing three sentences for existingPosition, you are writing the long
+clause-by-clause legal commentary the handover says not to produce.
 
-DRAFTING PROPOSED AMENDMENTS — keep them commercial and realistic. P&I's objective is to open the
-account while removing disproportionate exposures, not to rewrite the supplier's entire contract:
-- A personal guarantee: delete it, don't just explain the risk.
-- ALLPAAP: delete it, offer a PMSI over the supplier's own unpaid goods/proceeds instead.
-- Indemnities: "to the extent caused by P&I's negligence, breach or misuse", not unlimited.
-- Loss of hire: require evidence, mitigation, no double recovery, and a defined cap/period.
-- Group-company terms: limit the agreement to the entity P&I is actually opening the account
-  with, unless extension to another is specifically agreed.
+DRAFTING PROPOSED AMENDMENTS — keep them commercial and realistic. Do not try to rewrite the
+supplier's entire contract; P&I's objective is to open the account while removing
+disproportionate exposures:
+- Personal guarantee: delete it rather than merely explaining the risk. Directors sign solely on
+  behalf of P&I.
+- ALLPAAP: delete it and offer a PMSI over the supplier's own unpaid goods/proceeds instead.
+- Indemnities: use "to the extent caused by P&I's negligence, breach or misuse" rather than giving
+  an unlimited indemnity.
+- Loss of hire: require evidence, mitigation, no double recovery and a defined cap/period (Dan's
+  example: 30 days).
+- Group-company terms: limit the agreement to the company P&I is actually opening the account
+  with, unless extension to another entity is specifically agreed.
+State P&I's position as Dan states it — do not pre-offer fallback concessions in the amendment
+(e.g. "if the supplier insists, cap the guarantee at..."). Retreating is a decision for Dan to make
+once the supplier responds, not something to concede in the wording P&I sends first. Where Dan's
+position is to clarify (as with the water exclusion), the amendment is a clear request for the
+supplier to explain, not a demand to delete.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
   "register": [
     {
-      "documentPage": "<which document(s) this ONE issue is in, e.g. 'Credit Application, cl 3.4'>",
+      "documentPage": "<the document and page this ONE issue is on, e.g. 'Credit Application p2' or 'ETL Hire & Sales T&Cs p1' — the page, not the clause number (that goes in clauseRef); if no page is known, the document name alone>",
       "clauseRef": "<the clause reference(s) for THIS ONE issue, e.g. 'Cl. 3.4', or 'Cll. 1.2-1.3 + Declaration' where several sub-clauses are all part of the SAME issue — but never joining together clause refs for DIFFERENT issues that merely interact, e.g. the guarantee clause and the ALLPAAP clause stay two items even though they compound>",
       "clauseIssue": "<short name of the issue, e.g. 'ALLPAAP security over all P&I assets'>",
       "riskRating": "<high | medium | low>",
@@ -871,7 +946,7 @@ async function triageClauseBatch(context, clauses, depth = 0) {
     // register-drafting step quotes and amends — a must_change/negotiate candidate with
     // no wording has nothing to draft an amendment against.
     return rows.length === clauses.length
-      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null, wording: clauses[i].wording || null }))
+      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null, wording: clauses[i].wording || null, page: clauses[i].page ?? null }))
       : rows
   } catch (err) {
     if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
@@ -892,7 +967,8 @@ async function triageClauseBatch(context, clauses, depth = 0) {
         riskRating: 'medium',
         note: 'Could not be triaged automatically — read this clause directly before signing.',
         document: c.document || null,
-        wording: c.wording || null
+        wording: c.wording || null,
+        page: c.page ?? null
       }))
     }
     throw err
@@ -923,8 +999,8 @@ async function buildRegister(candidates) {
   const brief = [
     `Candidates triaged MUST CHANGE or NEGOTIATE / CLARIFY, across the whole pack (${candidates.length}):`,
     JSON.stringify(candidates.map(c => ({
-      clauseRef: c.clauseRef, document: c.document, tier: c.tier, riskRating: c.riskRating,
-      note: c.note, wording: c.wording
+      clauseRef: c.clauseRef, document: c.document, page: c.page ?? null, tier: c.tier,
+      riskRating: c.riskRating, note: c.note, wording: c.wording
     })), null, 2),
     '',
     'Produce the register JSON as specified.'
@@ -940,7 +1016,7 @@ async function buildRegister(candidates) {
     }
   }
   return candidates.map(c => ({
-    documentPage: c.document || null,
+    documentPage: c.page ? `${c.document || 'Document'} p${c.page}` : (c.document || null),
     clauseRef: c.clauseRef,
     clauseIssue: c.note || c.clauseRef,
     riskRating: c.riskRating || 'medium',

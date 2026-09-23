@@ -164,7 +164,7 @@ function registerRow(item, i) {
 
 function registerTable(register) {
   const rows = [headerRow(
-    ['#', 'Document / Page', 'Clause Ref', 'Clause / Issue', 'Risk', 'Existing Position', 'P&I Concern / Reason',
+    ['Item No.', 'Document / Page', 'Clause Reference', 'Clause / Issue', 'Risk Rating', 'Existing Position', 'P&I Concern / Reason',
       'P&I Proposed Position', 'Proposed Amendment / Wording', 'Priority', 'Supplier Response',
       "P&I Follow-up / Final Position", 'Status'],
     REGISTER_WIDTHS,

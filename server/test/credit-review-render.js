@@ -77,8 +77,9 @@ async function main() {
   const rows = await renderRegisterRows(baseReview)
 
   // ---- header carries every column Dan specified, in order ----
+  // Exactly the labels in Dan's handover, "CURRENT DEPARTURE REGISTER STRUCTURE".
   const EXPECTED_HEADERS = [
-    '#', 'Document / Page', 'Clause Ref', 'Clause / Issue', 'Risk', 'Existing Position',
+    'Item No.', 'Document / Page', 'Clause Reference', 'Clause / Issue', 'Risk Rating', 'Existing Position',
     'P&I Concern / Reason', 'P&I Proposed Position', 'Proposed Amendment / Wording',
     'Priority', 'Supplier Response', "P&I Follow-up / Final Position", 'Status'
   ]
