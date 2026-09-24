@@ -7,13 +7,18 @@
 // Promains, Spiral Drillers); this module is that same review, in the portal, so it runs
 // the same way every time without anyone having to re-paste the project instructions.
 //
-// Two stages, same split and same reasons as contractReviewPrompts.js: a credit
-// application is usually one PDF, but the application form and the supplier's terms &
-// conditions often arrive as separate files, and an EC Credit Control terms document on
-// its own can run to 20+ pages of dense clauses. Stage 1 reads ONE document and preserves
-// the actual clause wording; stage 2 turns every digest into the lawyer's review. Working
-// from preserved wording rather than a summary is what lets stage 2 quote a clause back
-// and propose an amendment to it.
+// The OUTPUT shape changed on 23 Sep 2026: Dan Broederlow (GM, 50% shareholder) reviewed
+// the ETL / Modern Transport Group pack himself and set out how he actually wants these
+// done — a DEPARTURE REGISTER of the 5-10 issues that can genuinely hurt P&I, ordered by
+// importance, with clause INTERACTIONS considered, not an exhaustive commentary on every
+// clause a supplier's drafter happened to write. See REVIEW_PHILOSOPHY below for the
+// detail this is built from.
+//
+// Reading stays a document-at-a-time stage: a credit application is usually one PDF, but
+// the application form and the supplier's terms & conditions often arrive as separate
+// files, and an EC Credit Control terms document on its own can run to 20+ pages of dense
+// clauses. That stage reads ONE document and preserves the actual clause wording. What
+// happens to that wording afterward is the new part — see the "stage two" comment below.
 
 const { createHash } = require('crypto')
 const mammoth = require('mammoth')
@@ -35,12 +40,6 @@ const {
   XLSX_RE: XLSX
 } = require('./tenderPrompts')
 
-// The recurring risk themes from the seven completed reviews (handover note §"Recurring
-// Risks to Check"). These are given to BOTH stages: stage 1 so it knows to preserve the
-// wording that decides each one, stage 2 so every review answers all six explicitly
-// instead of only flagging whichever the supplier happened to make obvious. This is the
-// whole point of running the series through one place — the eighth review applies the
-// same amendment positions as the first seven.
 // Every call in this module records what it cost. A review is a dozen calls at high
 // effort and the bill is not obvious from the outside — so the run reports its own, rather
 // than the first anyone hears of it being a declined API key mid-review (16 Sep 2026).
@@ -68,36 +67,162 @@ async function withUsage(fn) {
   }
 }
 
-const RECURRING_RISKS = `P&I's standing risk checklist, drawn from seven completed supplier credit
-application reviews. Address EVERY one of these explicitly in a review, including the ones this
-supplier does NOT impose (say so — "no personal guarantee sought" is a material finding, not a gap):
+// P&I's standing approach to supplier credit application reviews — set by Dan Broederlow
+// (General Manager, 50% shareholder) after personally reviewing the ETL / Modern Transport
+// Group pack (23 Sep 2026), superseding the old per-clause "analyse and print everything"
+// approach that had been in place since the review series began. This governs every review
+// from here, not just that one: a review is a DEPARTURE REGISTER — the same practical
+// commercial risk filter P&I already applies to major construction contracts — not an
+// exhaustive legal commentary on every clause a supplier's drafter happened to write.
+const REVIEW_PHILOSOPHY = `THE OBJECTIVE, in Dan's own words — hold this question in mind for every
+clause: "What are the clauses that could genuinely hurt P&I, its directors, or materially change
+our commercial exposure — and which ones are actually worth negotiating before we sign?"
 
-1. UNLIMITED PERSONAL GUARANTEE (High). All 7 prior suppliers required an unlimited, continuing,
-   joint and several guarantee with a principal debtor clause — no cap, no nil-balance release, no
-   sunset clause. P&I's standing position: insist on a cap tied to the approved credit limit, a
-   release at nil balance, and removal of the principal-debtor wording before any director signs.
-2. EC CREDIT CONTROL TEMPLATE (High). Used by 4 of 7 (Central Landscape, Colas, Promains, Pole
-   Yard). State in the executive summary whether this supplier's terms are the EC Credit Control
-   template — it is recognisable by its clause structure and its PPSA/guarantee/indemnity wording.
-   If it is, the amendment positions already agreed on the Colas review apply directly.
-3. GENERAL PPSA CHARGE (High). 6 of 7 sought a security interest over all present and
-   after-acquired property. P&I's position: negotiate down to a PMSI limited to the unpaid goods
-   actually supplied.
-4. REAL PROPERTY / LAND CHARGE (High). Central Landscape, Pole Yard and Promains included
-   mechanisms to register a charge or caveat over the directors' real property or P&I's land. Any
-   such clause must be checked against P&I's existing bank security before signing — flag it as a
-   condition precedent.
-5. DEFAULT INTEREST (Medium). Prior rates ran from 18% to ~34.5% p.a. compounding. Flag anything
-   above 12% p.a. for amendment, and say whether it compounds.
-6. DEFECT / DISPUTE NOTIFICATION WINDOW (Medium). 7-day windows (Central Landscape, Promains) are
-   too short for P&I's site cycles. Push for 20-30 working days for latent defects.`
+THE FILTER: this is a practical commercial risk review, similar to the departure-register process
+P&I uses for major construction contracts — not a long clause-by-clause legal commentary. Do not
+turn every supplier-friendly clause into a legal issue. A clause being one-sided does NOT
+automatically make it a departure — consider the practical likelihood and consequence for P&I. The finished register should generally hold only the important issues: preferably 5-10,
+not 15-20 minor observations. Order it by IMPORTANCE TO P&I, never by clause number.
+
+ALWAYS HUNT FOR (the recurring pattern P&I has been burned by, or nearly was):
+- Personal guarantees and director undertakings, INCLUDING liability hidden in a signature or
+  authority clause. A signatory can become personally liable even after a company-level guarantee
+  is removed — check BOTH the credit application's own declaration AND any liability the supplier's
+  terms attach to whoever physically signs an individual order or hire agreement. These can be two
+  separate traps in the same pack, not one.
+- ALLPAAP / general security interests over all of P&I's present and after-acquired property.
+  ALWAYS distinguish this from a normal supplier PMSI — a security interest limited to the goods
+  that supplier actually supplied and remain unpaid, plus their identifiable proceeds. P&I is
+  comfortable with an ordinary PMSI and NOT comfortable with an ALLPAAP. Treating the two as
+  equivalent, or rating them the same, is a mistake.
+- Cross-company / group-company liability (one credit application or guarantee covering several
+  related legal entities) and cross-default provisions. A group arrangement by itself is not
+  necessarily unacceptable and can be administratively convenient — the concern is what it
+  combines with (see CLAUSE INTERACTIONS below). If the personal guarantee and ALLPAAP are
+  removed, a group-wide arrangement becomes considerably less concerning.
+- Security for future debts, not just the current transaction.
+- Broad PPSA contracting-out (waiving Part 9 debtor protections).
+- Broad or unlimited indemnities running one way, especially where the supplier's own liability is
+  simultaneously excluded or capped low.
+- Open-ended loss-of-hire / loss-of-revenue claims with no defined cap or period. Responsibility for
+  damage to hired plant while in P&I's custody is reasonable — the concern is the additional,
+  potentially open-ended loss-of-revenue exposure on top of it. Worth negotiating, but not in the
+  same category as personal guarantees or ALLPAAP.
+- Termination charges — particularly termination for convenience (no default by P&I) that still
+  leaves P&I paying for the remainder of a fixed term.
+- Unreasonable default interest or recovery costs.
+- Insurance or damage-waiver exclusions relevant to P&I's ACTUAL work — stormwater, wastewater,
+  watermains, deep drainage, excavations, dewatering and working around water. Do not
+  automatically reject damage-waiver exclusions; an exclusion like "loss or damage involving
+  water" needs the supplier to explain exactly how it operates when its plant is used for P&I's
+  normal work. That makes it a CLARIFY / NEGOTIATE item by default, not a must-change — depending
+  on the supplier's answer it could become a higher-risk issue.
+
+MOST IMPORTANTLY — CLAUSE INTERACTIONS, NOT JUST CLAUSES IN ISOLATION: look at how clauses work
+together. Five related companies, on their own, might be administratively convenient. A director
+personal undertaking, on its own, is a known issue to negotiate. An ALLPAAP security interest, on
+its own, is a known issue to negotiate. Security extending to future debts, on its own, is ordinary.
+But group-wide credit + a director personal undertaking + ALLPAAP + future debts, taken TOGETHER, is
+a materially larger and more concerning exposure than any one of those provisions considered alone —
+say so explicitly. This means EXPLAINING the combination, not MERGING the items: each of those four
+is still its own negotiating ask (ETL may agree to drop the ALLPAAP and refuse to restrict the
+account to one entity, or vice versa — a director needs to be able to track and decide each one on
+its own). Dan's handover lists the director liability, the ALLPAAP and the five-company scope as
+three separate items and explains the combined exposure in the reasoning — that is the pattern to
+follow, not one item covering several different issues.
+
+LIVE WITH BY DEFAULT — a standing default across every review, not just this one. Do not re-add
+these items unless something materially unusual appears in this particular document (an unusual
+rate, mechanism or scope, not just the clause's mere presence) — the next supplier's pack
+containing one of these is not, by itself, a reason to raise it either:
+- Ordinary site access / repossession rights. P&I works on third-party sites, so this is never
+  ideal, but it is a known, low-practical-risk item — not worth negotiating capital on.
+- The supplier determining ownership of disputed goods.
+- Ordinary PPSA enforcement mechanics (as distinct from an ALLPAAP grant itself, above).
+- Reasonable default interest and normal collection/recovery costs.
+- Standard credit-check / privacy consent wording.
+- Other ordinary supplier boilerplate — governing law, notices, title retention, standard
+  warranties.
+
+THE THREE-TIER CALL — this is the decision, not riskRating alone:
+- MUST CHANGE: material exposure that P&I should actively push back on.
+- NEGOTIATE / CLARIFY: not ideal, but commercially manageable. Raise it if worthwhile, but don't
+  necessarily hold up the account.
+- LIVE WITH: normal supplier protection or low practical risk. Do not waste negotiating capital
+  on it — and do not print it in the register at all.
+
+WHAT DAN NEEDS TO BE ABLE TO DO WITH THIS, AT A GLANCE — the standard the whole register is judged
+against: he wants to look at it and immediately understand "What can actually hurt us? What should
+we push back on? What can we live with? What wording do we send them?" Avoid turning ordinary
+supplier Terms of Trade into the equivalent of negotiating a major construction subcontract. The
+objective is focused commercial risk management, not legal perfection.`
+
+// The "ETL / Modern Transport Group — current position" section of Dan's handover: his own
+// eight issues on that pack, each with the risk, priority and position he chose. Given to
+// the stage-2 calls (triage, register, overall) as calibration — how Dan actually rates and
+// positions things — because without it the register rated his two MEDIUM items (loss of
+// hire, the water exclusion) HIGH / Must Change and offered a capped-guarantee fallback he
+// never offered (23 Sep 2026). Not given to the reading stage, which only preserves wording.
+const HANDOVER_WORKED_EXAMPLE = `DAN'S WORKED EXAMPLE — ETL / Modern Transport Group (Credit Application + ETL Hire & Sales
+Terms). Dan reviewed this pack himself and reduced it to 8 material issues, in this priority order.
+Use it to calibrate how he rates risk, sets priority and states P&I's position. It is NOT a
+description of the pack in front of you (unless that pack is ETL's) — never import an issue from
+it that is not actually in the documents you are reviewing.
+
+1. Director personal liability — Credit Application, Limited Companies declaration. Risk HIGH,
+   Priority MUST CHANGE. The directors jointly accept liability for credit extended and undertake to
+   pay if P&I fails to meet its obligations. Position: directors sign solely on behalf of P&I — no
+   personal guarantee or personal liability. One of the biggest issues.
+2. Personal liability of the person signing an ETL hire contract — ETL 7.3. Risk HIGH, Priority
+   MUST CHANGE. The person signing for a corporate hirer "will, in any event, be personally liable".
+   Even with the guarantee removed from the credit application, this recreates personal liability
+   whenever a P&I director or employee signs an individual hire contract. Position: delete the
+   personal liability; the signatory may warrant authority to bind P&I, liability stays with P&I.
+3. ALLPAAP security — Credit Application 3.4. Risk HIGH, Priority MUST CHANGE. Security over all of
+   P&I's present and after-acquired personal property for money owing now and in the future.
+   Position: delete the ALLPAAP; restrict security to unpaid goods supplied by the relevant
+   supplier and identifiable proceeds (P&I is comfortable with a normal PMSI / retention of title).
+4. Credit application covers five Modern Group companies — Credit Application 1.2-1.3 + Limited
+   Companies declaration. Risk HIGH in combination with the other provisions, Priority MUST CHANGE /
+   CLARIFY. The group arrangement by itself is not necessarily unacceptable and could be
+   administratively convenient; the concern is five companies + director undertaking + ALLPAAP +
+   future debts together. Position: the credit application applies to Equipment and Transport
+   Leasing Ltd only unless P&I separately agrees in writing to extend it. If the guarantee and
+   ALLPAAP are removed, the group-wide arrangement becomes considerably less concerning.
+5. Termination without cause + future rentals — ETL 5.2 / 5.4.2. Risk HIGH, Priority MUST CHANGE.
+   ETL can terminate hire without reason on 48 hours' notice, and P&I may then have to pay the
+   remaining rentals to the end of the hire term. Position: if ETL terminates without P&I default,
+   P&I pays accrued hire to return/removal plus reasonable removal costs — no future rentals.
+6. One-sided liability / third-party indemnity — ETL 10.1-10.3, as ONE item. Risk HIGH, Priority
+   MUST CHANGE. ETL broadly excludes its own liability, including negligence, with a low cap, while
+   P&I gives ETL a broad third-party indemnity. Position: P&I's indemnity applies only to the
+   extent loss is caused by P&I's negligence, breach or misuse; ETL stays responsible for loss it
+   causes or contributes to. (One item because it is one ask: each party carries its own fault.)
+7. Equipment damage + open-ended loss of hire — ETL 7.1.9-7.1.10. Risk MEDIUM, Priority NEGOTIATE.
+   Responsibility for damage to hired plant in P&I's custody is reasonable; the concern is loss of
+   revenue running until the plant is hireable again or a total loss settles to ETL's satisfaction.
+   Position: loss of hire reasonable, evidenced, subject to mitigation, not duplicating insurance /
+   damage-waiver recovery, and ideally capped to a defined period, e.g. 30 days. Worth negotiating,
+   but not in the same category as personal guarantees or ALLPAAP.
+8. Damage waiver — water exclusion — ETL 9, particularly 9.4.6. Risk MEDIUM, Priority CLARIFY /
+   NEGOTIATE. The waiver excludes loss or damage involving water, which is particularly relevant to
+   P&I's stormwater, wastewater, watermain, deep drainage, excavation and dewatering work. Dan does
+   not automatically reject damage-waiver exclusions, but P&I needs ETL to explain exactly how the
+   water exclusion operates when its plant is used for P&I's normal work. Depending on ETL's
+   response, it could become a higher-risk issue.
+
+Considered but deliberately NOT raised on this pack: site access / repossession rights; the
+supplier determining ownership of disputed goods; ordinary PPSA enforcement mechanics; reasonable
+default interest and collection costs; broad but relatively standard credit-check / privacy
+wording; other normal supplier boilerplate.`
 
 const COMPANY_CONTEXT = `Pipelines & Infrastructure (North) Limited ("P&I") is a New Zealand civil
 construction contractor undertaking civil infrastructure work including large-diameter stormwater,
 wastewater, watermains, deep drainage and associated infrastructure works, for local authorities and
-subdivision projects. To open a trade account with a supplier, P&I must complete that supplier's
-credit application form and agree to its attached terms and conditions. The directors sign personally
-where a guarantee is required, so director-level exposure matters as much as company-level exposure.`
+subdivision projects. To open a trade account
+with a supplier, P&I must complete that supplier's credit application form and agree to its attached
+terms and conditions. The directors sign personally where a guarantee is required, so director-level
+exposure matters as much as company-level exposure.`
 
 // ---------------------------------------------------------------- stage one
 
@@ -113,7 +238,7 @@ wording rather than describing it in general terms. Never invent wording that is
 document. Guarantee, indemnity, PPSA/security, charge-over-land, interest, and dispute/defect
 notification clauses are the ones a summary always loses — quote those in full, however long.
 
-${RECURRING_RISKS}
+${REVIEW_PHILOSOPHY}
 
 Return ONLY valid JSON (no markdown fences, no explanation) matching exactly this schema:
 {
@@ -122,7 +247,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) matching exactly thi
   "templateSource": "<the terms template publisher if identifiable from the document's own markings or drafting, e.g. 'EC Credit Control', or null>",
   "summary": "<2-4 sentences: what this document covers and why it matters to the review>",
   "keyFacts": [ { "label": "<e.g. Credit limit sought, Payment terms, Trading name, Guarantors required, Governing law>", "value": "<the fact as stated>" } ],
-  "clauses": [ { "clauseRef": "<clause number/title>", "topic": "<one of: personal guarantee, indemnity, PPSA / security interest, charge over land or real property, default interest, credit limit and payment terms, title and risk, defect or dispute notification, price variation, termination or suspension of supply, limitation of liability, privacy and credit reporting, costs of recovery, unilateral variation of terms, other>", "wording": "<the clause wording, quoted>" } ],
+  "clauses": [ { "clauseRef": "<clause number/title>", "topic": "<one of: personal guarantee, indemnity, PPSA / security interest, charge over land or real property, default interest, credit limit and payment terms, title and risk, defect or dispute notification, price variation, termination or suspension of supply, limitation of liability, privacy and credit reporting, costs of recovery, unilateral variation of terms, other>", "wording": "<the clause wording, quoted>", "page": <the page number this clause starts on within the whole document — if you are told you are reading 'pages N-M' of a file, the first page you see is page N — or null if unknown> } ],
   "signatureRequirements": [ "<who is required to sign what, e.g. 'Directors to sign the Deed of Guarantee at clause 20 personally, witnessed'>" ],
   "incorporatedReferences": [ "<a document, website or term set incorporated by reference that is NOT part of the uploaded pack>" ],
   "risks": [ "<a specific risk to P&I or its directors evident in this document>" ],
@@ -471,130 +596,160 @@ clause a negotiation angle P&I can actually put to the supplier. Where the notes
 something needed for a full assessment, say so rather than guessing. Never invent a clause, figure
 or wording the notes do not support.
 
-${RECURRING_RISKS}`
+${REVIEW_PHILOSOPHY}
 
-// Stage 2 is built in PIECES, not in one answer. Asking for the whole review at once —
-// every clause analysed, the six-risk checklist, director exposure, the summary — put a
-// hard ceiling on how many clauses a pack could contain: Franklin Smith's terms of
-// business (16 Sep 2026) had more, and the run failed outright, with nothing to show for
-// the reading that had already succeeded. Telling the user to split the pack by hand was
-// not a fix.
+${HANDOVER_WORKED_EXAMPLE}`
+
+// Stage 2 is built in PIECES, not in one answer, for the same reason it always was: a
+// hard ceiling on how many clauses a pack could contain is a real failure, not a
+// hypothetical one — Franklin Smith's terms of business (16 Sep 2026) once overflowed a
+// single response outright, with nothing to show for the reading that had already
+// succeeded. But the shape of the pieces changed on 23 Sep 2026, when Dan Broederlow (GM,
+// 50% shareholder) set out how he actually wants these reviewed after doing the ETL /
+// Modern Transport Group pack himself: a DEPARTURE REGISTER — 5-10 material issues,
+// ordered by importance, with clause INTERACTIONS considered — not a row for every clause
+// a supplier's drafter happened to write. See REVIEW_PHILOSOPHY above for the detail.
 //
-// So the clauses are analysed in batches, and each remaining section gets its own call.
-// Nothing here scales with the size of the pack except the NUMBER of calls, so there is
-// no pack big enough to overflow a single response. It also reads better: the summary and
-// the overall recommendation are written last, with the finished clause analysis in front
-// of them, rather than everything being produced in one pass.
+// Three pieces now, not two:
+//   1. TRIAGE (batched, cheap) — every clause, sorted into must_change / negotiate /
+//      live_with. Nothing is skipped (you cannot rate something live_with without having
+//      read it), but most output is one short phrase, because most clauses ARE live_with
+//      on a well-drafted pack.
+//   2. REGISTER (one call, deliberately NOT batched) — every must_change/negotiate
+//      candidate from the WHOLE pack, together. This is the step that can see "group-wide
+//      credit + a director undertaking + ALLPAAP + future debts" as one combined issue
+//      rather than four separate ones, which is only possible if it holds the whole
+//      candidate set in view at once — batching this step would defeat its own purpose.
+//   3. OVERALL — supplier identity, a short introduction, and the recommendation, written
+//      last from the finished register.
 
 // Ten clauses at a time at maximum effort was measured taking 236s and then returning
 // nothing at all — the whole token budget went on thinking. Five at high effort is the
 // same total work in more, shorter calls, which is the trade this module keeps making.
 const CLAUSES_PER_BATCH = 5
 
-const CLAUSE_SYSTEM = `${REVIEW_PREAMBLE}
+const TRIAGE_SYSTEM = `${REVIEW_PREAMBLE}
 
-You are analysing ONE BATCH of clauses from the pack — not the whole review. Another step
-writes the summary and the overall recommendation from your analysis and the other batches.
+You are triaging ONE BATCH of clauses from the pack against P&I's standing filter below —
+deciding which tier each belongs in. You are NOT drafting the register yet: a later step takes
+every clause any batch rates MUST CHANGE or NEGOTIATE / CLARIFY, looks at them TOGETHER —
+including how they interact with each other, not just within this batch — and drafts the final
+register from that.
 
-Analyse every clause you are given. Do not skip one because it looks routine: routine wording is
-where risk hides in a credit application. If two clauses in the batch work together (a guarantee
-and the indemnity that backs it), say so in whyItMatters.
+Triage every clause you are given. Do not skip one because it looks routine: you cannot rate
+something LIVE WITH without having actually read it, and routine wording is where risk hides.
 
-RISK RATING RUBRIC — apply consistently, because the rating decides how the clause is presented to
-the directors, not just how it reads:
-- HIGH: uncapped or open-ended exposure for P&I or its directors personally — personal liability,
-  an unlimited indemnity, a general security interest over all present and after-acquired property,
-  a charge over real property, punitive default interest, or a one-sided termination/access right.
-  Anything a director should not sign without amendment.
-- MEDIUM: a real, negotiable commercial risk that is capped or already common in NZ trade credit —
-  a defect notification window that is a little short, an ordinary PMSI, a modest price-variation
-  clause. Worth raising with the supplier, not a reason to withhold signature.
-  Do not rate something MEDIUM merely because it is not perfectly balanced — every commercial
-  contract favours the drafting party somewhat. Rate it against what a director would actually
-  want changed before signing.
-- LOW: standard NZ trade-credit or Consumer Guarantees Act boilerplate that P&I would accept
-  unchanged in any comparable supplier agreement — governing law, notices, title retention pending
-  payment, ordinary privacy/credit-reporting consent. This is the majority rating on a well-drafted
-  pack, not the exception.
-
-Keep every field to its stated length regardless of riskRating — length signals nothing; the
-riskRating and negotiationAngle carry the signal. A HIGH-risk clause explained in two sentences is
-not under-analysed; a LOW-risk clause explained in five is over-written.
+For a LIVE WITH clause, keep "note" to one short phrase — most clauses land here, and
+elaborating on routine wording is exactly what this triage step exists to avoid. For a
+MUST CHANGE or NEGOTIATE / CLARIFY candidate, give enough for the drafting step to work from
+without going back to the source: what the clause actually does, and why it matters to P&I
+specifically.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "clauseAnalysis": [ { "clauseRef": "<clause number / title, as given>", "riskRating": "<high | medium | low>", "plainEnglish": "<one or two sentences: what it means>", "whyItMatters": "<one or two sentences: the commercial or director impact on P&I specifically>", "recommendedPosition": "<accept | amend | reject>", "negotiationAngle": "<one sentence: the actual amendment to ask for; null if accepting as is>" } ]
+  "triage": [ { "clauseRef": "<clause number / title, as given>", "tier": "<must_change | negotiate | live_with — the three tiers are MUST CHANGE, NEGOTIATE / CLARIFY, and LIVE WITH>", "riskRating": "<high | medium | low>", "note": "<LIVE WITH: one short phrase why it's fine. MUST CHANGE / NEGOTIATE / CLARIFY: 1-2 sentences on what it does and why it matters to P&I>" } ]
 }
 One entry per clause given, in the order given.`
 
-const CHECKLIST_SYSTEM = `${REVIEW_PREAMBLE}
+const REGISTER_SYSTEM = `${REVIEW_PREAMBLE}
 
-You are answering P&I's standing risk checklist against this pack — not writing the whole review.
+Every clause in the pack has already been triaged. You are given every clause triaged MUST CHANGE
+or NEGOTIATE / CLARIFY, from the WHOLE pack, together — not batched by document or clause number.
+That is deliberate: P&I's clearest example of why is its own ETL / Modern Transport Group review —
+group-wide credit, a director personal undertaking, an ALLPAAP security interest and security for
+future debts are each individually a known issue, but taken TOGETHER they are a materially larger
+exposure than any one of them alone. You can only see that by holding the whole candidate set in
+view at once, which is exactly what this step is for.
+
+YOUR JOB, IN ORDER:
+1. Look across every candidate for clauses that work together — a guarantee and the indemnity
+   that backs it, a security grant and a cross-company clause that broadens what it secures, a
+   termination right and the charge that survives it. EXPLAIN the combination in each item's
+   concernReason (cross-reference the item numbers or clause refs it compounds with) — do NOT
+   merge them into one row. Each is still its own negotiating ask: the supplier may agree to one
+   and not another, and a director needs to track and decide each on its own. Dan's worked example
+   above keeps the director liability, the ALLPAAP and the five-company scope as three separate
+   items even though the reasoning explains how they compound. The test for whether clauses belong
+   in ONE item is whether they are one ask — his item 6 puts ETL 10.1-10.3 (ETL's liability
+   exclusion and P&I's third-party indemnity) in a single item because the ask is single: each
+   party carries its own fault.
+2. Draft the full departure-register entry for each surviving issue — see schema below.
+3. Order the finished register by IMPORTANCE TO P&I, most material first. Never by clause number.
+4. Trim to what is genuinely material. Treat 5-10 as a real target, not a suggestion to ignore —
+   a candidate that turns out minor once weighed against the rest of the register can be dropped
+   entirely, but never folded into a different item just to hit the target.
+
+LENGTH — Dan's handover asks for commentary that is concise and practical, so a director can see
+what can hurt P&I and what to do about it at a glance: existingPosition, concernReason and
+proposedPosition each run ONE SHORT SENTENCE. proposedAmendment is the one field allowed a second
+sentence where the actual wording needs it — still one or two sentences, not a paragraph. If you
+find yourself writing three sentences for existingPosition, you are writing the long
+clause-by-clause legal commentary the handover says not to produce.
+
+DRAFTING PROPOSED AMENDMENTS — keep them commercial and realistic. Do not try to rewrite the
+supplier's entire contract; P&I's objective is to open the account while removing
+disproportionate exposures:
+- Personal guarantee: delete it rather than merely explaining the risk. Directors sign solely on
+  behalf of P&I.
+- ALLPAAP: delete it and offer a PMSI over the supplier's own unpaid goods/proceeds instead.
+- Indemnities: use "to the extent caused by P&I's negligence, breach or misuse" rather than giving
+  an unlimited indemnity.
+- Loss of hire: require evidence, mitigation, no double recovery and a defined cap/period (Dan's
+  example: 30 days).
+- Group-company terms: limit the agreement to the company P&I is actually opening the account
+  with, unless extension to another entity is specifically agreed.
+State P&I's position as Dan states it — do not pre-offer fallback concessions in the amendment
+(e.g. "if the supplier insists, cap the guarantee at..."). Retreating is a decision for Dan to make
+once the supplier responds, not something to concede in the wording P&I sends first. Where Dan's
+position is to clarify (as with the water exclusion), the amendment is a clear request for the
+supplier to explain, not a demand to delete.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "standingRiskChecklist": [ { "risk": "<unlimited personal guarantee | EC Credit Control template | general PPSA charge | real property / land charge | default interest | defect or dispute notification window>", "present": true, "detail": "<what this supplier's pack actually does about it, quoting the clause reference; if not present, say so plainly>", "riskRating": "<high | medium | low | not applicable>" } ],
-  "templateSource": "<the terms template publisher if identifiable, e.g. 'EC Credit Control', else null>"
+  "register": [
+    {
+      "documentPage": "<the document and page this ONE issue is on, e.g. 'Credit Application p2' or 'ETL Hire & Sales T&Cs p1' — the page, not the clause number (that goes in clauseRef); if no page is known, the document name alone>",
+      "clauseRef": "<the clause reference(s) for THIS ONE issue, e.g. 'Cl. 3.4', or 'Cll. 1.2-1.3 + Declaration' where several sub-clauses are all part of the SAME issue — but never joining together clause refs for DIFFERENT issues that merely interact, e.g. the guarantee clause and the ALLPAAP clause stay two items even though they compound>",
+      "clauseIssue": "<short name of the issue, e.g. 'ALLPAAP security over all P&I assets'>",
+      "riskRating": "<high | medium | low>",
+      "existingPosition": "<what the clause currently says/does — ONE short sentence, ~20 words>",
+      "concernReason": "<why this matters to P&I specifically — ONE short sentence, ~20 words; if this compounds with another item, say so here in a few words, e.g. 'Combined with item 3's group-company scope, this reaches well beyond the ETL account P&I intended.'>",
+      "proposedPosition": "<what P&I's position should be — ONE short sentence, ~15-20 words>",
+      "proposedAmendment": "<the actual wording/instruction to put to the supplier — one or two sentences, ~30-40 words>",
+      "priority": "<must_change | negotiate | acceptable_if_required>"
+    }
+  ]
 }
-Exactly six entries, one per checklist item, in the order listed above. Use "present": false and
-riskRating "not applicable" for any this supplier does not impose — that is a finding, not a gap.`
+One DISTINCT NEGOTIATING ASK is one item — combining a clause's own sub-references (cl 1.2-1.3, or
+a clause plus the declaration that goes with it) into one item is fine when they are genuinely the
+same issue. Combining DIFFERENT issues into one item because they interact is not — that
+compounding belongs in each item's concernReason as a cross-reference, never as a merged row.`
 
-const SUMMARY_SYSTEM = `${REVIEW_PREAMBLE}
+const OVERALL_SYSTEM = `${REVIEW_PREAMBLE}
 
-The clause-by-clause analysis and the standing risk checklist are already done and are given to
-you below. Your job is the parts that depend on seeing the whole picture: the plain-English
-summary a director reads first, their personal exposure, the priority amendments, how this
-supplier compares with normal NZ practice, and the overall recommendation.
+The departure register is already drafted and given to you below. Your job is the parts that
+depend on seeing the finished register as a whole: the supplier's identity, a short practical
+introduction, and the overall recommendation.
 
-Work only from the analysis and notes given. Never introduce a clause or figure that is not in
-them. Write for a director, not a lawyer.
+Keep it concise and practical — this exists so a director can look at it and immediately
+understand what can actually hurt P&I, what's worth pushing back on, and what to live with. This
+is a commercial risk review, not a legal treatise.
 
-Two sections deserve particular care because they are what P&I actually acts on:
-
-PRIORITY AMENDMENTS — an ordered list of what must change before anyone signs, most important
-first, each naming the clause it applies to. These are handed to the supplier as P&I's
-negotiating position, so each one must state the actual amendment, not the concern.
-
-INDUSTRY COMPARISON — a table setting this supplier's position against normal NZ construction
-trade credit practice, feature by feature (payment terms, default interest, personal guarantee,
-PPSA/security, defect notification window, set-off, price variation, liability, and anything else
-material in this pack). This is what turns "this clause is harsh" into "this clause is harsher
-than the market", and it is the evidence behind the positioning call. Give the industry norm as a
-figure or plain description where one exists (e.g. "10-15% p.a.", "20th of the following month",
-"20-30 working days"). Assessment must be one of: standard | reasonable | somewhat aggressive |
-aggressive | unusually aggressive.
+Work only from the register and notes given. Never introduce a clause or figure that is not in
+them.
 
 Return ONLY valid JSON (no markdown fences, no explanation):
 {
-  "supplierName": "<the supplier's LEGAL ENTITY NAME ONLY, e.g. 'Timberworld East Tamaki Ltd' — no description, no parenthetical about group companies, no trailing clause. Anything about related or group companies being bound belongs in keyClausesSummary, not here; this name is used as the document's title and filename>",
+  "supplierName": "<the supplier's LEGAL ENTITY NAME ONLY, e.g. 'Equipment and Transport Leasing Limited' — no description, no parenthetical about group companies, no trailing clause>",
   "supplierTrade": "<what this supplier supplies, in a few words>",
-  "documentsSubtitle": "<the documents this review covers, as a subtitle, e.g. 'Credit Account Application & Terms of Trade'>",
-  "documentsSummary": "<the documents with their sizes, e.g. 'Credit Account Application (4pp)  |  Terms of Trade (24 clauses, 4pp)'>",
-  "keyClausesSummary": "<4-8 paragraphs of plain-English narrative: who the supplier is and what they supply to P&I; whether these are a known template (EC Credit Control) and what that means; the most significant provision and why; anything unusual not seen in the other reviews; the guarantee position; and anything genuinely favourable, said plainly>",
-  "directorExposure": {
-    "guaranteeRequired": true,
-    "summary": "<what the directors are personally on the hook for if they sign as drafted>",
-    "priorityAmendments": [ "<the specific amendment a director should require before signing>" ],
-    "independentAdviceRecommended": true
-  },
-  "priorityAmendments": [ { "priority": 1, "action": "<the actual amendment to demand, in the imperative>", "clauseRef": "<the clause it applies to>" } ],
-  "nonStandardPractice": [ "<anything inconsistent with normal NZ construction industry credit practice, and why>" ],
-  "industryComparison": [ { "feature": "<e.g. Personal guarantee>", "nzStandard": "<the normal NZ position>", "supplierPosition": "<what this supplier requires>", "assessment": "<standard | reasonable | somewhat aggressive | aggressive | unusually aggressive>" } ],
-  "positioningNarrative": "<1-2 paragraphs answering: is this standard supplier positioning or unusually aggressive, judged against what a supplier of this kind normally asks for>",
+  "documentsSubtitle": "<the documents this review covers, as a subtitle, e.g. 'Credit Application & Hire Terms'>",
+  "documentsSummary": "<the documents with their sizes, e.g. 'Credit Application (3pp)  |  Hire Terms (1pp)'>",
+  "introduction": "<2-4 sentences: who the supplier is and what they supply to P&I, whether this is a recognisable template, and the overall shape of the exposure — practical, not a legal treatise>",
   "overallRisk": {
-    "topRisks": [ { "title": "<short name of the risk>", "detail": "<2-4 sentences: what it is and what it exposes P&I to, with the clause reference>" } ],
-    "positioning": "<standard | firm but not unusual | unusually aggressive>",
-    "positioningReason": "<one or two sentences supporting that assessment>",
     "recommendation": "<accept_as_is | accept_with_amendment | do_not_sign>",
-    "recommendationReason": "<one short paragraph, written to sit at the TOP of the review as the first thing a director reads: the verdict and the two or three things that drive it>"
+    "recommendationReason": "<one short paragraph, written to sit at the TOP of the review as the first thing a director reads: the verdict and the two or three things that actually drive it>"
   }
-}
-topRisks must have exactly three entries.
-
-priorityAmendments: AT MOST EIGHT, numbered from 1 in order of importance. This list is what P&I
-puts to the supplier, and a list of eighteen "priorities" is not a negotiating position — it is a
-wish list that gets ignored wholesale. Choose the ones that must change before a director signs
-and fold the rest into the clause table's Recommended Position column, where they already sit.`
+}`
 
 function buildPackContext({ supplierName, notes, documents = [], keyFacts = [] }) {
   const read = documents.filter(d => d.read)
@@ -752,9 +907,9 @@ async function digestPart({ filename, buffer, part }) {
 // request so that no single request grows with the size of the pack — a 300-clause pack
 // is 30 short requests, not one long one that a serverless function kills halfway
 // through, losing every batch that had already succeeded.
-async function analyseClauses({ supplierName, notes, documents, keyFacts, clauses }) {
+async function analyseTriage({ supplierName, notes, documents, keyFacts, clauses }) {
   const context = buildPackContext({ supplierName, notes, documents, keyFacts })
-  return analyseClauseBatch(context, clauses || [])
+  return triageClauseBatch(context, clauses || [])
 }
 
 function batchClauses(clauses, size = CLAUSES_PER_BATCH) {
@@ -765,66 +920,64 @@ function batchClauses(clauses, size = CLAUSES_PER_BATCH) {
 
 // One batch of clauses, halving itself if even that batch overruns — the same treatment
 // the reading stage gets, for the same reason.
-async function analyseClauseBatch(context, clauses, depth = 0) {
+async function triageClauseBatch(context, clauses, depth = 0) {
   if (!clauses.length) return []
   const brief = [
     context,
     '',
-    `Analyse these ${clauses.length} clause(s):`,
+    `Triage these ${clauses.length} clause(s):`,
     JSON.stringify(clauses, null, 2),
     '',
-    'Produce the clauseAnalysis JSON as specified.'
+    'Produce the triage JSON as specified.'
   ].join('\n')
   try {
     const out = await callClaude({
-      system: CLAUSE_SYSTEM,
+      system: TRIAGE_SYSTEM,
       content: [{ type: 'text', text: brief }],
       maxTokens: 16000,
       effort: 'high'
     })
-    const rows = Array.isArray(out?.clauseAnalysis) ? out.clauseAnalysis : []
-    // The analysis comes back as analysis only — it does not echo which document the
-    // clause came from, or the verbatim wording it was given (that would just be the
-    // model re-typing it back, wasted output tokens for no gain). Both are re-attached
-    // by position afterwards, and only when the counts agree — a mismatch means the order
-    // cannot be trusted and a wrong label is worse than none. `document` drives the
-    // PART A / PART B grouping in the review; `wording` is what a phase-2 amendment
-    // document quotes and marks up — without it, a "Yes, pursue this" decision has
-    // nothing to show the supplier.
+    const rows = Array.isArray(out?.triage) ? out.triage : []
+    // The triage comes back as triage only — it does not echo which document the clause
+    // came from, or the verbatim wording it was given (that would just be the model
+    // re-typing it back, wasted output tokens for no gain). Both are re-attached by
+    // position afterwards, and only when the counts agree — a mismatch means the order
+    // cannot be trusted and a wrong label is worse than none. `wording` is what the
+    // register-drafting step quotes and amends — a must_change/negotiate candidate with
+    // no wording has nothing to draft an amendment against.
     return rows.length === clauses.length
-      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null, wording: clauses[i].wording || null }))
+      ? rows.map((row, i) => ({ ...row, document: clauses[i].document || null, wording: clauses[i].wording || null, page: clauses[i].page ?? null }))
       : rows
   } catch (err) {
     if ((err.isMaxTokens || err.isBadJson) && clauses.length > 1 && depth < 5) {
       const mid = Math.ceil(clauses.length / 2)
       const [a, b] = await Promise.all([
-        analyseClauseBatch(context, clauses.slice(0, mid), depth + 1),
-        analyseClauseBatch(context, clauses.slice(mid), depth + 1)
+        triageClauseBatch(context, clauses.slice(0, mid), depth + 1),
+        triageClauseBatch(context, clauses.slice(mid), depth + 1)
       ])
       return [...a, ...b]
     }
     if (err.isMaxTokens || err.isBadJson) {
-      // One clause alone could not be analysed. Losing it silently would leave a review
-      // that looks complete — surface it as a row the reader can see and chase.
+      // A clause that could not be triaged automatically defaults to a candidate, never
+      // to live_with — silently waving through something unreadable would be worse than
+      // one extra register item a director can dismiss on sight.
       return clauses.map(c => ({
         clauseRef: c.clauseRef || 'Unidentified clause',
-        riskRating: 'high',
-        plainEnglish: 'This clause could not be analysed automatically.',
-        whyItMatters: 'It is in the pack but is not covered by this review — read it yourself before signing.',
-        recommendedPosition: 'amend',
-        negotiationAngle: null,
+        tier: 'negotiate',
+        riskRating: 'medium',
+        note: 'Could not be triaged automatically — read this clause directly before signing.',
         document: c.document || null,
-        wording: c.wording || null
+        wording: c.wording || null,
+        page: c.page ?? null
       }))
     }
     throw err
   }
 }
 
-// The last two calls: the standing checklist, and the summary written from the finished
-// clause analysis. Both are fixed-size regardless of how big the pack was — the checklist
-// is always six rows, and the summary reads the analysis rather than the raw pack — so
-// this request does not grow with the pack either.
+// The last two calls: the register, and the overall summary written from the finished
+// register. Both are fixed-size regardless of how big the pack was — the register is
+// already trimmed to ~5-10 items by the time either runs.
 function reviewContext({ supplierName, notes, digests }) {
   const documents = digests.map(d => ({
     filename: d.filename, read: !!d.read, reason: d.reason || null,
@@ -834,113 +987,87 @@ function reviewContext({ supplierName, notes, digests }) {
   return buildPackContext({ supplierName, notes, documents, keyFacts })
 }
 
-// The standing six-risk checklist — its own request, its own single model call. Answered
-// against the ANALYSED clauses rather than the raw wording: by this point every clause has
-// been read closely once already, and the analysis is a fraction of the size, so this call
-// stays small however big the pack was.
-async function buildChecklist({ supplierName, notes, digests, clauseAnalysis = [] }) {
-  const read = digests.filter(d => d.read)
-  if (!read.length) throw new Error('None of the uploaded documents could be read — nothing to build a review from')
-  try {
-    return await callClaude({
-      system: CHECKLIST_SYSTEM,
-      content: [{
-        type: 'text',
-        text: [
-          reviewContext({ supplierName, notes, digests }),
-          '',
-          `Every clause in the pack, as analysed (${clauseAnalysis.length}):`,
-          JSON.stringify(clauseAnalysis, null, 2),
-          '',
-          'Clause topics noted while reading:',
-          JSON.stringify(read.flatMap(d => (d.clauses || []).map(c => ({ clauseRef: c.clauseRef, topic: c.topic }))), null, 2),
-          '',
-          'Produce the standingRiskChecklist JSON as specified.'
-        ].join('\n')
-      }],
-      maxTokens: 8000,
-      effort: 'max'
-    })
-  } catch (err) {
-    // A missing checklist must not sink a review that is otherwise complete — the clause
-    // analysis is the bulk of the value. The document prints the checklist section empty,
-    // which is visibly missing rather than silently wrong.
-    if (err.isMaxTokens || err.isBadJson) return { standingRiskChecklist: [], templateSource: null }
-    throw err
+// The register: every must_change/negotiate candidate from the WHOLE pack, in ONE call —
+// deliberately not batched, because batching would hide exactly the cross-candidate
+// interactions this step exists to catch (see REGISTER_SYSTEM). If it overruns, retry with
+// more room rather than stepping effort down: a register drafted with less deliberation is
+// a worse merge of the same candidates, not a smaller version of the same quality. If both
+// attempts fail, fall back to one register item per candidate, unmerged — no interaction
+// detection, but nothing a director needs to see is silently dropped.
+async function buildRegister(candidates) {
+  if (!candidates.length) return []
+  const brief = [
+    `Candidates triaged MUST CHANGE or NEGOTIATE / CLARIFY, across the whole pack (${candidates.length}):`,
+    JSON.stringify(candidates.map(c => ({
+      clauseRef: c.clauseRef, document: c.document, page: c.page ?? null, tier: c.tier,
+      riskRating: c.riskRating, note: c.note, wording: c.wording
+    })), null, 2),
+    '',
+    'Produce the register JSON as specified.'
+  ].join('\n')
+  for (const [effort, maxTokens] of [['max', 24000], ['high', 24000]]) {
+    try {
+      const out = await callClaude({ system: REGISTER_SYSTEM, content: [{ type: 'text', text: brief }], maxTokens, effort })
+      const rows = Array.isArray(out?.register) ? out.register : []
+      if (rows.length) return rows
+    } catch (err) {
+      if (!(err.isMaxTokens || err.isBadJson)) throw err
+      console.warn(`Credit review register overran at effort ${effort} — retrying`)
+    }
   }
+  return candidates.map(c => ({
+    documentPage: c.page ? `${c.document || 'Document'} p${c.page}` : (c.document || null),
+    clauseRef: c.clauseRef,
+    clauseIssue: c.note || c.clauseRef,
+    riskRating: c.riskRating || 'medium',
+    existingPosition: c.wording || 'See the original clause wording.',
+    concernReason: c.note || 'Could not be drafted automatically — read the clause directly before signing.',
+    proposedPosition: 'Amend before signing.',
+    proposedAmendment: null,
+    priority: c.tier === 'must_change' ? 'must_change' : 'negotiate'
+  }))
 }
 
-// The last call: the summary, director exposure and recommendation, written from the
-// finished analysis. Fixed-size input whatever the pack was.
-async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], checklist }) {
+// The last call: supplier identity, the introduction, and the recommendation — written
+// from the finished register. Fixed-size input whatever the pack was.
+async function buildOverallSummary({ supplierName, notes, digests, register = [] }) {
   const read = digests.filter(d => d.read)
   if (!read.length) throw new Error('None of the uploaded documents could be read — nothing to build a review from')
 
-  const standingRiskChecklist = checklist?.standingRiskChecklist || []
   const content = [{
-      type: 'text',
-      text: [
-        reviewContext({ supplierName, notes, digests }),
-        '',
-        `Clause-by-clause analysis (${clauseAnalysis.length} clauses):`,
-        JSON.stringify(clauseAnalysis.map(c => ({
-          clauseRef: c.clauseRef, riskRating: c.riskRating,
-          plainEnglish: c.plainEnglish, whyItMatters: c.whyItMatters,
-          recommendedPosition: c.recommendedPosition
-        })), null, 2),
-        '',
-        'Standing risk checklist:',
-        JSON.stringify(standingRiskChecklist, null, 2),
-        '',
-        'Risks and gaps noted while reading:',
-        JSON.stringify({ risks: read.flatMap(d => d.risks || []), gaps: read.flatMap(d => d.gaps || []) }, null, 2),
-        '',
-        'Produce the summary JSON as specified.'
-      ].join('\n')
+    type: 'text',
+    text: [
+      reviewContext({ supplierName, notes, digests }),
+      '',
+      `Departure register (${register.length} items):`,
+      JSON.stringify(register, null, 2),
+      '',
+      'Produce the summary JSON as specified.'
+    ].join('\n')
   }]
 
-  // The last step, and the one with the most to weigh up: it reads every analysed clause
-  // and the checklist before writing. At effort max with a 12000 budget it ran out of room
-  // and failed — which threw away a completed reading and clause analysis that had taken
-  // half an hour (measured on the real Franklin Smith pack, 16 Sep 2026). Nothing about
-  // that is an acceptable way to lose a review.
-  //
-  // So: a bigger budget, and if it still overruns, step the effort down rather than fail.
-  // A summary written with less deliberation is worth far more than no document at all,
-  // and the clause-by-clause table — the bulk of the value — is already finished either way.
   let summary
-  for (const [effort, maxTokens] of [['high', 24000], ['medium', 24000], ['low', 16000]]) {
+  for (const [effort, maxTokens] of [['high', 8000], ['medium', 8000]]) {
     try {
-      summary = await callClaude({ system: SUMMARY_SYSTEM, content, maxTokens, effort })
+      summary = await callClaude({ system: OVERALL_SYSTEM, content, maxTokens, effort })
       break
     } catch (err) {
       if (!(err.isMaxTokens || err.isBadJson)) throw err
-      console.warn(`Credit review summary overran at effort ${effort} — stepping down`)
+      console.warn(`Credit review overall summary overran at effort ${effort} — stepping down`)
     }
   }
   if (!summary) {
-    // Every attempt overran. Rather than lose the whole review, say plainly in the
-    // document that this section could not be written — the clause table, the checklist
-    // and the director exposure carry the findings regardless.
-    const high = clauseAnalysis.filter(c => String(c.riskRating).toLowerCase() === 'high')
+    // Both attempts overran. Rather than lose the whole review, say plainly that this
+    // section could not be written — the register itself, the bulk of the value, is
+    // already finished either way.
+    const high = register.filter(r => String(r.riskRating).toLowerCase() === 'high')
     summary = {
-      keyClausesSummary: 'The plain-English summary could not be generated for this pack — there was more '
-        + 'in it than could be weighed up in one pass. The clause-by-clause table in section 2 and the '
-        + 'standing risk checklist in section 3 are complete and carry the findings; read those directly.',
-      directorExposure: {
-        guaranteeRequired: standingRiskChecklist.some(r => /guarantee/i.test(r.risk) && r.present),
-        summary: 'Not assessed automatically — see the guarantee and indemnity rows in the clause table.',
-        priorityAmendments: high.map(c => `${c.clauseRef}: ${c.negotiationAngle || c.recommendedPosition}`).slice(0, 6),
-        independentAdviceRecommended: true
-      },
-      nonStandardPractice: [],
+      introduction: 'The introduction could not be generated for this pack — the departure register '
+        + 'below is complete and carries the findings; read it directly.',
       overallRisk: {
-        topRisks: high.slice(0, 3).map(c => `${c.clauseRef} — ${c.whyItMatters}`),
-        positioning: 'not assessed',
-        positioningReason: 'The overall assessment could not be generated; the clause table is complete.',
-        recommendation: high.length ? 'accept_with_amendment' : 'accept_as_is',
-        recommendationReason: `Derived from the clause analysis: ${high.length} clause(s) were rated high risk `
-          + 'and are listed above. A lawyer should read section 2 before the directors sign.'
+        recommendation: register.length ? 'accept_with_amendment' : 'accept_as_is',
+        recommendationReason: `Derived from the register: ${register.length} item(s) identified, ${high.length} `
+          + 'rated high risk. Read the register below before any director signs.'
       }
     }
   }
@@ -948,9 +1075,8 @@ async function buildReview({ supplierName, notes, digests, clauseAnalysis = [], 
   return {
     ...summary,
     supplierName: summary?.supplierName || supplierName || read.find(d => d.supplierName)?.supplierName || 'Supplier',
-    templateSource: checklist?.templateSource || read.find(d => d.templateSource)?.templateSource || null,
-    clauseAnalysis,
-    standingRiskChecklist
+    templateSource: read.find(d => d.templateSource)?.templateSource || null,
+    register
   }
 }
 
@@ -1115,7 +1241,7 @@ async function buildPhase2Redlines(clauses) {
 
 module.exports = {
   isReadable, unreadableReason, digestDocument, planDocument, digestPart, withUsage,
-  analyseClauses, batchClauses, buildChecklist, buildReview,
+  analyseTriage, batchClauses, buildRegister, buildOverallSummary,
   buildPhase2Summary, buildPhase2Redlines,
-  CLAUSES_PER_BATCH, RECURRING_RISKS
+  CLAUSES_PER_BATCH, REVIEW_PHILOSOPHY
 }
