@@ -1,19 +1,20 @@
 'use strict'
 /*
- * CREDIT APPLICATION REVIEW — departure register rendering tests
- * =================================================================
+ * CREDIT APPLICATION REVIEW — clause table rendering tests
+ * =========================================================
  *
- * Guards the 23 Sep 2026 redesign: Dan Broederlow (GM, 50% shareholder) reviewed the ETL /
- * Modern Transport Group pack himself and replaced the old "analyse and print every
- * clause" review with a DEPARTURE REGISTER — 5-10 material issues, ordered by importance,
- * 13 columns (see buildCreditReviewDocx.js's registerTable). The old test here covered the
- * per-clause table (Action/Don't Action ticks, HIGH/MEDIUM full rows, LOW collapsing) that
- * no longer exists — this replaces it entirely rather than patching it. Makes NO API call:
- * the model's drafting isn't what regresses, the render is.
+ * Guards the fix for the 94-page Equipment and Transport Leasing review (20 Sep 2026):
+ * every one of a pack's 73 clauses got a full five-field row regardless of risk, so a
+ * review's length tracked how many clauses the supplier's drafter used, not how many
+ * needed a director's decision. LOW-risk clauses (36 of 73 on that pack, most of them
+ * MEDIUM when they should have been LOW) now collapse into one summary row per part;
+ * HIGH and MEDIUM keep the full row. This makes NO API call: the model's clause
+ * analysis isn't what regresses, the render is.
  *
  *   node server/test/credit-review-render.js
  */
 
+const assert = require('assert')
 const { buildCreditReviewDocx } = require('../src/lib/buildCreditReviewDocx')
 
 let pass = 0, fail = 0
@@ -30,99 +31,91 @@ function xmlUnescape(s) {
 // Extract each table row's plain text from the rendered document.xml, the same way a
 // human reading the .docx would encounter it — not by inspecting the docx.js objects,
 // which would only prove the builder called itself correctly.
-async function renderRegisterRows(review) {
+async function renderRows(review) {
   const JSZip = require('jszip')
   const buf = await buildCreditReviewDocx(review, { documents: [] })
   const zip = await JSZip.loadAsync(buf)
   const xml = await zip.file('word/document.xml').async('string')
   const tables = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) || []
-  // The register table is the largest one in the document.
-  const registerTableXml = tables.reduce((a, b) => (b.length > a.length ? b : a), '')
-  const rows = registerTableXml.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []
+  // The clause table is the largest one in the document.
+  const clauseTableXml = tables.reduce((a, b) => (b.length > a.length ? b : a), '')
+  const rows = clauseTableXml.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []
   return rows.map(r => {
     const texts = r.match(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g) || []
     return xmlUnescape(texts.map(t => t.replace(/<[^>]+>/g, '')).join(' | '))
   })
 }
 
-function item(overrides = {}) {
+function clause(clauseRef, riskRating, document) {
   return {
-    documentPage: 'Credit Application, cl 3.4',
-    clauseRef: 'Cl. 3.4',
-    clauseIssue: 'ALLPAAP security over all P&I assets',
-    riskRating: 'high',
-    existingPosition: 'The supplier takes a security interest over all present and after-acquired property.',
-    concernReason: 'This is materially broader than the goods actually supplied.',
-    proposedPosition: 'Restrict security to a PMSI over unpaid supplied goods.',
-    proposedAmendment: 'Delete cl 3.4 and substitute a PMSI limited to unpaid supplied goods and proceeds.',
-    priority: 'must_change',
-    ...overrides
+    document,
+    clauseRef,
+    riskRating,
+    plainEnglish: `Plain English for ${clauseRef}.`,
+    whyItMatters: `Why it matters for ${clauseRef}.`,
+    recommendedPosition: riskRating === 'low' ? 'accept' : 'amend',
+    negotiationAngle: riskRating === 'low' ? null : `Amend ${clauseRef}.`
   }
 }
 
 const baseReview = {
   supplierName: 'Test Supplier Ltd',
-  supplierTrade: 'Plant hire',
-  introduction: 'Test Supplier Ltd hires plant to P&I.',
-  overallRisk: { recommendation: 'accept_with_amendment', recommendationReason: 'Amend the security clause before signing.' },
-  register: [
-    item(),
-    item({ clauseRef: 'Cl. 9.4.6', clauseIssue: 'Damage waiver water exclusion', riskRating: 'medium', priority: 'negotiate' })
-  ]
+  clauseAnalysis: [
+    clause('cl 1 — Guarantee', 'high', 'Application Form'),
+    clause('cl 2 — Governing law', 'low', 'Application Form'),
+    clause('cl 3 — Notices', 'low', 'Application Form'),
+    clause('cl 4 — Title retention', 'low', 'Application Form'),
+    clause('cl 9 — Default interest', 'medium', 'Terms of Trade'),
+    clause('cl 10 — Privacy consent', 'low', 'Terms of Trade')
+  ],
+  standingRiskChecklist: [],
+  directorExposure: { guaranteeRequired: true, summary: 's', priorityAmendments: [], independentAdviceRecommended: true },
+  overallRisk: { topRisks: [], positioning: 'standard', positioningReason: 'r', recommendation: 'accept_with_amendment', recommendationReason: 'r' }
 }
 
 async function main() {
-  console.log('\n=== CREDIT REVIEW DEPARTURE REGISTER RENDER ===\n')
+  console.log('\n=== CREDIT REVIEW RENDER ===\n')
 
-  const rows = await renderRegisterRows(baseReview)
+  const rows = await renderRows(baseReview)
+  const joined = rows.join('\n')
 
-  // ---- header carries every column Dan specified, in order ----
-  // Exactly the labels in Dan's handover, "CURRENT DEPARTURE REGISTER STRUCTURE".
-  const EXPECTED_HEADERS = [
-    'Item No.', 'Document / Page', 'Clause Reference', 'Clause / Issue', 'Risk Rating', 'Existing Position',
-    'P&I Concern / Reason', 'P&I Proposed Position', 'Proposed Amendment / Wording',
-    'Priority', 'Supplier Response', "P&I Follow-up / Final Position", 'Status'
-  ]
-  check('header has all 13 columns, in order', rows[0] === EXPECTED_HEADERS.join(' | '), rows[0])
+  // ---- Action / Don't Action are two separate tick columns, not one shared cell
+  // (21 Sep 2026: a director's handwritten "Yes" over a crossed-out first answer in the
+  // old single column was not reliably readable back — later renamed Yes/No -> Keep/Remove
+  // -> Action/Don't Action, the wording the GM already uses marking up a printed review by
+  // hand) ----
+  check('header has a standalone "Action" column distinct from "Don\'t Action"',
+    / \| Action \| /.test(rows[0]) && / \| Don't Action$/.test(rows[0]),
+    rows[0])
 
-  // ---- register content reaches the document ----
-  check('clause issue reaches the document', rows.some(r => r.includes('ALLPAAP security over all P&I assets')))
-  check('existing position reaches the document', rows.some(r => r.includes('security interest over all present and after-acquired property')))
-  check('concern reason reaches the document', rows.some(r => r.includes('materially broader than the goods actually supplied')))
-  check('proposed amendment reaches the document', rows.some(r => r.includes('Delete cl 3.4 and substitute a PMSI')))
+  // ---- HIGH and MEDIUM clauses each keep their own full row ----
+  check('HIGH clause keeps its own row', rows.some(r => r.includes('cl 1 — Guarantee') && r.includes('HIGH')))
+  check('MEDIUM clause keeps its own row', rows.some(r => r.includes('cl 9 — Default interest') && r.includes('MEDIUM')))
 
-  // ---- risk rating renders uppercase ----
-  check('HIGH risk rating renders', rows.some(r => r.includes('Cl. 3.4') && / \| HIGH \| /.test(r)))
-  check('MEDIUM risk rating renders', rows.some(r => r.includes('Cl. 9.4.6') && / \| MEDIUM \| /.test(r)))
+  // ---- LOW clauses collapse to one row per part, not one row each ----
+  const lowRowsPartA = rows.filter(r => r.includes('LOW') && r.includes('cl 2') )
+  check('exactly one collapsed LOW row for Part A (not 3 separate rows)',
+    rows.filter(r => /LOW/.test(r)).length === 2, `found ${rows.filter(r => /LOW/.test(r)).length} LOW rows: \n${joined}`)
+  check('collapsed Part A row names all three LOW clause refs',
+    rows.some(r => r.includes('cl 2 — Governing law') && r.includes('cl 3 — Notices') && r.includes('cl 4 — Title retention')))
+  check('collapsed Part A row does not repeat the individual plain-English text',
+    !rows.some(r => r.includes('LOW') && r.includes('Plain English for cl 2')))
+  check('a single LOW clause in Part B still collapses (not left as a full row)',
+    !rows.some(r => r.includes('cl 10 — Privacy consent') && r.includes('Plain English for cl 10')))
 
-  // ---- priority is translated to Dan's own wording, not the raw enum value ----
-  check('must_change renders as "Must Change"', rows.some(r => r.includes('Cl. 3.4') && r.includes('Must Change')))
-  check('negotiate renders as "Negotiate"', rows.some(r => r.includes('Cl. 9.4.6') && r.includes('Negotiate')))
-  check('raw enum values never leak into the printed document', !rows.some(r => /must_change|acceptable_if_required/.test(r)))
+  // ---- total row count: column header + 2 part headers + 1 high + 1 medium + 2 collapsed-low ----
+  check('table has 7 rows, not one per clause (would be 9)', rows.length === 7, `got ${rows.length} rows`)
 
-  // ---- the three tracking columns: two blank, Status pre-filled "Open" ----
-  const row1 = rows.find(r => r.includes('Cl. 3.4'))
-  const cells = row1.split(' | ')
-  check('row has exactly 13 cells', cells.length === 13, `got ${cells.length}: ${row1}`)
-  check('Supplier Response column is blank (filled in by hand later)', cells[10] === '')
-  check("P&I Follow-up / Final Position column is blank (filled in by hand later)", cells[11] === '')
-  check('Status column is pre-filled "Open"', cells[12] === 'Open')
+  // ---- an all-LOW pack still renders (no crash, no empty table) ----
+  const allLow = { ...baseReview, clauseAnalysis: [clause('cl 1 — Notices', 'low', 'Application Form')] }
+  const allLowRows = await renderRows(allLow)
+  check('an all-LOW pack still produces a collapsed summary row', allLowRows.some(r => r.includes('LOW') && r.includes('cl 1 — Notices')))
 
-  // ---- items render in the order given — the drafting step already ordered by
-  // importance, the docx must not silently re-sort or re-group them ----
-  const idx3_4 = rows.findIndex(r => r.includes('Cl. 3.4'))
-  const idx9_4_6 = rows.findIndex(r => r.includes('Cl. 9.4.6'))
-  check('items render in the order the register gave them', idx3_4 !== -1 && idx9_4_6 !== -1 && idx3_4 < idx9_4_6)
-
-  // ---- an empty register still renders, flagged, rather than an empty/broken table ----
-  const emptyRows = await renderRegisterRows({ ...baseReview, register: [] })
-  check('an empty register renders a placeholder row rather than crashing',
-    emptyRows.some(r => /no material issues were identified/i.test(r)))
-
-  // ---- a single-item register still renders correctly (not a special "collapsed" case) ----
-  const oneRows = await renderRegisterRows({ ...baseReview, register: [item()] })
-  check('a single-item register still renders that item in full',
-    oneRows.some(r => r.includes('ALLPAAP security over all P&I assets')))
+  // ---- an all-HIGH pack renders every clause individually (no over-collapsing) ----
+  const allHigh = { ...baseReview, clauseAnalysis: [clause('cl 1 — Guarantee', 'high', 'Application Form'), clause('cl 2 — Security', 'high', 'Application Form')] }
+  const allHighRows = await renderRows(allHigh)
+  check('an all-HIGH pack keeps both clauses as separate rows',
+    allHighRows.some(r => r.includes('cl 1 — Guarantee')) && allHighRows.some(r => r.includes('cl 2 — Security')) && !allHighRows.some(r => /LOW/.test(r)))
 
   console.log(`\n${pass} passed, ${fail} failed\n`)
   if (fail) process.exit(1)

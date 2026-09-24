@@ -7,7 +7,7 @@ const { saveCostDoc, getCostDoc, savePhase2Data, getPhase2Data, savePhase2Doc, g
 const { saveJob, getJob, patchJob } = require('../lib/creditReviewJobs')
 const {
   isReadable, unreadableReason, planDocument, digestPart,
-  analyseTriage, batchClauses, buildRegister, buildOverallSummary, withUsage,
+  analyseClauses, batchClauses, buildChecklist, buildReview, withUsage,
   buildPhase2Summary, buildPhase2Redlines
 } = require('../lib/creditReviewPrompts')
 const { buildCreditReviewDocx, creditReviewFilename } = require('../lib/buildCreditReviewDocx')
@@ -74,7 +74,7 @@ router.post('/upload-url', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // Everything the job still has to do, in order. Steps are added as earlier ones reveal
-// them: reading is planned once the documents are opened, triage batches once the reading
+// them: reading is planned once the documents are opened, clause batches once the reading
 // is done and we know how many clauses there actually are.
 function describeStep(step) {
   if (step.kind === 'read') {
@@ -82,13 +82,13 @@ function describeStep(step) {
       ? { label: 'Reading the pack', note: `section ${step.n} of ${step.total} · ${step.filename}` }
       : { label: `Reading ${step.filename}`, note: 'looking for every clause that carries risk' }
   }
-  if (step.kind === 'triage') {
-    return { label: 'Triaging the clauses', note: `${step.from}-${step.to} of ${step.totalClauses} · must change, negotiate or live with` }
+  if (step.kind === 'clauses') {
+    return { label: 'Analysing the clauses', note: `${step.from}-${step.to} of ${step.totalClauses} · risk, meaning and negotiating position for each` }
   }
-  if (step.kind === 'register') {
-    return { label: 'Drafting the departure register', note: 'checking how the flagged clauses interact, ordering by importance' }
+  if (step.kind === 'checklist') {
+    return { label: 'Checking the pack against the standing risk list', note: 'guarantee · PPSA · land charge · interest · defect window' }
   }
-  return { label: 'Writing the recommendation', note: 'the last step' }
+  return { label: 'Writing the review and the recommendation', note: 'the last step — usually the longest' }
 }
 
 // Start a job: open every uploaded document, work out how many sections each needs to be
@@ -125,8 +125,8 @@ router.post('/jobs', async (req, res) => {
       status: steps.length ? 'running' : 'failed',
       error: steps.length ? null : `Nothing could be read: ${plans.map(p => `${p.filename} (${p.reason})`).join('; ')}`,
       digests: plans.filter(p => p.read === false).map(p => ({ filename: p.filename, read: false, reason: p.reason })),
-      triage: [],
-      register: [],
+      clauseAnalysis: [],
+      checklist: null,
       steps,
       stepIndex: 0,
       createdAt: new Date().toISOString()
@@ -221,43 +221,41 @@ async function runStep(job, step) {
     const digest = await digestPart({ filename: step.filename, buffer, part: step.part })
     const digests = [...job.digests, { ...digest, pages: step.pages }]
 
-    // Last read? Then we know every clause, and can plan the triage.
+    // Last read? Then we know every clause, and can plan the analysis.
     const isLastRead = !job.steps[job.stepIndex + 1] || job.steps[job.stepIndex + 1].kind !== 'read'
     if (!isLastRead) return { digests }
 
     const clauses = digests.filter(d => d.read).flatMap(d => (d.clauses || []).map(c => ({ ...c, document: d.documentType || d.filename })))
     const batches = batchClauses(clauses)
     let from = 1
-    const triageSteps = batches.map(batch => {
-      const s = { kind: 'triage', clauses: batch, from, to: from + batch.length - 1, totalClauses: clauses.length }
+    const clauseSteps = batches.map(batch => {
+      const s = { kind: 'clauses', clauses: batch, from, to: from + batch.length - 1, totalClauses: clauses.length }
       from += batch.length
       return s
     })
-    // 'register' is its own step, not folded into the final one — see buildRegister in
-    // creditReviewPrompts.js for why it's deliberately not batched (it needs to see every
-    // candidate together to catch clause interactions), which makes it the one call in
-    // this whole pipeline that can genuinely take a while.
     return {
       digests,
-      steps: [...job.steps.slice(0, job.stepIndex + 1), ...triageSteps, { kind: 'register' }, { kind: 'overall' }]
+      steps: [...job.steps.slice(0, job.stepIndex + 1), ...clauseSteps, { kind: 'checklist' }, { kind: 'summary' }]
     }
   }
 
-  if (step.kind === 'triage') {
-    const rows = await analyseTriage({
+  if (step.kind === 'clauses') {
+    const rows = await analyseClauses({
       supplierName: job.supplierName,
       notes: job.notes,
       documents: job.digests.map(d => ({ filename: d.filename, read: !!d.read, reason: d.reason || null, documentType: d.documentType || null, pages: d.pages || null })),
       keyFacts: job.digests.filter(d => d.read).flatMap(d => d.keyFacts || []),
       clauses: step.clauses
     })
-    return { triage: [...job.triage, ...rows] }
+    return { clauseAnalysis: [...job.clauseAnalysis, ...rows] }
   }
 
-  if (step.kind === 'register') {
-    const candidates = job.triage.filter(t => t.tier === 'must_change' || t.tier === 'negotiate')
-    const register = await buildRegister(candidates)
-    return { register }
+  if (step.kind === 'checklist') {
+    const checklist = await buildChecklist({
+      supplierName: job.supplierName, notes: job.notes,
+      digests: job.digests, clauseAnalysis: job.clauseAnalysis
+    })
+    return { checklist }
   }
 
   return finishJob(job)
@@ -273,11 +271,11 @@ function costLine(job) {
     + `${((u.inputTokens + u.cacheReadTokens) / 1000).toFixed(0)}k in${cached}, ${(u.outputTokens / 1000).toFixed(0)}k out.`
 }
 
-// The last step: write the overall summary, render the .docx, file the run.
+// The last step: write the review, render the .docx, file the run.
 async function finishJob(job) {
-  const review = await buildOverallSummary({
+  const review = await buildReview({
     supplierName: job.supplierName, notes: job.notes,
-    digests: job.digests, register: job.register
+    digests: job.digests, clauseAnalysis: job.clauseAnalysis, checklist: job.checklist
   })
   review.supplierName = review.supplierName || job.supplierName || 'Supplier'
 
@@ -301,8 +299,7 @@ async function finishJob(job) {
 
   // A file that could not be read is named here, not left to be inferred from a short review.
   const unread = [...new Set(documents.filter(d => !d.read).map(d => `${d.filename} (${d.reason})`))]
-  const register = review.register || []
-  const mustChangeCount = register.filter(r => String(r.priority).toLowerCase() === 'must_change').length
+  const highCount = (review.clauseAnalysis || []).filter(c => String(c.riskRating).toLowerCase() === 'high').length
   const RECOMMENDATION_TEXT = {
     accept_as_is: 'Accept as is',
     accept_with_amendment: 'Accept with amendment',
@@ -311,23 +308,20 @@ async function finishJob(job) {
   const rec = RECOMMENDATION_TEXT[review.overallRisk?.recommendation] || 'Recommendation not stated'
   const output = [
     `${review.supplierName} — ${rec}.`,
-    `${register.length} item(s) on the departure register · ${mustChangeCount} must change`
-      + `${review.templateSource ? ` · terms template: ${review.templateSource}` : ''}.`,
+    `${review.clauseAnalysis.length} clauses reviewed · ${highCount} high risk${review.templateSource ? ` · terms template: ${review.templateSource}` : ''} · positioning: ${review.overallRisk?.positioning || 'not assessed'}.`,
+    review.directorExposure?.guaranteeRequired
+      ? '⚠️ A personal guarantee is required — the directors are personally exposed. See section 4 before anyone signs.'
+      : 'No personal guarantee identified in this pack.',
     unread.length ? `⚠️ ${unread.length} file(s) could NOT be read and are excluded: ${unread.join('; ')}.` : null,
-    'Download the .docx below for the full departure register.'
+    'Download the .docx below — section 3 is the standing risk checklist, section 4 is the director exposure.'
   ].filter(Boolean).join('\n')
 
   await db.from('ProcessRun').update({ output, status: 'completed' }).eq('id', runId)
   await removeUploads(job.steps.filter(s => s.kind === 'read').map(s => s.path)).catch(() => {})
 
   // Seed phase 2 (the supplier-facing amendment document) with this review's own clause
-  // table, unmarked — a director records Action/Don't Action against these later, from the
-  // same tab. Not fatal if it fails: the review itself is already filed and downloadable
-  // either way. NOTE (23 Sep 2026): phase 2 was built against the old per-clause
-  // clauseAnalysis shape, which this review no longer produces (it produces `register`
-  // instead) — this seeds an empty clause list until phase 2 is revisited to work from the
-  // register. Left as is deliberately: getting the register right is the current priority,
-  // not phase 2.
+  // table, unmarked — a director records Action/Don't Action against these later, from the same tab.
+  // Not fatal if it fails: the review itself is already filed and downloadable either way.
   await savePhase2Data(runId, {
     supplierName: review.supplierName,
     clauseAnalysis: (review.clauseAnalysis || []).map(c => ({ ...c, decision: null })),

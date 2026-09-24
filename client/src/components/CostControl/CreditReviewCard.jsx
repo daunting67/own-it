@@ -248,21 +248,20 @@ export default function CreditReviewCard() {
         <div style={{ marginTop: 20, padding: 16, background: 'var(--pi-neutral-tint)', borderRadius: 6 }}>
           <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginBottom: 14 }}>{result.output}</div>
 
-          {/* The departure register on screen, so "what actually needs a decision"
-              doesn't require opening the Word document first — same list, same order the
-              document uses (see buildOverallSummary in creditReviewPrompts.js). */}
-          {review?.register?.length > 0 && (
+          {/* The standing six risks on screen, so the answer to "did it check the
+              guarantee?" doesn't require opening the Word document first. */}
+          {review?.standingRiskChecklist?.length > 0 && (
             <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
-              {review.register.map((r, i) => (
+              {review.standingRiskChecklist.map((r, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
                   <span style={{
                     flexShrink: 0, minWidth: 92, fontWeight: 700,
-                    color: RISK_COLOUR[String(r.riskRating).toLowerCase()] || 'var(--text-muted)',
+                    color: r.present ? (RISK_COLOUR[String(r.riskRating).toLowerCase()] || 'var(--text-muted)') : '#2e7d32',
                   }}>
-                    {String(r.riskRating || '').toUpperCase()}
+                    {r.present ? String(r.riskRating || '').toUpperCase() : 'NOT PRESENT'}
                   </span>
-                  <span style={{ fontWeight: 600 }}>{r.clauseIssue}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>— {r.concernReason}</span>
+                  <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{r.risk}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>— {r.detail}</span>
                 </div>
               ))}
             </div>

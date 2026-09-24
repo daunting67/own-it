@@ -5,20 +5,21 @@ const {
 
 // The Credit Application Review, in the house format.
 //
-// US Letter landscape, Arial, navy headers, a red recommendation banner — the original
-// visual language is a faithful reproduction of the reviews Chloe produced by hand for the
-// first seven suppliers (Tony: "This is the output format we need - replicate this"). The
-// CONTENT changed on 23 Sep 2026: Dan Broederlow (GM, 50% shareholder) reviewed the ETL /
-// Modern Transport Group pack himself and set out how he actually wants these done — a
-// DEPARTURE REGISTER of the 5-10 issues that can genuinely hurt P&I, ordered by importance,
-// not an exhaustive clause-by-clause commentary. See creditReviewPrompts.js's
-// REVIEW_PHILOSOPHY for the detail this is built from.
+// This layout is not invented — it is a faithful reproduction of the reviews Chloe
+// produced by hand for the first seven suppliers, taken measurement by measurement from
+// `Timberworld - Credit Application Review.docx`: US Letter landscape, Arial, the same
+// page margins, the same six-column clause table (2200/1100/3100/3100/3380/800 twips), the
+// same navy headers and red recommendation banners, the same risk colours, the same
+// running header and page footer. Tony: "This is the output format we need - replicate
+// this." The point is that a review out of the portal is indistinguishable in form from
+// the seven already in the series, so the set reads as one body of work.
 //
-// Two things in that format are easy to miss and matter most:
-//   - the RECOMMENDATION is stated at the top, before the register, not buried at the end;
-//   - the register carries three blank columns (Supplier Response, P&I Follow-up / Final
-//     Position, Status) — this is a LIVING document, tracked through a negotiation by hand
-//     or directly in Word, not a one-shot report.
+// Three things in that format are easy to miss and matter most:
+//   - the RECOMMENDATION is stated at the top, before any analysis, not buried at the end;
+//   - the clause table carries empty "Action / Don't Action" columns, because a director
+//     signs the decision off clause by clause on paper;
+//   - the review closes by comparing the supplier against NZ industry norms, which is what
+//     turns "this clause is harsh" into "this clause is harsher than the market".
 
 const NAVY = '1F3864'
 const DARKRED = '8B0000'
@@ -33,6 +34,9 @@ const RISK = {
   low: { fill: 'E2EFDA', text: '375623' }
 }
 
+const CLAUSE_WIDTHS = [2200, 1100, 3100, 3100, 3380, 400, 400]
+const RISK_WIDTHS = [600, 3000, 10080]
+const COMPARE_WIDTHS = [3200, 3500, 3800, 3180]
 const FULL_WIDTH = 13680
 
 function run(text, opts = {}) {
@@ -117,70 +121,165 @@ function recommendationLabel(r) {
 // Clauses are grouped by the document they came from — PART A is the application form and
 // its guarantee, PART B the terms of trade — because those are two different signatures
 // with two different risks, and a director reads them as separate decisions.
-// The departure register itself — 13 columns, per Dan's own structure. Narrow on purpose:
-// Item / Doc-Page / Clause Ref / Risk / Priority / the three trailing blank columns are all
-// short labels or numbers, which leaves as much width as possible for the four columns that
-// carry real prose (Existing Position, P&I Concern/Reason, P&I Proposed Position, Proposed
-// Amendment/Wording). Body text runs at 15 (7.5pt), smaller than the review's usual 17 —
-// this table is denser than anything else in the house format, by design (Dan: keep the
-// commentary concise and practical).
-const REGISTER_WIDTHS = [400, 900, 900, 1400, 500, 1600, 1600, 1600, 2080, 900, 600, 700, 500]
-const REGISTER_HEADER_SIZES = REGISTER_WIDTHS.map(() => 13)
-const REGISTER_BODY_SIZE = 15
-
-const PRIORITY_LABELS = {
-  must_change: 'Must Change',
-  negotiate: 'Negotiate',
-  acceptable_if_required: 'Acceptable if Required'
-}
-function priorityLabel(p) {
-  return PRIORITY_LABELS[String(p || '').toLowerCase()] || String(p || '').replace(/_/g, ' ')
+function partsFromClauses(clauseAnalysis) {
+  const groups = new Map()
+  for (const c of clauseAnalysis || []) {
+    const key = c.document || c.part || 'Clauses'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(c)
+  }
+  const letters = 'ABCDEFGH'
+  return [...groups.entries()].map(([name, clauses], i) => ({
+    title: groups.size > 1 ? `PART ${letters[i] || i + 1} — ${name}` : name,
+    clauses
+  }))
 }
 
-function registerRow(item, i) {
-  const r = riskOf(item.riskRating)
+// Every clause is analysed (see creditReviewPrompts.js), but not every clause earns a full
+// row: a director reading this table is looking for what to act on, and a LOW-risk clause
+// — by definition standard NZ trade-credit boilerplate P&I would accept unchanged — read the
+// same as a HIGH one with five full-width cells each. Full rows are for HIGH and MEDIUM;
+// LOW clauses within a part collapse into one summary row so the table's length tracks the
+// number of things that actually need a decision, not the number of clauses the supplier's
+// drafter happened to use (73 full rows on one pack, 20 Sep 2026).
+function clauseRow(c) {
+  const r = riskOf(c.riskRating)
+  const position = [
+    c.recommendedPosition ? `${String(c.recommendedPosition).toUpperCase()}.` : null,
+    c.negotiationAngle
+  ].filter(Boolean).join(' ')
   return new TableRow({
     children: [
-      cell(para(String(i + 1), { bold: true, size: REGISTER_BODY_SIZE }, { alignment: AlignmentType.CENTER }), { width: REGISTER_WIDTHS[0] }),
-      cell(para(item.documentPage, { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[1] }),
-      cell(para(item.clauseRef, { bold: true, size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[2] }),
-      cell(para(item.clauseIssue, { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[3] }),
-      cell(para(String(item.riskRating || '').toUpperCase(), { bold: true, color: r.text, size: REGISTER_BODY_SIZE }, { alignment: AlignmentType.CENTER }),
-        { fill: r.fill, width: REGISTER_WIDTHS[4] }),
-      cell(para(item.existingPosition, { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[5] }),
-      cell(para(item.concernReason, { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[6] }),
-      cell(para(item.proposedPosition, { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[7] }),
-      cell(para(item.proposedAmendment || '—', { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[8] }),
-      cell(para(priorityLabel(item.priority), { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[9] }),
-      // These three are left blank (Status pre-filled "Open") on purpose: this is a living
-      // document, filled in — by hand, or directly in Word — as the negotiation actually
-      // happens, not a one-shot report. Dan's own status vocabulary: Open / Agreed / Closed.
-      cell(para('', { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[10] }),
-      cell(para('', { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[11] }),
-      cell(para('Open', { size: REGISTER_BODY_SIZE }), { width: REGISTER_WIDTHS[12] })
+      cell(para(c.clauseRef, { bold: true, size: 17 }), { width: CLAUSE_WIDTHS[0] }),
+      cell(para(String(c.riskRating || '').toUpperCase(), { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
+        { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
+      cell(para(c.plainEnglish, { size: 17 }), { width: CLAUSE_WIDTHS[2] }),
+      cell(para(c.whyItMatters, { size: 17 }), { width: CLAUSE_WIDTHS[3] }),
+      cell(para(position, { size: 17 }), { width: CLAUSE_WIDTHS[4] }),
+      // Both left blank on purpose: the director ticks ONE of the two boxes (Action or
+      // Don't Action) by hand, rather than writing a word into a single shared cell — a
+      // plain tick is unambiguous where a hand-written answer over a crossed-out first one
+      // was not (Progressive Maintenance Workshop review, 22 Jun 2026 — same wording the
+      // GM already used there).
+      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[5] }),
+      cell(para('', { size: 17 }), { width: CLAUSE_WIDTHS[6] })
     ]
   })
 }
 
-function registerTable(register) {
+function lowRiskSummaryRow(clauses) {
+  const r = riskOf('low')
+  const refs = clauses.map(c => c.clauseRef).filter(Boolean).join(', ')
+  return new TableRow({
+    children: [
+      cell(para(refs, { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[0] }),
+      cell(para('LOW', { bold: true, color: r.text, size: 17 }, { alignment: AlignmentType.CENTER }),
+        { fill: r.fill, width: CLAUSE_WIDTHS[1] }),
+      cell(para(
+        `${clauses.length} standard clause${clauses.length === 1 ? '' : 's'}, consistent with normal NZ trade credit practice. Accepted as drafted — no amendment recommended.`,
+        { italics: true, size: 17 }
+      ), { fill: r.fill, width: CLAUSE_WIDTHS[2] + CLAUSE_WIDTHS[3] + CLAUSE_WIDTHS[4], span: 3 }),
+      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[5] }),
+      cell(para('', { size: 17 }), { fill: r.fill, width: CLAUSE_WIDTHS[6] })
+    ]
+  })
+}
+
+function clauseTable(clauseAnalysis) {
   const rows = [headerRow(
-    ['Item No.', 'Document / Page', 'Clause Reference', 'Clause / Issue', 'Risk Rating', 'Existing Position', 'P&I Concern / Reason',
-      'P&I Proposed Position', 'Proposed Amendment / Wording', 'Priority', 'Supplier Response',
-      "P&I Follow-up / Final Position", 'Status'],
-    REGISTER_WIDTHS,
-    REGISTER_HEADER_SIZES
+    ['Clause / Reference', 'Risk', 'What It Means (Plain English)', 'Why It Matters to P&I', 'Recommended Position', 'Action', "Don't Action"],
+    CLAUSE_WIDTHS,
+    [17, 17, 17, 17, 17, 13, 13]
   )]
-  const list = (register || []).filter(Boolean)
-  if (!list.length) {
-    rows.push(new TableRow({
-      children: [cell(
-        para('No material issues were identified — nothing on this pack needs to go on the departure register.', { italics: true, color: GREY_LIGHT }),
-        { fill: ROW_TINT, span: 13 }
-      )]
-    }))
+
+  const parts = partsFromClauses(clauseAnalysis)
+  if (!parts.length) {
+    rows.push(new TableRow({ children: [cell(para('No clauses of concern were identified.', { italics: true, color: GREY_LIGHT }), { fill: ROW_TINT, span: 7 })] }))
   }
-  list.forEach((item, i) => rows.push(registerRow(item, i)))
-  return new Table({ columnWidths: REGISTER_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+
+  for (const part of parts) {
+    if (parts.length > 1 || part.title !== 'Clauses') {
+      rows.push(new TableRow({
+        children: [cell(para(part.title, { bold: true, color: WHITE, size: 17 }), { fill: NAVY, span: 7 })]
+      }))
+    }
+    const low = part.clauses.filter(c => String(c.riskRating).toLowerCase() === 'low')
+    const notLow = part.clauses.filter(c => String(c.riskRating).toLowerCase() !== 'low')
+    for (const c of notLow) rows.push(clauseRow(c))
+    if (low.length) rows.push(lowRiskSummaryRow(low))
+  }
+  return new Table({ columnWidths: CLAUSE_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function topRisksTable(topRisks) {
+  const rows = [headerRow(['#', 'Risk', 'Detail'], RISK_WIDTHS)]
+  const list = (topRisks || []).filter(Boolean)
+  if (!list.length) {
+    rows.push(new TableRow({ children: [cell(para('No overriding commercial risks were identified.', { italics: true, color: GREY_LIGHT }), { span: 3 })] }))
+  }
+  list.forEach((risk, i) => {
+    // Older reviews stored these as plain strings; newer ones as { title, detail }.
+    const title = typeof risk === 'string' ? risk.split(/[—:]/)[0].trim() : risk.title
+    const detail = typeof risk === 'string' ? risk.slice(title.length).replace(/^[\s—:]+/, '') : risk.detail
+    rows.push(new TableRow({
+      children: [
+        cell(para(String(i + 1), { bold: true, size: 17 }, { alignment: AlignmentType.CENTER }), { width: RISK_WIDTHS[0] }),
+        cell(para(title, { bold: true, size: 17 }), { width: RISK_WIDTHS[1] }),
+        cell(para(detail || title, { size: 17 }), { width: RISK_WIDTHS[2] })
+      ]
+    }))
+  })
+  return new Table({ columnWidths: RISK_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function comparisonTable(rowsIn, supplierName) {
+  const list = (rowsIn || []).filter(Boolean)
+  if (!list.length) return null
+  const rows = [headerRow(['Clause / Feature', 'NZ Industry Standard', `${supplierName} Position`, 'Assessment'], COMPARE_WIDTHS)]
+  list.forEach((r, i) => {
+    const tint = i % 2 ? ROW_TINT : undefined
+    const harsh = /aggressive/i.test(r.assessment || '')
+    rows.push(new TableRow({
+      children: [
+        cell(para(r.feature, { bold: true, size: 17 }), { fill: tint, width: COMPARE_WIDTHS[0] }),
+        cell(para(r.nzStandard, { size: 17 }), { fill: tint, width: COMPARE_WIDTHS[1] }),
+        cell(para(r.supplierPosition, { size: 17 }), { fill: tint, width: COMPARE_WIDTHS[2] }),
+        cell(para(r.assessment, { size: 17, bold: harsh, color: harsh ? RISK.high.text : BODY }), { fill: tint, width: COMPARE_WIDTHS[3] })
+      ]
+    }))
+  })
+  return new Table({ columnWidths: COMPARE_WIDTHS, width: { size: FULL_WIDTH, type: WidthType.DXA }, borders: gridBorders(), rows })
+}
+
+function priorityBox(review) {
+  const list = (review.priorityAmendments?.length
+    ? review.priorityAmendments
+    : (review.directorExposure?.priorityAmendments || []).map((action, i) => ({ priority: i + 1, action }))
+  ).filter(Boolean)
+
+  const children = [para(recommendationLabel(review.overallRisk?.recommendation), { bold: true, size: 22, color: WHITE })]
+  if (!list.length) {
+    children.push(para('No priority amendments were identified.', { color: WHITE, size: 18 }, { spacing: { before: 120 } }))
+  }
+  list.forEach((p, i) => {
+    const action = typeof p === 'string' ? p : p.action
+    const ref = typeof p === 'string' ? null : p.clauseRef
+    children.push(new Paragraph({
+      spacing: { before: 140 },
+      children: [
+        run(`Priority ${typeof p === 'string' ? i + 1 : (p.priority || i + 1)} — `, { bold: true, color: WHITE, size: 18 }),
+        run(action, { color: WHITE, size: 18 }),
+        ...(ref ? [run(`  (${ref})`, { color: WHITE, size: 18, italics: true })] : [])
+      ]
+    }))
+  })
+
+  return new Table({
+    columnWidths: [FULL_WIDTH],
+    width: { size: FULL_WIDTH, type: WidthType.DXA },
+    borders: gridBorders(DARKRED),
+    rows: [new TableRow({ children: [cell(children, { fill: DARKRED, width: FULL_WIDTH })] })]
+  })
 }
 
 const DISCLAIMER = 'This review is provided as internal legal advice for Pipelines & Infrastructure (North) '
@@ -205,9 +304,10 @@ async function buildCreditReviewDocx(review, { documents = [], reviewDate } = {}
   const supplier = supplierShortName(r)
   const dateLabel = reviewDate || new Date().toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric' })
   const overall = r.overallRisk || {}
+  const director = r.directorExposure || {}
 
   const children = [
-    new Paragraph({ children: [run('Credit Application Review — Departure Register', { bold: true, size: 32, color: NAVY })] }),
+    new Paragraph({ children: [run('Credit Application Legal Review', { bold: true, size: 32, color: NAVY })] }),
     new Paragraph({
       spacing: { before: 80 },
       children: [run(`${supplier}${r.documentsSubtitle ? ` — ${r.documentsSubtitle}` : r.supplierTrade ? ` — ${r.supplierTrade}` : ''}`,
@@ -222,11 +322,41 @@ async function buildCreditReviewDocx(review, { documents = [], reviewDate } = {}
       String(overall.recommendationReason || '').split(/\n\s*\n/).filter(Boolean).slice(0, 2)
     ),
 
-    ...paragraphs(r.introduction),
+    sectionHeading('1. Summary of Key Commercial & Legal Clauses'),
+    ...paragraphs(r.keyClausesSummary),
 
-    sectionHeading('Departure Register'),
-    registerTable(r.register),
+    sectionHeading('2. Clause-by-Clause Analysis'),
+    clauseTable(r.clauseAnalysis),
+
+    sectionHeading('3. Overall Risk Summary'),
+    para('Top 3 commercial risks', { bold: true, size: 19, color: NAVY }, { spacing: { after: 100 } }),
+    topRisksTable(overall.topRisks),
+    spacer(),
+    para('Personal director exposure', { bold: true, size: 19, color: NAVY }, { spacing: { before: 200, after: 100 } }),
+    ...paragraphs(director.summary),
+    para(director.independentAdviceRecommended === false
+      ? 'Independent legal advice: not considered essential for this pack, though it remains the directors\' call.'
+      : 'Independent legal advice: required before any director signs a guarantee or security document.',
+      { bold: true, color: director.independentAdviceRecommended === false ? BODY : RISK.high.text, size: 18 }),
+    spacer(),
+    priorityBox(r),
   ]
+
+  // Section 3's closing question, and the table that answers it with the market rather
+  // than with an opinion.
+  children.push(sectionHeading('Standard Supplier Positioning or Unusually Aggressive?'))
+  children.push(...paragraphs(r.positioningNarrative || overall.positioningReason))
+  if ((r.nonStandardPractice || []).length) {
+    children.push(spacer())
+    for (const item of r.nonStandardPractice) {
+      children.push(new Paragraph({ bullet: { level: 0 }, spacing: { after: 60 }, children: [run(item, { size: 18, color: BODY })] }))
+    }
+  }
+  const compare = comparisonTable(r.industryComparison, supplier)
+  if (compare) {
+    children.push(spacer())
+    children.push(compare)
+  }
 
   children.push(spacer())
   children.push(para(DISCLAIMER, { size: 16, color: GREY_TEXT, italics: true }))
