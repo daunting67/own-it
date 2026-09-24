@@ -229,16 +229,6 @@ export default function PeopleModule({ onSaveStateChange }) {
       setImportMsg({ text: err.message || 'Could not download the staff list', ok: false })
     }
   }
-
-  async function downloadKeelCsv() {
-    try {
-      const { csv, filename } = await api.getKeelCsv()
-      downloadCsv(csv, filename)
-    } catch (err) {
-      setImportMsg({ text: err.message || 'Could not download the Keel update', ok: false })
-    }
-  }
-
   // Once onboarding is at 100%, the person belongs to the staff list (already
   // correct, already there) — the tracker only needs to show people still
   // genuinely mid-onboarding.
@@ -292,9 +282,7 @@ export default function PeopleModule({ onSaveStateChange }) {
               </button>
             </>
           )}
-          <button className="btn btn-secondary" onClick={downloadStaffCsv}>Download staff list (.csv)</button>
-          <button className="btn btn-secondary" onClick={downloadKeelCsv}>Download Keel update (.csv)</button>
-          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add staff member</button>
+          <button className="btn btn-secondary" onClick={downloadStaffCsv}>Download staff list (.csv)</button>          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add staff member</button>
         </div>
       </div>
 

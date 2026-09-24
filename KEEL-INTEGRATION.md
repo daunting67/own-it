@@ -1,74 +1,47 @@
-# Own It → Keel staff sync
+# Own It → Keel
 
-**Goal:** Own It (P&I's HR & People / onboarding portal) becomes the single
-point of entry for staff. When someone is added in Own It, they should show
-up in Keel automatically — no re-typing a second time into a second system.
+Keel (app.keelsystems.co.nz) is the crew/plant resource board P&I uses. Goal:
+Own It is the single point of entry — add a new starter here and they appear
+on the Keel board without being typed in twice.
 
-Own It's side of this is already built and wired in (`server/src/lib/keelSync.js`,
-called from `server/src/routes/staff.js` whenever a staff member is added,
-single or bulk-imported). It currently has nowhere to send to — Keel doesn't
-publish an API or webhook today. This doc is the proposed contract for the
-Keel side, plus a small reference implementation, so a small team can pick
-this up without having to design it from scratch.
+## How it works
 
-## The contract
+Keel has no public API and no import screen. Its own web app talks to a
+private backend at `https://app.keelsystems.co.nz/api/`, and the portal uses
+that same backend (`server/src/lib/keelSync.js`). The 41 plant resources on
+P&I's board were batch-loaded this way, so writing through it is proven.
 
-One endpoint, called once per new staff member:
+When someone is added with **+ Add staff member**, the portal (fire-and-forget,
+never blocks the add):
 
-```
-POST /staff
-Authorization: Bearer <api key>
-Content-Type: application/json
-```
+1. `login` with the integration login → bearer token
+2. `userList` search — skips anyone whose first + last name is already in Keel
+3. `CompanyRoleList` — maps Own It's Position onto Keel's role by exact name
+   (no match → no role, rather than a wrong one)
+4. `addOrUpdateUser` (multipart form, same fields Keel's own Add People form
+   sends) — created as crew (`usrType` 3), no Keel login of their own, on the
+   default site (normally "Available Resources")
 
-Body:
+The bulk **Add new staff (.csv)** import does NOT push — it's for people
+already working, who are already on the board.
 
-```json
-{
-  "externalId": "b3f1c2e4-...",
-  "externalSource": "own-it",
-  "name": "Jane Smith",
-  "role": "Site Foreman",
-  "hireType": "Direct Hire",
-  "site": "101 Bruce Rd",
-  "employer": "P&I (North) Ltd",
-  "mobile": "021 555 0123",
-  "email": "jane@example.co.nz",
-  "startDate": "2026-09-22"
-}
-```
+## Switching it on
 
-Notes:
-- `externalId` is Own It's own staff record id — store it against the Keel
-  record so a future retry or update can match by id instead of by name.
-- `hireType` is one of `Direct Hire`, `Labour Hire`, `Contractor`, `Casual`.
-- Any field may be `null` — Own It sends whatever it has at the moment of
-  creation; site/role/mobile aren't always filled in on day one.
-- Expected response: `2xx` on success (create or, if `externalId` already
-  exists, an idempotent update). Any other status is logged on Own It's side
-  and the push is simply skipped — no retry queue exists yet, so a failed
-  push currently means the person needs to be added in Keel by hand as a
-  fallback.
+Needs Keel's agreement first: these are their private endpoints, so they can
+change without notice, and the portal shouldn't run on anyone's personal
+login. Once Keel provides a dedicated login, set on the server:
 
-## Reference implementation
+- `KEEL_EMAIL`, `KEEL_PASSWORD`
+- `KEEL_DEFAULT_SITE_ID`, `KEEL_DEFAULT_SITE_RECEIVER_ID` (134 / 583 for
+  "Available Resources", as of 24 Sep 2026)
 
-`keel-integration-reference/receiver.js` in this repo is a minimal, runnable
-Express server implementing the endpoint above against an in-memory store —
-enough to show the shape end to end and be adapted into Keel's real stack
-(swap the in-memory `staff` array for their actual database write). Run it
-with:
+With `KEEL_EMAIL`/`KEEL_PASSWORD` unset it does nothing.
 
-```bash
-cd keel-integration-reference
-npm install express
-node receiver.js
-```
+## Keel's backend (as mapped 24 Sep 2026)
 
-## What this doesn't cover yet (deliberately out of scope for v1)
-
-- Updates/deletes in Own It are NOT pushed, only creates — keeps the first
-  version small. Worth adding once creates are proven out.
-- No sync back from Keel into Own It (e.g. site/plant allocations) — this is
-  one-way, Own It → Keel, matching the "portal is the first point of entry"
-  goal.
-- No retry queue for a failed push — see note above.
+All `POST`, `Authorization: Bearer <token>`, replies `{status: 200, ...}`.
+Relevant beyond staff: `plantList`/`addPlant`/`updatePlant`,
+`siteList`/`addOrUpdateSite`, `updateUserCompetencies`/`updateUserLicences`/
+`updateUserTrainingRecord` (tickets — the next thing worth syncing from
+Teammate), and `allSitesUserList`/`allSitesPlantList`/`resourcePlannerList`
+(who and what is on each site — for a Pre-Start "who's missing" check).

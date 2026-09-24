@@ -31,9 +31,7 @@ export const api = {
   updateStaff: (id, data) => request(`/api/staff/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteStaff: (id) => request(`/api/staff/${id}`, { method: 'DELETE' }),
   importStaff: (csv) => request('/api/staff/import', { method: 'POST', body: JSON.stringify({ csv }) }),
-  getStaffCsv: () => request('/api/staff/export.csv'),
-  getKeelCsv: () => request('/api/staff/export-keel.csv'),
-  importStaffDetails: (csv) => request('/api/staff/import-details', { method: 'POST', body: JSON.stringify({ csv }) }),
+  getStaffCsv: () => request('/api/staff/export.csv'),  importStaffDetails: (csv) => request('/api/staff/import-details', { method: 'POST', body: JSON.stringify({ csv }) }),
 
   // Sites
   getSites: () => request('/api/sites'),

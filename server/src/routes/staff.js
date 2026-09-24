@@ -5,7 +5,6 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { buildChecklist, applySiteInductions, applyCompanyVehicle, markChecklistComplete, mergeMissingChecklistItems } = require('../lib/checklists')
 const { parseStaffCsv } = require('../lib/staffImport')
 const { refreshStaffCsv, getStaffCsv } = require('../lib/staffCsv')
-const { refreshKeelCsv, getKeelCsv } = require('../lib/keelCsv')
 const { importStaffDetails } = require('../lib/staffDetailsImport')
 const { syncStaffToKeel } = require('../lib/keelSync')
 
@@ -17,14 +16,6 @@ router.use(requireAuth)
 // on, so it's regenerated fire-and-forget rather than awaited.
 function touchStaffCsv() {
   refreshStaffCsv().catch(() => { /* the live Staff table is still correct; the export just lags until the next change */ })
-}
-
-// Same fire-and-forget mirror, for the CSV Tony drops into Keel's bulk
-// upload. Kept as its own file/route rather than folded into the FastField
-// export above — different columns (Site and Employer matter to Keel,
-// aren't in the FastField list), different consumer, different cadence.
-function touchKeelCsv() {
-  refreshKeelCsv().catch(() => { /* live Staff table is still correct; the export just lags until the next change */ })
 }
 
 router.get('/', async (req, res) => {
@@ -53,19 +44,6 @@ router.get('/export.csv', async (req, res) => {
   // Authorization-header-authenticated, and a plain <a href> download can't
   // attach that header — the client turns this into a Blob download instead.
   res.json({ csv, filename: 'staff-list.csv' })
-})
-
-// Same shape as /export.csv above, formatted for Keel's bulk upload instead
-// of FastField's staff lookup — see keelCsv.js for the column mapping.
-router.get('/export-keel.csv', async (req, res) => {
-  let csv
-  try {
-    csv = await refreshKeelCsv()
-  } catch (err) {
-    csv = await getKeelCsv()
-    if (csv === null) return res.status(500).json({ error: err.message })
-  }
-  res.json({ csv, filename: 'keel-staff-list.csv' })
 })
 
 // Bulk-add staff from a CSV export (a spreadsheet, another system's staff
@@ -116,7 +94,6 @@ router.post('/import', requireAdmin, async (req, res) => {
     })
     if (error) { skipped++; continue }
     added++
-    syncStaffToKeel({ id, name: person.name, hireType: person.hireType, position: person.position, mobile: person.mobile, email: person.email, startDate: person.startDate, site, supplier }).catch(() => {})
     // hireType can only ever be a best guess from a CSV's wording — surfaced
     // here so the admin can fix it in one screen right after import instead
     // of hunting through cards, per Tony: "I need to be able to allocate them
@@ -124,7 +101,6 @@ router.post('/import', requireAdmin, async (req, res) => {
     insertedForReview.push({ id, name: person.name, hireType: person.hireType, hireTypeGuessed: !!person.hireTypeGuessed })
   }
   touchStaffCsv()
-  touchKeelCsv()
   res.json({ added, skipped, total: people.length, inserted: insertedForReview })
 })
 
@@ -182,7 +158,6 @@ router.post('/', async (req, res) => {
   if (hasCompanyVehicle) checklist = applyCompanyVehicle(checklist, true)
   const { data } = await db.from('Staff').insert({ id: randomUUID(), name, hireType, siteId: siteId || null, position, mobile, email, startDate, supplierId: supplierId || null, role, checklist }).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
-  touchKeelCsv()
   if (data) syncStaffToKeel(data).catch(() => {})
   res.status(201).json(data)
 })
@@ -233,14 +208,12 @@ router.patch('/:id', async (req, res) => {
   }
   const { data } = await db.from('Staff').update(updates).eq('id', req.params.id).select('*,site:Site(*),supplier:Supplier(*)').single()
   touchStaffCsv()
-  touchKeelCsv()
   res.json(data)
 })
 
 router.delete('/:id', async (req, res) => {
   await db.from('Staff').delete().eq('id', req.params.id)
   touchStaffCsv()
-  touchKeelCsv()
   res.status(204).end()
 })
 

@@ -253,9 +253,7 @@ const server = http.createServer(async (req, res) => {
   // Re-exports the REAL prestartForm.js, so the run sheet, sections and field
   // list here are exactly what the server would serve.
   if (path === '/api/staff' && req.method === 'GET') return send(res, 200, MOCK_STAFF)
-  if (path === '/api/staff/export.csv' && req.method === 'GET') return send(res, 200, { csv: 'Full Name,Hire Type,Position,Mobile,Email,Employer / Supplier,Start Date\n', filename: 'staff-list.csv' })
-  if (path === '/api/staff/export-keel.csv' && req.method === 'GET') return send(res, 200, { csv: 'Full Name,Role,Hire Type,Site,Employer / Supplier,Mobile,Email,Start Date\nSam Kereama,Foreman,Direct Hire,101 Bruce Road,,,,\n', filename: 'keel-staff-list.csv' })
-  if (path === '/api/sites' && req.method === 'GET') return send(res, 200, MOCK_SITES)
+  if (path === '/api/staff/export.csv' && req.method === 'GET') return send(res, 200, { csv: 'Full Name,Hire Type,Position,Mobile,Email,Employer / Supplier,Start Date\n', filename: 'staff-list.csv' })  if (path === '/api/sites' && req.method === 'GET') return send(res, 200, MOCK_SITES)
 
   if (path === '/api/prestart/form' && req.method === 'GET') {
     return send(res, 200, {
